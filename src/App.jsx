@@ -1445,7 +1445,7 @@ function App() {
                 )}
               </div>
             )}
-            {authError && !authError.includes('이메일') && !authError.includes('비밀번호') && !authError.includes('공백') && !authError.includes('일치') && (
+            {authError && (authView === 'login' || (!authError.includes('이메일') && !authError.includes('비밀번호') && !authError.includes('공백') && !authError.includes('일치'))) && (
               <div className="auth-error-message">{authError}</div>
             )}
             <button type="submit" className="btn-save auth-submit-btn" disabled={submittingAuth}>
