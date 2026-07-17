@@ -483,6 +483,9 @@ function App() {
     const handleResize = () => {
       if (window.visualViewport) {
         document.documentElement.style.setProperty('--vh', `${window.visualViewport.height}px`);
+        // 키보드가 올라오면 하단 네비게이션 바 숨김
+        const keyboardOpen = window.innerHeight - window.visualViewport.height > 100;
+        document.body.classList.toggle('keyboard-open', keyboardOpen);
         window.scrollTo(0, 0);
       }
     };
@@ -1225,14 +1228,6 @@ function App() {
         {/* 달력 */}
         <div className="monthly-grid">{rows}</div>
 
-        {/* 습관 키워드 힌트 */}
-        {habitKeywords.filter(k => !k.endedAt).length > 0 && (
-          <div className="monthly-keywords-hint">
-            <Tag size={12} />
-            <span>습관: {habitKeywords.filter(k => !k.endedAt).map(k => k.name).join(', ')}</span>
-          </div>
-        )}
-
         {/* 선택한 날짜의 기록 (하단 패널) */}
         <div className="monthly-day-panel">
           <div className="monthly-day-panel-title">{format(selectedDate, 'M월 d일 (E)', { locale: ko })}</div>
@@ -1273,7 +1268,12 @@ function App() {
                         ? `var(--habit-${habitMatch.color})`
                         : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb');
                       return (
-                        <div key={memo.id} style={{ backgroundColor: bg, padding: '8px 12px', borderRadius: '8px', fontSize: '0.85rem', lineHeight: 1.4 }}>
+                        <div
+                          key={memo.id}
+                          style={{ backgroundColor: bg, padding: '8px 12px', borderRadius: '8px', fontSize: '0.85rem', lineHeight: 1.4, cursor: 'pointer' }}
+                          onClick={() => openContentEditor(memo)}
+                          title="메모 수정"
+                        >
                           <span style={{ fontSize: '0.7rem', color: '#999', marginRight: '8px' }}>
                             {format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}
                           </span>
@@ -1293,12 +1293,22 @@ function App() {
             );
           })()}
         </div>
+
+        {/* 습관 키워드 힌트 */}
+        {habitKeywords.filter(k => !k.endedAt).length > 0 && (
+          <div className="monthly-keywords-hint">
+            <Tag size={12} />
+            <span>습관: {habitKeywords.filter(k => !k.endedAt).map(k => k.name).join(', ')}</span>
+          </div>
+        )}
       </div>
     );
   };
 
   const dateFormatted = format(selectedDate, 'M월 d일 (E)', { locale: ko });
   const headerTitle = isToday(selectedDate) ? `${dateFormatted} - 오늘` : dateFormatted;
+  const weekStart = startOfWeek(selectedDate);
+  const weekTitle = `${format(weekStart, 'M월 d일', { locale: ko })} ~ ${format(endOfWeek(selectedDate), 'M월 d일', { locale: ko })}`;
   const memoGroups = groupMemosByHour(timelineMemos);
 
   // ── 위클리 뷰 렌더 ───────────────────────────────────────────

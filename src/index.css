@@ -415,6 +415,11 @@ body {
   color: #666;
 }
 
+/* 키보드가 올라와 있는 동안 하단 네비게이션 숨김 */
+.keyboard-open .bottom-tab-bar {
+  display: none;
+}
+
 /* ── Undo Toast ──────────────────────────────────────────────── */
 .undo-toast {
   position: absolute;
@@ -640,7 +645,8 @@ body {
 
 /* ── 스케줄 상세 바텀시트 ───────────────────────────────────── */
 .schedule-detail-overlay {
-  position: fixed;
+  /* app-container 기준으로 배치 → 키보드가 올라오면 시트도 키보드 위로 올라옴 */
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
@@ -808,7 +814,7 @@ body {
 .monthly-weekdays {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  padding: 0 12px;
+  padding: 0; /* 날짜 그리드와 동일한 폭이어야 요일-날짜 정렬이 맞음 */
   margin-top: 16px;
   margin-bottom: 8px;
 }
@@ -836,7 +842,7 @@ body {
 }
 
 .monthly-cell {
-  min-height: 80px;
+  min-height: 64px;
   padding: 6px 5px;
   border-radius: 10px;
   cursor: pointer;
@@ -880,11 +886,13 @@ body {
   cursor: default;
 }
 .monthly-cell-today {
-  background-color: #eef2ff !important;
+  /* 오늘은 배경 없이 날짜 숫자만 파란색으로 (배경은 선택된 날짜 전용) */
+  background-color: transparent !important;
 }
 .monthly-cell-today .monthly-cell-date {
   background-color: transparent !important;
-  color: var(--text-main) !important;
+  color: var(--primary-color) !important;
+  font-weight: 700 !important;
   border-radius: 0 !important;
   width: 100% !important;
   height: auto !important;
