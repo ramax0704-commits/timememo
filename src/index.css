@@ -479,7 +479,7 @@ body {
 /* 현재 시간 빨간 줄 */
 .schedule-now-line {
   position: absolute;
-  left: 0;
+  left: 14px; /* 시간 라벨과 살짝 간격 */
   right: 0;
   height: 2px;
   background-color: #f87171;
@@ -510,7 +510,7 @@ body {
   position: absolute;
   left: 0;
   right: 0;
-  margin: 0 4px;
+  margin: 0 4px 0 14px; /* 시간 라벨과 살짝 간격 */
   padding: 8px;
   border: 1px solid;
   border-radius: 8px;

@@ -145,7 +145,7 @@ function useSwipe(onSwipeLeft, onSwipeRight, threshold = 60) {
 }
 
 // ── 메모 아이템 컴포넌트 ──────────────────────────────────────
-function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords }) {
+function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords, dimmed }) {
   const [swiped, setSwiped] = useState(false);
 
   // 습관 키워드가 포함된 메모는 키워드 색으로 표시 (사용자가 직접 색을 고른 경우는 그대로)
@@ -169,6 +169,7 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
   return (
     <div
       className={`memo-swipe-wrapper ${swiped ? 'swiped' : ''}`}
+      style={dimmed ? { opacity: 0.45 } : undefined}
       {...swipe}
     >
       {/* 삭제 버튼 (스와이프 시 노출) */}
@@ -487,6 +488,16 @@ function App() {
 
 
   const displayedMemos = memos.filter(m => isSameDay(new Date(m.recordedAt), selectedDate));
+
+  // 다음날 자정~새벽 2시 메모: 전날 화면에도 흐리게 함께 표시
+  const dayStartMs = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()).getTime();
+  const minutesFromDayStart = (iso) => (new Date(iso).getTime() - dayStartMs) / 60000;
+  const lateNightMemos = memos.filter(m => {
+    const min = minutesFromDayStart(m.recordedAt);
+    return min >= 1440 && min < 1440 + 120; // 다음날 00:00 ~ 01:59
+  });
+  const timelineMemos = [...displayedMemos, ...lateNightMemos];
+
   const monthlyData = buildMonthlyData(memos, habitKeywords);
 
   // ── 시간대별 그룹핑 ──────────────────────────────────────────
@@ -1192,39 +1203,53 @@ function App() {
 
   const dateFormatted = format(selectedDate, 'M월 d일 (E)', { locale: ko });
   const headerTitle = isToday(selectedDate) ? `${dateFormatted} - 오늘` : dateFormatted;
-  const memoGroups = groupMemosByHour(displayedMemos);
+  const memoGroups = groupMemosByHour(timelineMemos);
 
   // ── 스케줄 뷰 렌더 ──
   const renderScheduleView = () => {
-    const sortedMemos = [...displayedMemos].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+    const sortedMemos = [...timelineMemos].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
     if (sortedMemos.length === 0) return null;
 
     const isViewingToday = isToday(selectedDate);
+    // 다음날 새벽 메모가 있으면 그리드를 26시간(다음날 02:00까지)으로 확장
+    const gridHours = lateNightMemos.length > 0 ? 26 : 24;
+    const gridMinutes = gridHours * 60;
     const schedules = [];
 
     // 각 메모 = 자기 시간부터 다음 메모 시간까지의 블록
-    // 마지막 메모는 (오늘이면) 현재 시간까지 진행 중인 것으로 표시
+    // 마지막 메모는 현재 시간이 그리드 범위 안이면 지금까지 진행 중으로 표시
     for (let i = 0; i < sortedMemos.length; i++) {
       const currentMemo = sortedMemos[i];
       const nextMemo = sortedMemos[i + 1];
 
       const startTime = new Date(currentMemo.recordedAt);
-      let endTime;
+      const startPos = minutesFromDayStart(currentMemo.recordedAt);
+      let endTime, endPos;
       if (nextMemo) {
         endTime = new Date(nextMemo.recordedAt);
-      } else if (isViewingToday && nowTime > startTime) {
-        endTime = nowTime;
+        endPos = minutesFromDayStart(nextMemo.recordedAt);
       } else {
-        endTime = startTime; // 최소 높이 블록으로 표시됨
+        const nowPosInDay = (nowTime.getTime() - dayStartMs) / 60000;
+        if (nowPosInDay > startPos && nowPosInDay < gridMinutes) {
+          endTime = nowTime;
+          endPos = nowPosInDay;
+        } else {
+          endTime = startTime;
+          endPos = startPos; // 최소 높이 블록으로 표시됨
+        }
       }
+      endPos = Math.min(endPos, gridMinutes);
 
       schedules.push({
+        startPos,
+        endPos,
         startHour: startTime.getHours(),
         startMin: startTime.getMinutes(),
         endHour: endTime.getHours(),
         endMin: endTime.getMinutes(),
         content: currentMemo.content,
         color: currentMemo.color || 'default',
+        isCarry: startPos >= 1440, // 다음날 새벽 메모 (흐리게 표시)
         startMemoId: currentMemo.id,
         endMemoId: nextMemo ? nextMemo.id : null
       });
@@ -1233,33 +1258,41 @@ function App() {
     // 현재 시간 위치 (0~1440분)
     const nowPos = nowTime.getHours() * 60 + nowTime.getMinutes();
 
-    // 시간 눈금 (0~23시)
-    const hours = Array.from({ length: 24 }, (_, i) => i);
+    // 시간 눈금
+    const hours = Array.from({ length: gridHours }, (_, i) => i);
 
     return (
       <div className="schedule-view" ref={scheduleViewRef}>
         <div className="schedule-header">
           <div className="schedule-times">
             {hours.map(hour => (
-              <div key={hour} className="schedule-hour-label">
-                {hour.toString().padStart(2, '0')}:00
+              <div key={hour} className="schedule-hour-label" style={hour >= 24 ? { opacity: 0.4 } : undefined}>
+                {(hour % 24).toString().padStart(2, '0')}:00
               </div>
             ))}
           </div>
-          <div className="schedule-grid">
+          <div className="schedule-grid" style={{ height: `${gridMinutes}px` }}>
             {hours.map(hour => (
               <div key={hour} className="schedule-hour-slot" />
             ))}
             {/* 현재 시간 빨간 줄 (오늘만) */}
             {isViewingToday && (
-              <div className="schedule-now-line" style={{ top: `${(nowPos / (24 * 60)) * 100}%` }} />
+              <div className="schedule-now-line" style={{ top: `${(nowPos / gridMinutes) * 100}%` }} />
             )}
             {schedules.map((schedule, idx) => {
-              const startPos = schedule.startHour * 60 + schedule.startMin;
-              const endPos = schedule.endHour * 60 + schedule.endMin;
+              const startPos = schedule.startPos;
+              const endPos = schedule.endPos;
               const duration = endPos - startPos;
-              const bgColor = COLOR_PALETTE.find(c => c.id === schedule.color)?.bg || '#f9f9fb';
-              const borderColor = COLOR_BORDER[schedule.color] || '#e8e8f0';
+              // 습관 키워드 포함 시 키워드 색으로 (직접 고른 색이 있으면 그대로)
+              const habitMatch = schedule.color === 'default'
+                ? habitKeywords.find(k => k?.name && schedule.content.includes(k.name))
+                : null;
+              const bgColor = habitMatch
+                ? `var(--habit-${habitMatch.color})`
+                : (COLOR_PALETTE.find(c => c.id === schedule.color)?.bg || '#f9f9fb');
+              const borderColor = habitMatch
+                ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
+                : (COLOR_BORDER[schedule.color] || '#e8e8f0');
 
               // 시간 길이에 따른 표시 결정
               let showTime = false;
@@ -1281,10 +1314,11 @@ function App() {
                   className="schedule-block"
                   onClick={() => setSelectedSchedule(schedule)}
                   style={{
-                    top: `${(startPos / (24 * 60)) * 100}%`,
-                    height: `${(duration / (24 * 60)) * 100}%`,
+                    top: `${(startPos / gridMinutes) * 100}%`,
+                    height: `${(duration / gridMinutes) * 100}%`,
                     backgroundColor: bgColor,
                     borderColor: borderColor,
+                    opacity: schedule.isCarry ? 0.45 : 1,
                     minHeight: (showTime || showContent) ? '40px' : 'auto',
                     cursor: 'pointer',
                     justifyContent: (showTime || showContent) ? 'flex-start' : 'center',
@@ -1614,11 +1648,11 @@ function App() {
       <div className="main-content">
         {activeView === 'timeline' ? (
           /* ── 타임라인 뷰 ── */
-          showScheduleView && displayedMemos.length > 0 ? (
+          showScheduleView && timelineMemos.length > 0 ? (
             renderScheduleView()
           ) : (
           <div className="timeline" ref={timelineRef}>
-            {displayedMemos.length === 0 ? (
+            {timelineMemos.length === 0 ? (
               <div className="empty-state">
                 <Inbox size={48} strokeWidth={1} />
                 <p>
@@ -1640,6 +1674,7 @@ function App() {
                       onEdit={(m, type) => type === 'time' ? openTimeEditor(m) : openContentEditor(m)}
                       onDeleteWithUndo={handleDeleteWithUndo}
                       habitKeywords={habitKeywords}
+                      dimmed={!isSameDay(new Date(memo.recordedAt), selectedDate)}
                     />
                   ))}
                 </div>
