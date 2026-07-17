@@ -110,9 +110,14 @@ function buildMonthlyData(memos, habitKeywords) {
       else result[dateKey].expense += fin.amount;
     }
 
-    // 습관 키워드
+    // 습관 키워드 (보관된 키워드는 종료일 이전 기록에만 적용)
     habitKeywords.forEach(kwObj => {
-      if (kwObj?.name && memo.content.includes(kwObj.name) && !result[dateKey].habits.find(h => h.name === kwObj.name)) {
+      if (
+        kwObj?.name &&
+        memo.content.includes(kwObj.name) &&
+        (!kwObj.endedAt || dateKey < kwObj.endedAt) &&
+        !result[dateKey].habits.find(h => h.name === kwObj.name)
+      ) {
         result[dateKey].habits.push(kwObj);
       }
     });
@@ -149,8 +154,9 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
   const [swiped, setSwiped] = useState(false);
 
   // 습관 키워드가 포함된 메모는 키워드 색으로 표시 (사용자가 직접 색을 고른 경우는 그대로)
+  const memoDateKey = format(new Date(memo.recordedAt), 'yyyy-MM-dd');
   const habitMatch = (memo.color || 'default') === 'default'
-    ? habitKeywords?.find(k => k?.name && memo.content.includes(k.name))
+    ? habitKeywords?.find(k => k?.name && memo.content.includes(k.name) && (!k.endedAt || memoDateKey < k.endedAt))
     : null;
 
   const colorBg = habitMatch
@@ -281,7 +287,6 @@ function App() {
   const [editMemoColor, setEditMemoColor] = useState('default');
   const [showCalendar, setShowCalendar] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDayModal, setSelectedDayModal] = useState(null);
   const [showScheduleView, setShowScheduleView] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState(null);
   const [editStartHour, setEditStartHour] = useState('');
@@ -296,12 +301,10 @@ function App() {
   const [habitKeywords, setHabitKeywords] = useState([]);
   const [newKeyword, setNewKeyword] = useState('');
   const [newKeywordColor, setNewKeywordColor] = useState('purple');
-  const [showKeywordColorPicker, setShowKeywordColorPicker] = useState(false);
-  const [editingKeywordName, setEditingKeywordName] = useState(null);
-  const [showEditKeywordColorPicker, setShowEditKeywordColorPicker] = useState(false);
-  const colorButtonRef = useRef(null);
-  const editColorButtonRef = useRef(null);
-  const [colorPickerPos, setColorPickerPos] = useState({});
+  // 키워드 관리 모달: 모달 안에서 수정하고 저장을 눌러야 반영됨
+  const [showKeywordModal, setShowKeywordModal] = useState(false);
+  const [draftKeywords, setDraftKeywords] = useState([]);
+  const [deletingKeyword, setDeletingKeyword] = useState(null);
 
   const timelineRef = useRef(null);
   const inputRef = useRef(null);
@@ -315,6 +318,16 @@ function App() {
     const interval = setInterval(() => setNowTime(new Date()), 60000);
     return () => clearInterval(interval);
   }, []);
+
+  // ── 위클리 뷰 열 때 선택한 날짜가 보이도록 가로 스크롤 ───────
+  const weeklyRef = useRef(null);
+  useEffect(() => {
+    if (activeView !== 'weekly' || !weeklyRef.current) return;
+    const container = weeklyRef.current;
+    const colWidth = container.scrollWidth / 7;
+    const dayIndex = Math.round((new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()).getTime() - startOfWeek(selectedDate).getTime()) / 86400000);
+    container.scrollLeft = Math.max(0, (dayIndex - 1) * colWidth);
+  }, [activeView, selectedDate]);
 
   // ── 스케줄(타임로그) 뷰 열 때 현재 시간 위치로 자동 스크롤 ───
   const scheduleViewRef = useRef(null);
@@ -499,6 +512,12 @@ function App() {
   const timelineMemos = [...displayedMemos, ...lateNightMemos];
 
   const monthlyData = buildMonthlyData(memos, habitKeywords);
+
+  // 메모 내용/날짜에 적용되는 습관 키워드 찾기 (종료된 키워드는 종료일 이전 기록에만 적용)
+  const habitMatchFor = (content, iso) => {
+    const dateKey = format(new Date(iso), 'yyyy-MM-dd');
+    return habitKeywords.find(k => k?.name && content.includes(k.name) && (!k.endedAt || dateKey < k.endedAt));
+  };
 
   // ── 시간대별 그룹핑 ──────────────────────────────────────────
   function groupMemosByHour(memoList) {
@@ -906,33 +925,49 @@ function App() {
     if (error) console.error('Error saving settings:', error);
   };
 
-  const addHabitKeyword = async () => {
-    const kw = newKeyword.trim();
-    console.log('Adding keyword:', kw, 'color:', newKeywordColor);
-    if (!kw || habitKeywords.some(k => k.name === kw)) {
-      console.log('Keyword already exists or empty');
-      return;
-    }
-    const updated = [...habitKeywords, { name: kw, color: newKeywordColor }];
-    console.log('Updated habitKeywords:', updated);
-    setHabitKeywords(updated);
-    await saveHabitKeywords(updated);
+  // ── 습관 키워드 관리 모달 동작 ───────────────────────────────
+  const HABIT_COLORS = ['purple', 'blue', 'green', 'pink', 'orange'];
+
+  const openKeywordModal = () => {
+    setDraftKeywords(habitKeywords.map(k => ({ ...k })));
+    setDeletingKeyword(null);
     setNewKeyword('');
-    setNewKeywordColor('purple');
+    setShowKeywordModal(true);
   };
 
-  const removeHabitKeyword = (kwName) => {
-    const updated = habitKeywords.filter(k => k.name !== kwName);
-    setHabitKeywords(updated);
-    saveHabitKeywords(updated);
+  // 원래 저장되어 있던 키워드인지 (새로 추가한 건 바로 삭제 가능)
+  const isExistingKeyword = (name) => habitKeywords.some(k => k.name === name && !k.endedAt);
+
+  const addDraftKeyword = () => {
+    const kw = newKeyword.trim();
+    if (!kw || draftKeywords.some(k => k.name === kw && !k.endedAt)) return;
+    // 같은 이름의 보관(종료) 키워드가 있으면 새 키워드로 대체
+    setDraftKeywords(prev => [...prev.filter(k => k.name !== kw), { name: kw, color: newKeywordColor }]);
+    setNewKeyword('');
   };
 
-  const updateKeywordColor = (kwName, newColor) => {
-    const updated = habitKeywords.map(k =>
-      k.name === kwName ? { ...k, color: newColor } : k
-    );
-    setHabitKeywords(updated);
-    saveHabitKeywords(updated);
+  const removeDraftKeyword = (name) => {
+    setDraftKeywords(prev => prev.filter(k => k.name !== name));
+    setDeletingKeyword(null);
+  };
+
+  // 기록 남기기: 키워드를 오늘까지만 적용하고 보관 (이전 달력 기록 유지)
+  const archiveDraftKeyword = (name) => {
+    const endedAt = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+    setDraftKeywords(prev => prev.map(k => (k.name === name ? { ...k, endedAt } : k)));
+    setDeletingKeyword(null);
+  };
+
+  const cycleDraftColor = (name) => {
+    setDraftKeywords(prev => prev.map(k =>
+      k.name === name ? { ...k, color: HABIT_COLORS[(HABIT_COLORS.indexOf(k.color) + 1) % HABIT_COLORS.length] } : k
+    ));
+  };
+
+  const saveKeywordModal = async () => {
+    setHabitKeywords(draftKeywords);
+    await saveHabitKeywords(draftKeywords);
+    setShowKeywordModal(false);
   };
 
   // ── 달력 스크롤 핸들러 ──────────────────────────────────────────
@@ -1112,7 +1147,7 @@ function App() {
             },
             onTouchEnd: (e) => {
               if (!touchState.isScrolling && isCurrentMonth) {
-                setSelectedDayModal(cloneDay);
+                setSelectedDate(cloneDay);
               }
             }
           };
@@ -1123,11 +1158,11 @@ function App() {
         days.push(
           <div
             key={day.toISOString()}
-            className={`monthly-cell ${!isCurrentMonth ? 'monthly-cell-disabled' : ''} ${isDayToday ? 'monthly-cell-today' : ''}`}
+            className={`monthly-cell ${!isCurrentMonth ? 'monthly-cell-disabled' : ''} ${isDayToday ? 'monthly-cell-today' : ''} ${isSelected && isCurrentMonth ? 'monthly-cell-selected' : ''}`}
             tabIndex={-1}
             onClick={(e) => {
               if (isCurrentMonth) {
-                setSelectedDayModal(cloneDay);
+                setSelectedDate(cloneDay);
               }
             }}
             onTouchStart={handlers.onTouchStart}
@@ -1191,12 +1226,73 @@ function App() {
         <div className="monthly-grid">{rows}</div>
 
         {/* 습관 키워드 힌트 */}
-        {habitKeywords.length > 0 && (
+        {habitKeywords.filter(k => !k.endedAt).length > 0 && (
           <div className="monthly-keywords-hint">
             <Tag size={12} />
-            <span>습관: {habitKeywords.map(k => k.name).join(', ')}</span>
+            <span>습관: {habitKeywords.filter(k => !k.endedAt).map(k => k.name).join(', ')}</span>
           </div>
         )}
+
+        {/* 선택한 날짜의 기록 (하단 패널) */}
+        <div className="monthly-day-panel">
+          <div className="monthly-day-panel-title">{format(selectedDate, 'M월 d일 (E)', { locale: ko })}</div>
+          {(() => {
+            const dateKey = format(selectedDate, 'yyyy-MM-dd');
+            const dayData = monthlyData[dateKey];
+            const textColors = { purple: '#6b21a8', blue: '#1e40af', green: '#15803d', pink: '#be185d', orange: '#9a3412' };
+            return (
+              <>
+                {dayData && dayData.habits.length > 0 && (
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                    {dayData.habits.map(h => (
+                      <span
+                        key={h.name}
+                        style={{
+                          backgroundColor: `var(--habit-${h.color})`,
+                          color: textColors[h.color] || '#000',
+                          padding: '3px 10px',
+                          borderRadius: '10px',
+                          fontSize: '0.75rem',
+                          fontWeight: '600'
+                        }}
+                      >
+                        {h.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {displayedMemos.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: '#aaa', fontSize: '0.85rem', padding: '16px 0' }}>
+                    이 날짜에 기록된 내용이 없습니다.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {displayedMemos.map(memo => {
+                      const habitMatch = (memo.color || 'default') === 'default' ? habitMatchFor(memo.content, memo.recordedAt) : null;
+                      const bg = habitMatch
+                        ? `var(--habit-${habitMatch.color})`
+                        : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb');
+                      return (
+                        <div key={memo.id} style={{ backgroundColor: bg, padding: '8px 12px', borderRadius: '8px', fontSize: '0.85rem', lineHeight: 1.4 }}>
+                          <span style={{ fontSize: '0.7rem', color: '#999', marginRight: '8px' }}>
+                            {format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}
+                          </span>
+                          {memo.content}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {dayData && (dayData.income > 0 || dayData.expense > 0) && (
+                  <div style={{ display: 'flex', gap: '16px', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #f0f0f0', fontSize: '0.85rem' }}>
+                    {dayData.income > 0 && <span style={{ color: '#2563eb', fontWeight: '600' }}>수입 +{dayData.income.toLocaleString()}</span>}
+                    {dayData.expense > 0 && <span style={{ color: '#dc2626', fontWeight: '600' }}>지출 -{dayData.expense.toLocaleString()}</span>}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
       </div>
     );
   };
@@ -1204,6 +1300,61 @@ function App() {
   const dateFormatted = format(selectedDate, 'M월 d일 (E)', { locale: ko });
   const headerTitle = isToday(selectedDate) ? `${dateFormatted} - 오늘` : dateFormatted;
   const memoGroups = groupMemosByHour(timelineMemos);
+
+  // ── 위클리 뷰 렌더 ───────────────────────────────────────────
+  const renderWeeklyView = () => {
+    const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+
+    return (
+      <div className="weekly-container" ref={weeklyRef}>
+        {days.map(day => {
+          const dayMemos = memos
+            .filter(m => isSameDay(new Date(m.recordedAt), day))
+            .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+          const isDayToday = isToday(day);
+
+          return (
+            <div key={day.toISOString()} className={`weekly-day ${isDayToday ? 'weekly-day-today' : ''}`}>
+              <div
+                className="weekly-day-header"
+                onClick={() => { setSelectedDate(day); setActiveView('timeline'); }}
+                title="타임라인으로 이동"
+              >
+                <span className="weekly-day-date">{format(day, 'd')}</span>
+                <span className="weekly-day-name">{format(day, 'E', { locale: ko })}</span>
+              </div>
+              <div className="weekly-day-memos">
+                {dayMemos.length === 0 ? (
+                  <div className="weekly-empty">·</div>
+                ) : (
+                  dayMemos.map(memo => {
+                    const habitMatch = (memo.color || 'default') === 'default' ? habitMatchFor(memo.content, memo.recordedAt) : null;
+                    const bg = habitMatch
+                      ? `var(--habit-${habitMatch.color})`
+                      : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb');
+                    const border = habitMatch
+                      ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
+                      : (COLOR_BORDER[memo.color || 'default'] || '#e8e8f0');
+                    return (
+                      <div
+                        key={memo.id}
+                        className="weekly-memo"
+                        style={{ backgroundColor: bg, borderColor: border }}
+                        onClick={() => openContentEditor(memo)}
+                      >
+                        <div className="weekly-memo-time">{format(new Date(memo.recordedAt), 'HH:mm')}</div>
+                        <div className="weekly-memo-content">{memo.content}</div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   // ── 스케줄 뷰 렌더 ──
   const renderScheduleView = () => {
@@ -1260,6 +1411,7 @@ function App() {
         endMin: endTime.getMinutes(),
         content: currentMemo.content,
         color: currentMemo.color || 'default',
+        recordedAt: currentMemo.recordedAt,
         isCarry: startPos >= 1440, // 다음날 새벽 메모 (흐리게 표시)
         isSingle, // 새벽 단일 블록 (다음 메모와 이어지지 않음)
         startMemoId: currentMemo.id,
@@ -1297,7 +1449,7 @@ function App() {
               const duration = endPos - startPos;
               // 습관 키워드 포함 시 키워드 색으로 (직접 고른 색이 있으면 그대로)
               const habitMatch = schedule.color === 'default'
-                ? habitKeywords.find(k => k?.name && schedule.content.includes(k.name))
+                ? habitMatchFor(schedule.content, schedule.recordedAt)
                 : null;
               const bgColor = habitMatch
                 ? `var(--habit-${habitMatch.color})`
@@ -1623,14 +1775,18 @@ function App() {
       {/* Header */}
       {activeView !== 'settings' && (
         <header className="header">
-          {activeView === 'timeline' && (
-            <button className="header-nav-btn" onClick={() => setSelectedDate(addDays(selectedDate, -1))} title="이전날">
+          {(activeView === 'timeline' || activeView === 'weekly') && (
+            <button
+              className="header-nav-btn"
+              onClick={() => setSelectedDate(addDays(selectedDate, activeView === 'weekly' ? -7 : -1))}
+              title={activeView === 'weekly' ? '이전주' : '이전날'}
+            >
               <ChevronLeft size={20} />
             </button>
           )}
           <div className="header-title-container" onClick={() => { setCurrentMonth(selectedDate); setShowCalendar(true); }}>
             <Calendar size={20} className="header-icon" />
-            <h1>{activeView === 'monthly' ? format(currentMonth, 'yyyy년 M월', { locale: ko }) : headerTitle}</h1>
+            <h1>{activeView === 'monthly' ? format(currentMonth, 'yyyy년 M월', { locale: ko }) : activeView === 'weekly' ? weekTitle : headerTitle}</h1>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {activeView === 'timeline' && (
@@ -1651,6 +1807,11 @@ function App() {
                   <ChevronRight size={20} />
                 </button>
               </>
+            )}
+            {activeView === 'weekly' && (
+              <button className="header-nav-btn" onClick={() => setSelectedDate(addDays(selectedDate, 7))} title="다음주">
+                <ChevronRight size={20} />
+              </button>
             )}
           </div>
         </header>
@@ -1694,6 +1855,9 @@ function App() {
             )}
           </div>
           )
+        ) : activeView === 'weekly' ? (
+          /* ── 위클리 뷰 ── */
+          renderWeeklyView()
         ) : activeView === 'monthly' ? (
           /* ── 먼슬리 뷰 ── */
           <div
@@ -1786,158 +1950,22 @@ function App() {
                   <h3>먼슬리 습관 키워드</h3>
                 </div>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px', lineHeight: 1.5 }}>
-                  메모에 아래 단어가 포함되면 먼슬리 달력에 자동으로 표시됩니다.
+                  메모에 아래 단어가 포함되면 달력에 자동으로 표시됩니다.
                 </p>
                 <div className="keyword-list">
-                  {habitKeywords.map(kw => (
-                    <div key={kw.name} className="keyword-chip" style={{ display: 'flex', alignItems: 'center', gap: '6px', position: 'relative' }}>
-                      <button
-                        ref={editingKeywordName === kw.name ? editColorButtonRef : null}
-                        onClick={() => {
-                          setEditingKeywordName(editingKeywordName === kw.name ? null : kw.name);
-                          setShowEditKeywordColorPicker(!showEditKeywordColorPicker);
-                        }}
-                        style={{
-                          width: '16px',
-                          height: '16px',
-                          borderRadius: '50%',
-                          backgroundColor: `var(--habit-${kw.color})`,
-                          border: editingKeywordName === kw.name ? '2px solid #4a72ff' : 'none',
-                          cursor: 'pointer',
-                          padding: 0,
-                          flexShrink: 0
-                        }}
-                        title="색상 변경"
-                      />
+                  {habitKeywords.filter(k => !k.endedAt).map(kw => (
+                    <div key={kw.name} className="keyword-chip" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: `var(--habit-${kw.color})`, flexShrink: 0 }} />
                       <span>{kw.name}</span>
-                      <button
-                        onClick={() => removeHabitKeyword(kw.name)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: '#999' }}
-                      >
-                        <X size={12} />
-                      </button>
-
-                      {/* 색상 선택 팝업 */}
-                      {editingKeywordName === kw.name && showEditKeywordColorPicker && (
-                        <div style={{
-                          position: 'absolute',
-                          bottom: '100%',
-                          left: '-10px',
-                          backgroundColor: 'white',
-                          borderRadius: '12px',
-                          padding: '8px',
-                          display: 'flex',
-                          gap: '6px',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                          zIndex: 100,
-                          marginBottom: '4px'
-                        }}>
-                          {['purple', 'blue', 'green', 'pink', 'orange'].map(color => (
-                            <button
-                              key={color}
-                              onClick={() => {
-                                updateKeywordColor(kw.name, color);
-                                setEditingKeywordName(null);
-                                setShowEditKeywordColorPicker(false);
-                              }}
-                              style={{
-                                width: '20px',
-                                height: '20px',
-                                borderRadius: '50%',
-                                backgroundColor: `var(--habit-${color})`,
-                                border: kw.color === color ? '2px solid #333' : 'none',
-                                cursor: 'pointer',
-                                padding: 0
-                              }}
-                            />
-                          ))}
-                        </div>
-                      )}
                     </div>
                   ))}
-                  {habitKeywords.length === 0 && (
+                  {habitKeywords.filter(k => !k.endedAt).length === 0 && (
                     <span style={{ fontSize: '0.8rem', color: '#aaa' }}>등록된 키워드가 없습니다</span>
                   )}
                 </div>
-
-                {/* 타임라인처럼 좌우 배치: 좌측 컬러 버튼, 우측 입력 */}
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '12px', position: 'relative', overflow: 'visible' }}>
-                  {/* 좌측: 컬러 버튼 (토글식) */}
-                  <div style={{ position: 'relative', flexShrink: 0 }}>
-                    <button
-                      ref={colorButtonRef}
-                      onClick={() => {
-                        if (!showKeywordColorPicker && colorButtonRef.current) {
-                          const rect = colorButtonRef.current.getBoundingClientRect();
-                          setColorPickerPos({
-                            top: rect.top - 50,
-                            left: rect.left - 20
-                          });
-                        }
-                        setShowKeywordColorPicker(!showKeywordColorPicker);
-                      }}
-                      style={{
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '50%',
-                        backgroundColor: COLOR_PALETTE.find(c => c.id === newKeywordColor)?.bg || '#f9f9fb',
-                        border: `2px solid ${COLOR_BORDER[newKeywordColor] || '#ddd'}`,
-                        cursor: 'pointer',
-                        padding: 0
-                      }}
-                    />
-                    {/* 컬러 팝업 - 타임라인 스타일 */}
-                    {showKeywordColorPicker && (
-                      <div style={{
-                        position: 'fixed',
-                        top: `${colorPickerPos.top}px`,
-                        left: `${colorPickerPos.left}px`,
-                        backgroundColor: 'white',
-                        borderRadius: '16px',
-                        padding: '10px',
-                        display: 'flex',
-                        gap: '8px',
-                        boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                        zIndex: 50,
-                        whiteSpace: 'nowrap'
-                      }}>
-                        {COLOR_PALETTE.filter(c => c.id !== 'default' && c.id !== 'yellow').map(c => (
-                          <button
-                            key={c.id}
-                            className={`color-swatch ${newKeywordColor === c.id ? 'selected' : ''}`}
-                            onClick={() => {
-                              setNewKeywordColor(c.id);
-                              setShowKeywordColorPicker(false);
-                            }}
-                            style={{
-                              width: '28px',
-                              height: '28px',
-                              backgroundColor: c.bg,
-                              borderColor: COLOR_BORDER[c.id],
-                              padding: 0
-                            }}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 우측: 입력 및 버튼 */}
-                  <div style={{ flex: 1, display: 'flex', gap: '6px' }}>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="키워드 추가"
-                      value={newKeyword}
-                      onChange={e => setNewKeyword(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addHabitKeyword(); } }}
-                      style={{ borderRadius: '8px', fontSize: '0.85rem', padding: '8px 12px', flex: 1 }}
-                    />
-                    <button className="btn-save keyword-add-btn" onClick={addHabitKeyword} disabled={!newKeyword.trim()} style={{ width: '36px', height: '32px', padding: 0, backgroundColor: '#7090ff' }}>
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                </div>
+                <button className="btn-save" style={{ marginTop: '12px', width: '100%' }} onClick={openKeywordModal}>
+                  키워드 관리
+                </button>
               </div>
 
               {/* Billing Card */}
@@ -2143,6 +2171,13 @@ function App() {
           <span>타임라인</span>
         </button>
         <button
+          className={`tab-btn ${activeView === 'weekly' ? 'active' : ''}`}
+          onClick={() => setActiveView('weekly')}
+        >
+          <Calendar size={20} />
+          <span>위클리</span>
+        </button>
+        <button
           className={`tab-btn ${activeView === 'monthly' ? 'active' : ''}`}
           onClick={() => {
             setActiveView('monthly');
@@ -2177,136 +2212,108 @@ function App() {
         </div>
       )}
 
-      {/* Day Detail Modal */}
-      {selectedDayModal && (
-        <div className="modal-overlay" onClick={() => setSelectedDayModal(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '420px', maxHeight: '80vh', overflowY: 'auto', position: 'relative' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 className="modal-title" style={{ margin: 0 }}>{format(selectedDayModal, 'M월 d일 (E)', { locale: ko })}</h3>
-              <button
-                onClick={() => setSelectedDayModal(null)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: '1.5rem',
-                  color: '#999',
-                  padding: '0 4px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <X size={20} />
-              </button>
+      {/* 습관 키워드 관리 모달 */}
+      {showKeywordModal && (
+        <div className="modal-overlay" onClick={() => setShowKeywordModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxHeight: '80vh', overflowY: 'auto' }}>
+            <h3 className="modal-title">습관 키워드 관리</h3>
+
+            {/* 등록된 키워드 목록 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+              {draftKeywords.filter(k => !k.endedAt).map(kw => (
+                deletingKeyword === kw.name ? (
+                  <div key={kw.name} style={{ backgroundColor: '#fff5f5', borderRadius: '10px', padding: '10px 12px' }}>
+                    <p style={{ fontSize: '0.85rem', margin: '0 0 8px', color: '#333' }}>
+                      '{kw.name}' 삭제 — 이전 기록은 어떻게 할까요?
+                    </p>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button className="btn-cancel" style={{ flex: 1, fontSize: '0.78rem', padding: '8px 4px' }} onClick={() => archiveDraftKeyword(kw.name)}>
+                        기록 남기기
+                      </button>
+                      <button className="btn-cancel" style={{ flex: 1, fontSize: '0.78rem', padding: '8px 4px', color: '#e53e3e' }} onClick={() => removeDraftKeyword(kw.name)}>
+                        모두 삭제
+                      </button>
+                      <button className="btn-cancel" style={{ flex: 1, fontSize: '0.78rem', padding: '8px 4px' }} onClick={() => setDeletingKeyword(null)}>
+                        취소
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div key={kw.name} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', backgroundColor: '#f9f9fb', borderRadius: '10px' }}>
+                    <button
+                      onClick={() => cycleDraftColor(kw.name)}
+                      title="색상 변경 (누를 때마다 바뀜)"
+                      style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: `var(--habit-${kw.color})`, border: '1px solid rgba(0,0,0,0.1)', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+                    />
+                    <span style={{ flex: 1, fontSize: '0.9rem' }}>{kw.name}</span>
+                    <button
+                      onClick={() => { if (isExistingKeyword(kw.name)) { setDeletingKeyword(kw.name); } else { removeDraftKeyword(kw.name); } }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: '#999' }}
+                      aria-label="삭제"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                )
+              ))}
+              {draftKeywords.filter(k => !k.endedAt).length === 0 && (
+                <span style={{ fontSize: '0.85rem', color: '#aaa', textAlign: 'center', padding: '8px 0' }}>등록된 키워드가 없습니다</span>
+              )}
             </div>
 
-            {(() => {
-              const dateKey = format(selectedDayModal, 'yyyy-MM-dd');
-              const dayData = monthlyData[dateKey];
-              const dayMemos = memos.filter(m => isSameDay(new Date(m.recordedAt), selectedDayModal));
-
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-                  {/* 습관 & 메모 섹션 (그룹화) */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
-                    {dayData && dayData.habits.map(habit => {
-                      const relatedMemos = dayMemos.filter(m => m.content.includes(habit.name));
-                      const textColors = { purple: '#6b21a8', blue: '#1e40af', green: '#15803d', pink: '#be185d', orange: '#9a3412' };
-
-                      return (
-                        <div key={habit.name}>
-                          {/* 습관 태그 */}
-                          <div style={{ marginBottom: '8px' }}>
-                            <span
-                              style={{
-                                backgroundColor: `var(--habit-${habit.color})`,
-                                color: textColors[habit.color] || '#000',
-                                padding: '4px 12px',
-                                borderRadius: '12px',
-                                fontSize: '0.8rem',
-                                fontWeight: '600',
-                                display: 'inline-block'
-                              }}
-                            >
-                              {habit.name}
-                            </span>
-                          </div>
-
-                          {/* 관련 메모 */}
-                          {relatedMemos.length > 0 && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                              {relatedMemos.map(memo => (
-                                <div
-                                  key={memo.id}
-                                  style={{
-                                    backgroundColor: COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb',
-                                    padding: '10px 12px',
-                                    borderRadius: '8px',
-                                    fontSize: '0.85rem',
-                                    lineHeight: '1.4',
-                                    color: '#333'
-                                  }}
-                                >
-                                  <div style={{ fontSize: '0.7rem', color: '#999', marginBottom: '4px' }}>
-                                    {format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}
-                                  </div>
-                                  <div>{memo.content}</div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                    {dayData && dayData.habits.length === 0 && dayMemos.length === 0 && (
-                      <div style={{ textAlign: 'center', color: '#999', fontSize: '0.9rem', padding: '20px 0' }}>
-                        기록된 습관이 없습니다.
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 수입/지출 섹션 */}
-                  {dayData && (dayData.income > 0 || dayData.expense > 0) && (
-                    <div style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                      paddingTop: '16px',
-                      borderTop: '1px solid #f0f0f0'
-                    }}>
-                      {dayData.income > 0 && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
-                          <span style={{ color: '#666' }}>수입</span>
-                          <span style={{ color: '#2563eb', fontWeight: '600' }}>+{dayData.income.toLocaleString()}</span>
-                        </div>
-                      )}
-                      {dayData.expense > 0 && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
-                          <span style={{ color: '#666' }}>지출</span>
-                          <span style={{ color: '#dc2626', fontWeight: '600' }}>-{dayData.expense.toLocaleString()}</span>
-                        </div>
-                      )}
+            {/* 기록 보관 중인 키워드 */}
+            {draftKeywords.some(k => k.endedAt) && (
+              <div style={{ marginBottom: '16px' }}>
+                <p style={{ fontSize: '0.75rem', color: '#999', margin: '0 0 6px' }}>기록 보관 중 (이전 날짜 기록에만 표시됨)</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {draftKeywords.filter(k => k.endedAt).map(kw => (
+                    <div key={kw.name} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px', backgroundColor: '#f0f0f0', borderRadius: '8px', fontSize: '0.8rem', color: '#888' }}>
+                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: `var(--habit-${kw.color})`, opacity: 0.6 }} />
+                      <span>{kw.name}</span>
+                      <button
+                        onClick={() => removeDraftKeyword(kw.name)}
+                        title="기록까지 완전 삭제"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', color: '#aaa' }}
+                      >
+                        <X size={12} />
+                      </button>
                     </div>
-                  )}
-
-                  {(!dayData || (dayData.income === 0 && dayData.expense === 0 && dayData.habits.length === 0)) && dayMemos.length === 0 && (
-                    <div style={{ textAlign: 'center', color: '#999', fontSize: '0.9rem', padding: '20px 0' }}>
-                      이 날짜에 기록된 내용이 없습니다.
-                    </div>
-                  )}
-
-                  <button
-                    className="btn-save"
-                    onClick={() => setSelectedDayModal(null)}
-                    style={{ marginTop: '24px' }}
-                  >
-                    닫기
-                  </button>
+                  ))}
                 </div>
-              );
-            })()}
+              </div>
+            )}
+
+            {/* 새 키워드 추가 */}
+            <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: '14px', marginBottom: '16px', width: '100%' }}>
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                {HABIT_COLORS.map(color => (
+                  <button
+                    key={color}
+                    onClick={() => setNewKeywordColor(color)}
+                    style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: `var(--habit-${color})`, border: newKeywordColor === color ? '2px solid #333' : '1px solid rgba(0,0,0,0.1)', cursor: 'pointer', padding: 0 }}
+                  />
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="새 키워드"
+                  value={newKeyword}
+                  onChange={e => setNewKeyword(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addDraftKeyword(); } }}
+                  style={{ flex: 1, borderRadius: '8px', fontSize: '0.9rem', padding: '8px 12px' }}
+                />
+                <button className="btn-save" onClick={addDraftKeyword} disabled={!newKeyword.trim()} style={{ width: '60px', padding: '8px 0' }}>
+                  추가
+                </button>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn-cancel" onClick={() => setShowKeywordModal(false)}>취소</button>
+              <button className="btn-save" onClick={saveKeywordModal}>저장</button>
+            </div>
           </div>
         </div>
       )}
@@ -2477,140 +2484,6 @@ function App() {
         </div>
       )}
 
-      {/* My Page Modal */}
-      {showMyPage && currentUser && (
-        <div className="modal-overlay mypage-overlay" onClick={() => setShowMyPage(false)}>
-          <div className="mypage-content" onClick={e => e.stopPropagation()}>
-            <div className="mypage-header">
-              <h2>마이페이지</h2>
-              <button className="mypage-close-btn" onClick={() => setShowMyPage(false)}><X size={20} /></button>
-            </div>
-            <div className="mypage-scrollable">
-              {/* Profile Card */}
-              <div className="mypage-card profile-card">
-                <div className="profile-avatar">
-                  {currentUser.user_metadata?.avatar_url ? (
-                    <img src={currentUser.user_metadata.avatar_url} alt="Avatar" className="user-photo" />
-                  ) : (
-                    <div className="avatar-placeholder"><User size={28} /></div>
-                  )}
-                </div>
-                <div className="profile-info">
-                  <span className="profile-email">{currentUser.email}</span>
-                  <span className="profile-provider-badge">
-                    {currentUser.app_metadata?.provider === 'google' ? '구글 로그인 계정' : '이메일 가입 계정'}
-                  </span>
-                </div>
-              </div>
-
-              {/* 습관 키워드 설정 */}
-              <div className="mypage-card">
-                <div className="card-header-icon">
-                  <Tag size={18} style={{ color: 'var(--primary-color)' }} />
-                  <h3>먼슬리 습관 키워드</h3>
-                </div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px', lineHeight: 1.5 }}>
-                  메모에 아래 단어가 포함되면 먼슬리 달력에 자동으로 표시됩니다.
-                </p>
-                <div className="keyword-list">
-                  {habitKeywords.map(kw => (
-                    <div key={kw.name} className="keyword-chip" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: `var(--habit-${kw.color})`, flexShrink: 0 }} />
-                      <span>{kw.name}</span>
-                      <button
-                        onClick={() => removeHabitKeyword(kw.name)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: '#999' }}
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  ))}
-                  {habitKeywords.length === 0 && (
-                    <span style={{ fontSize: '0.8rem', color: '#aaa' }}>등록된 키워드가 없습니다</span>
-                  )}
-                </div>
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
-                  {/* 좌측: 컬러 선택 */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <span style={{ fontSize: '0.8rem', color: '#666' }}>컬러</span>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      {['purple', 'blue', 'green', 'pink', 'orange'].map(color => (
-                        <button
-                          key={color}
-                          onClick={() => setNewKeywordColor(color)}
-                          style={{
-                            width: '28px',
-                            height: '28px',
-                            borderRadius: '50%',
-                            backgroundColor: `var(--habit-${color})`,
-                            border: newKeywordColor === color ? '3px solid #333' : '2px solid #ccc',
-                            cursor: 'pointer',
-                            transition: 'border 0.2s',
-                            padding: 0
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 우측: 입력 및 버튼 */}
-                  <div style={{ flex: 1, display: 'flex', gap: '8px' }}>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="키워드 추가"
-                      value={newKeyword}
-                      onChange={e => setNewKeyword(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addHabitKeyword(); } }}
-                      style={{ borderRadius: '10px', fontSize: '0.9rem', padding: '10px 14px', flex: 1 }}
-                    />
-                    <button className="btn-save keyword-add-btn" onClick={addHabitKeyword} style={{ width: '44px' }}>
-                      <Plus size={16} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Billing Card */}
-              <div className="mypage-card billing-card">
-                <div className="card-header-icon">
-                  <CreditCard size={18} className="billing-icon" />
-                  <h3>멤버십 &amp; 결제 관리</h3>
-                </div>
-                <div className="membership-status">
-                  <span className="status-label">현재 플랜</span>
-                  <span className="status-value active-plan">일반 회원 (Free Plan)</span>
-                </div>
-                <p className="billing-description">
-                  프리미엄 요금제로 업그레이드하시면 무제한 메모 백업, 테마 커스터마이징, 고급 통계 기능을 이용할 수 있습니다.
-                </p>
-                <button className="btn-save upgrade-btn" onClick={() => alert('프리미엄 플랜 결제 기능은 준비 중입니다. 조금만 기다려주세요!')}>
-                  프리미엄 요금제로 업그레이드
-                </button>
-                <button className="btn-cancel billing-history-btn" onClick={() => alert('결제 내역이 없습니다.')}>
-                  결제 내역 조회
-                </button>
-              </div>
-
-              {/* Danger Zone */}
-              <div className="mypage-card danger-zone-card">
-                <div className="card-header-icon">
-                  <ShieldAlert size={18} className="danger-icon" />
-                  <h3>계정 및 보안</h3>
-                </div>
-                <div className="danger-zone-actions">
-                  <button className="btn-cancel logout-action-btn" onClick={async () => { if (window.confirm('로그아웃 하시겠습니까?')) { await supabase.auth.signOut(); setShowMyPage(false); } }}>
-                    로그아웃
-                  </button>
-                  <button className="btn-cancel delete-account-btn" onClick={handleDeleteAccount} disabled={deletingAccount}>
-                    {deletingAccount ? '회원탈퇴 진행 중...' : '회원탈퇴'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

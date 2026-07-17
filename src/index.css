@@ -384,9 +384,10 @@ body {
   display: flex;
   border-top: 1px solid var(--border-color);
   background-color: var(--bg-app);
-  height: var(--tab-height);
+  height: auto;
   flex-shrink: 0;
-  padding-bottom: env(safe-area-inset-bottom);
+  /* iOS 하단 홈바 영역 확보 (없는 기기는 최소 10px) */
+  padding-bottom: max(env(safe-area-inset-bottom), 10px);
 }
 
 .tab-btn {
@@ -394,7 +395,9 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start; /* 상단 정렬 */
+  padding-top: 10px;
+  height: 58px;
   gap: 4px;
   background: none;
   border: none;
@@ -496,6 +499,105 @@ body {
   height: 10px;
   border-radius: 50%;
   background-color: #f87171;
+}
+
+/* ── 위클리 뷰 ───────────────────────────────────────────────── */
+.weekly-container {
+  flex: 1;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  background-color: var(--bg-app);
+}
+
+.weekly-day {
+  flex: 0 0 33.4%;
+  min-width: 33.4%;
+  scroll-snap-align: start;
+  border-right: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.weekly-day-today {
+  background-color: #f7f9ff;
+}
+
+.weekly-day-header {
+  padding: 10px 8px 8px;
+  text-align: center;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.weekly-day-date {
+  font-size: 1.05rem;
+  font-weight: 700;
+  display: block;
+  line-height: 1.2;
+}
+
+.weekly-day-today .weekly-day-date {
+  color: var(--primary-color);
+}
+
+.weekly-day-name {
+  font-size: 0.7rem;
+  color: #999;
+}
+
+.weekly-day-memos {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.weekly-memo {
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.weekly-memo-time {
+  font-size: 0.65rem;
+  color: #999;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.weekly-memo-content {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  word-break: break-word;
+  color: #333;
+}
+
+.weekly-empty {
+  text-align: center;
+  color: #ddd;
+  padding: 12px 0;
+}
+
+/* ── 먼슬리 하단 패널 ────────────────────────────────────────── */
+.monthly-day-panel {
+  margin-top: 12px;
+  background-color: white;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.monthly-day-panel-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 10px;
 }
 
 .schedule-grid {
@@ -791,8 +893,8 @@ body {
   justify-content: center !important;
 }
 .monthly-cell-selected {
-  background-color: transparent !important;
-  border: none !important;
+  background-color: #eef2ff !important;
+  border-radius: 10px;
 }
 
 .monthly-cell-date {
