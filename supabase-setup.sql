@@ -3,6 +3,9 @@
 -- Supabase 대시보드 → SQL Editor 에 전체 붙여넣고 Run 하세요.
 -- ─────────────────────────────────────────────────────────────
 
+-- 읽기 전용 모드 해제 (이 세션에서만)
+set default_transaction_read_only = off;
+
 -- 1. 메모 테이블
 create table public.memos (
   id uuid primary key default gen_random_uuid(),
