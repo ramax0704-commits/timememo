@@ -506,68 +506,45 @@ body {
 }
 
 /* ── 위클리 뷰 (시간 그리드) ─────────────────────────────────── */
+/* 가로/세로 스크롤을 서로 다른 요소가 담당 → 대각선 스크롤 없음 */
 .weekly-container {
   flex: 1;
-  overflow: auto;
-  background-color: var(--bg-app);
-}
-
-.weekly-grid-wrap {
   display: flex;
-  min-width: max-content;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--bg-app);
 }
 
-/* 좌측 시간 라벨 컬럼 (가로 스크롤 시 고정) */
-.weekly-hours-col {
-  position: sticky;
-  left: 0;
-  z-index: 3;
-  background-color: var(--bg-app);
+/* 상단 날짜 헤더 줄 (세로 고정) */
+.weekly-head-row {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.weekly-head-spacer {
   flex: 0 0 44px;
   width: 44px;
 }
 
-.weekly-corner {
-  position: sticky;
-  top: 0;
-  height: 52px;
-  background-color: var(--bg-app);
-  z-index: 4;
+.weekly-head-scroll {
+  flex: 1;
+  overflow: hidden; /* 스크롤은 아래 그리드가 담당, 위치만 동기화됨 */
 }
 
-.weekly-hour-label {
-  height: 60px; /* 그리드 1시간(60px)과 일치 */
-  font-size: 0.7rem;
-  color: #999;
-  font-weight: 600;
-  line-height: 1;
-  text-align: right;
-  padding-right: 6px;
-  transform: translateY(-5px);
+.weekly-head-cols {
+  display: flex;
+  min-width: max-content;
 }
 
-.weekly-day-col {
-  flex: 0 0 170px;
-  width: 170px; /* 자동 스크롤 계산과 일치해야 함 */
-  border-left: 1px solid #f0f0f0;
-}
-
-.weekly-day-today .weekly-day-grid {
-  background-color: #f7f9ff;
-}
-
-/* 상단 날짜 헤더 (세로 스크롤 시 고정) */
 .weekly-day-header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background-color: var(--bg-app);
+  flex: 0 0 170px;
+  width: 170px;
+  box-sizing: border-box;
   text-align: center;
   padding: 8px 0 6px;
-  height: 52px;
-  box-sizing: border-box;
   cursor: pointer;
-  border-bottom: 1px solid #f0f0f0;
+  border-left: 1px solid #f0f0f0;
 }
 
 .weekly-day-date {
@@ -586,11 +563,63 @@ body {
   color: #999;
 }
 
+/* 세로 스크롤 영역 (시간 라벨 + 날짜 컬럼이 함께 움직임) */
+.weekly-vscroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.weekly-body-row {
+  display: flex;
+}
+
+.weekly-hours-col {
+  flex: 0 0 44px;
+  width: 44px;
+  box-sizing: border-box;
+  padding-top: 8px; /* 00:00 라벨이 짤리지 않게 (.weekly-day-cols와 동일) */
+}
+
+.weekly-hour-label {
+  height: 60px; /* 그리드 1시간(60px)과 일치 */
+  font-size: 0.7rem;
+  color: #999;
+  font-weight: 600;
+  line-height: 1;
+  text-align: right;
+  padding-right: 6px;
+  transform: translateY(-5px);
+}
+
+/* 가로 스크롤 영역 (날짜 컬럼만) */
+.weekly-hscroll {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.weekly-day-cols {
+  display: flex;
+  min-width: max-content;
+  padding-top: 8px; /* .weekly-hours-col과 동일 */
+}
+
+.weekly-day-col {
+  flex: 0 0 170px;
+  width: 170px; /* 자동 스크롤 계산(170px)과 일치해야 함 */
+  border-left: 1px solid #f0f0f0;
+}
+
 .weekly-day-grid {
   position: relative;
-  height: 1440px; /* 1분 = 1px */
-  background: linear-gradient(to bottom, #f0f0f0 1px, transparent 1px);
+  height: 1560px; /* 26시간, 1분 = 1px */
+  background-image: linear-gradient(to bottom, #f0f0f0 1px, transparent 1px);
   background-size: 100% 60px;
+}
+
+.weekly-day-grid-today {
+  background-color: #f7f9ff;
 }
 
 .weekly-block {
