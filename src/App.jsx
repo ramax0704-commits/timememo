@@ -16,7 +16,7 @@ import {
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus } from 'lucide-react';
-import { supabase } from './supabase';
+import { supabase, setRememberMe, getRememberMe } from './supabase';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
 function rowToMemo(row) {
@@ -47,6 +47,15 @@ const COLOR_BORDER = {
   purple:  '#e9d5ff',
   pink:    '#fbcfe8',
   orange:  '#fed7aa',
+};
+
+// 습관 키워드 색상 (배경은 --habit-* CSS 변수, 테두리는 한 톤 진하게)
+const HABIT_BORDER = {
+  purple: '#d8b4fe',
+  blue:   '#93c5fd',
+  green:  '#86efac',
+  pink:   '#f9a8d4',
+  orange: '#fdba74',
 };
 
 // ── 가계부 파싱 ───────────────────────────────────────────────
@@ -136,10 +145,20 @@ function useSwipe(onSwipeLeft, onSwipeRight, threshold = 60) {
 }
 
 // ── 메모 아이템 컴포넌트 ──────────────────────────────────────
-function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice }) {
+function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords }) {
   const [swiped, setSwiped] = useState(false);
-  const colorBg = COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb';
-  const colorBorder = COLOR_BORDER[memo.color || 'default'] || '#e8e8f0';
+
+  // 습관 키워드가 포함된 메모는 키워드 색으로 표시 (사용자가 직접 색을 고른 경우는 그대로)
+  const habitMatch = (memo.color || 'default') === 'default'
+    ? habitKeywords?.find(k => k?.name && memo.content.includes(k.name))
+    : null;
+
+  const colorBg = habitMatch
+    ? `var(--habit-${habitMatch.color})`
+    : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb');
+  const colorBorder = habitMatch
+    ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
+    : (COLOR_BORDER[memo.color || 'default'] || '#e8e8f0');
 
   const swipe = useSwipe(
     () => setSwiped(true),
@@ -229,6 +248,7 @@ function App() {
   const [authConfirmPassword, setAuthConfirmPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [submittingAuth, setSubmittingAuth] = useState(false);
+  const [rememberMe, setRememberMeState] = useState(getRememberMe());
   const [showMyPage, setShowMyPage] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
@@ -294,6 +314,30 @@ function App() {
     const interval = setInterval(() => setNowTime(new Date()), 60000);
     return () => clearInterval(interval);
   }, []);
+
+  // ── 스케줄(타임로그) 뷰 열 때 현재 시간 위치로 자동 스크롤 ───
+  const scheduleViewRef = useRef(null);
+  useEffect(() => {
+    if (!showScheduleView || !scheduleViewRef.current) return;
+    const container = scheduleViewRef.current;
+    const now = new Date();
+    let targetMin;
+    if (isToday(selectedDate)) {
+      targetMin = now.getHours() * 60 + now.getMinutes();
+    } else {
+      // 과거 날짜는 그 날의 첫 메모 위치로
+      const dayMemos = memos.filter(m => isSameDay(new Date(m.recordedAt), selectedDate));
+      if (dayMemos.length > 0) {
+        const first = dayMemos.reduce((a, b) => (new Date(a.recordedAt) < new Date(b.recordedAt) ? a : b));
+        const d = new Date(first.recordedAt);
+        targetMin = d.getHours() * 60 + d.getMinutes();
+      } else {
+        targetMin = 8 * 60;
+      }
+    }
+    // 그리드는 1분=1px, 위 여백 20px. 대상 시간이 화면 위에서 1/3 지점에 오도록
+    container.scrollTop = Math.max(0, 20 + targetMin - container.clientHeight / 3);
+  }, [showScheduleView, selectedDate]);
 
   // ── 자정 자동 날짜 전환 ──────────────────────────────────────
   useEffect(() => {
@@ -546,6 +590,7 @@ function App() {
         setAuthPassword('');
         setAuthConfirmPassword('');
       } else {
+        setRememberMe(rememberMe);
         const { error } = await supabase.auth.signInWithPassword({
           email: authEmail,
           password: authPassword
@@ -724,6 +769,7 @@ function App() {
     setSubmittingAuth(true);
     setAuthError('');
     try {
+      setRememberMe(rememberMe);
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo: window.location.origin }
@@ -1191,7 +1237,7 @@ function App() {
     const hours = Array.from({ length: 24 }, (_, i) => i);
 
     return (
-      <div className="schedule-view">
+      <div className="schedule-view" ref={scheduleViewRef}>
         <div className="schedule-header">
           <div className="schedule-times">
             {hours.map(hour => (
@@ -1469,6 +1515,19 @@ function App() {
                 )}
               </div>
             )}
+            {authView === 'login' && (
+              <div className="auth-remember-container">
+                <label className="auth-remember-label">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={e => setRememberMeState(e.target.checked)}
+                    className="auth-remember-checkbox"
+                  />
+                  자동 로그인
+                </label>
+              </div>
+            )}
             {authError && (authView === 'login' || (!authError.includes('이메일') && !authError.includes('비밀번호') && !authError.includes('공백') && !authError.includes('일치'))) && (
               <div className="auth-error-message">{authError}</div>
             )}
@@ -1580,6 +1639,7 @@ function App() {
                       memo={memo}
                       onEdit={(m, type) => type === 'time' ? openTimeEditor(m) : openContentEditor(m)}
                       onDeleteWithUndo={handleDeleteWithUndo}
+                      habitKeywords={habitKeywords}
                     />
                   ))}
                 </div>
