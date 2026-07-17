@@ -464,7 +464,6 @@ body {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 60px;
 }
 
 .schedule-hour-label {
@@ -472,6 +471,30 @@ body {
   color: #999;
   font-weight: 600;
   line-height: 1;
+  height: 60px; /* 그리드 1시간(60px)과 정확히 일치해야 눈금이 맞음 */
+  transform: translateY(-6px); /* 텍스트 중심을 그리드 선 위에 맞춤 */
+}
+
+/* 현재 시간 빨간 줄 */
+.schedule-now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #f87171;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.schedule-now-line::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #f87171;
 }
 
 .schedule-grid {

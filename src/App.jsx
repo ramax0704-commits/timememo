@@ -288,6 +288,13 @@ function App() {
   const [isCalendarScrolling, setIsCalendarScrolling] = useState(false);
   const calendarScrollTimeoutRef = useRef(null);
 
+  // ── 현재 시간 (스케줄 뷰 빨간 줄 등) 1분마다 갱신 ─────────────
+  const [nowTime, setNowTime] = useState(new Date());
+  useEffect(() => {
+    const interval = setInterval(() => setNowTime(new Date()), 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   // ── 자정 자동 날짜 전환 ──────────────────────────────────────
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1144,32 +1151,41 @@ function App() {
   // ── 스케줄 뷰 렌더 ──
   const renderScheduleView = () => {
     const sortedMemos = [...displayedMemos].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
-    console.log('📋 메모 목록:');
-    sortedMemos.forEach((m, i) => console.log(`  ${i}: ${m.content?.substring(0, 20)} | 시간: ${m.recordedAt}`));
     if (sortedMemos.length === 0) return null;
 
+    const isViewingToday = isToday(selectedDate);
     const schedules = [];
 
-    for (let i = 0; i < sortedMemos.length - 1; i++) {
+    // 각 메모 = 자기 시간부터 다음 메모 시간까지의 블록
+    // 마지막 메모는 (오늘이면) 현재 시간까지 진행 중인 것으로 표시
+    for (let i = 0; i < sortedMemos.length; i++) {
       const currentMemo = sortedMemos[i];
       const nextMemo = sortedMemos[i + 1];
 
       const startTime = new Date(currentMemo.recordedAt);
-      const endTime = new Date(nextMemo.recordedAt);
-      const content = nextMemo.content;
-      const color = nextMemo.color || 'default';
+      let endTime;
+      if (nextMemo) {
+        endTime = new Date(nextMemo.recordedAt);
+      } else if (isViewingToday && nowTime > startTime) {
+        endTime = nowTime;
+      } else {
+        endTime = startTime; // 최소 높이 블록으로 표시됨
+      }
 
       schedules.push({
         startHour: startTime.getHours(),
         startMin: startTime.getMinutes(),
         endHour: endTime.getHours(),
         endMin: endTime.getMinutes(),
-        content,
-        color,
+        content: currentMemo.content,
+        color: currentMemo.color || 'default',
         startMemoId: currentMemo.id,
-        endMemoId: nextMemo.id
+        endMemoId: nextMemo ? nextMemo.id : null
       });
     }
+
+    // 현재 시간 위치 (0~1440분)
+    const nowPos = nowTime.getHours() * 60 + nowTime.getMinutes();
 
     // 시간 눈금 (0~23시)
     const hours = Array.from({ length: 24 }, (_, i) => i);
@@ -1188,6 +1204,10 @@ function App() {
             {hours.map(hour => (
               <div key={hour} className="schedule-hour-slot" />
             ))}
+            {/* 현재 시간 빨간 줄 (오늘만) */}
+            {isViewingToday && (
+              <div className="schedule-now-line" style={{ top: `${(nowPos / (24 * 60)) * 100}%` }} />
+            )}
             {schedules.map((schedule, idx) => {
               const startPos = schedule.startHour * 60 + schedule.startMin;
               const endPos = schedule.endHour * 60 + schedule.endMin;
@@ -1202,6 +1222,10 @@ function App() {
                 showTime = true;
                 showContent = true;
               } else if (duration >= 30) {
+                showContent = true;
+              }
+              // 마지막(진행 중) 블록은 짧아도 내용이 보이게
+              if (!schedule.endMemoId) {
                 showContent = true;
               }
 
@@ -1933,6 +1957,7 @@ function App() {
                   />
                 </div>
               </div>
+              {selectedSchedule.endMemoId && (
               <div className="time-input-group">
                 <label>종료 시간</label>
                 <div className="time-input-row">
@@ -1957,16 +1982,28 @@ function App() {
                   />
                 </div>
               </div>
+              )}
               <div className="schedule-detail-actions">
                 <button className="btn-save" onClick={async () => {
+                  const updates = [];
                   const startMemo = memos.find(m => m.id === selectedSchedule.startMemoId);
                   if (startMemo) {
                     const newStartTime = new Date(startMemo.recordedAt);
                     newStartTime.setHours(editStartHour !== '' ? editStartHour : selectedSchedule.startHour);
                     newStartTime.setMinutes(editStartMin !== '' ? editStartMin : selectedSchedule.startMin);
-                    const { error } = await supabase.from('memos').update({ recorded_at: newStartTime.toISOString() }).eq('id', startMemo.id);
+                    updates.push({ id: startMemo.id, time: newStartTime.toISOString() });
+                  }
+                  const endMemo = selectedSchedule.endMemoId ? memos.find(m => m.id === selectedSchedule.endMemoId) : null;
+                  if (endMemo) {
+                    const newEndTime = new Date(endMemo.recordedAt);
+                    newEndTime.setHours(editEndHour !== '' ? editEndHour : selectedSchedule.endHour);
+                    newEndTime.setMinutes(editEndMin !== '' ? editEndMin : selectedSchedule.endMin);
+                    updates.push({ id: endMemo.id, time: newEndTime.toISOString() });
+                  }
+                  for (const u of updates) {
+                    const { error } = await supabase.from('memos').update({ recorded_at: u.time }).eq('id', u.id);
                     if (!error) {
-                      setMemos(prev => prev.map(m => m.id === startMemo.id ? { ...m, recordedAt: newStartTime.toISOString() } : m)
+                      setMemos(prev => prev.map(m => m.id === u.id ? { ...m, recordedAt: u.time } : m)
                         .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
                     }
                   }
