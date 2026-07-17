@@ -1330,25 +1330,33 @@ function App() {
   const memoGroups = groupMemosByHour(timelineMemos);
 
   // ── 위클리 스크롤 축 잠금 (대각선 스크롤 방지) ────────────────
-  const weeklyTouchRef = useRef({ x: 0, y: 0, locked: null });
+  // overflow를 바꾸면 스크롤 위치가 리셋되므로, 잠긴 축의 위치를 계속 되돌리는 방식 사용
+  const weeklyTouchRef = useRef({ x: 0, y: 0, locked: null, top: 0, left: 0 });
   const onWeeklyTouchStart = (e) => {
-    weeklyTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, locked: null };
+    const el = weeklyRef.current;
+    weeklyTouchRef.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
+      locked: null,
+      top: el ? el.scrollTop : 0,
+      left: el ? el.scrollLeft : 0
+    };
   };
   const onWeeklyTouchMove = (e) => {
+    const el = weeklyRef.current;
+    if (!el) return;
     const t = weeklyTouchRef.current;
-    if (t.locked || !weeklyRef.current) return;
-    const dx = Math.abs(e.touches[0].clientX - t.x);
-    const dy = Math.abs(e.touches[0].clientY - t.y);
-    if (dx < 8 && dy < 8) return; // 방향이 정해질 때까지 대기
-    t.locked = dx > dy ? 'x' : 'y';
-    if (t.locked === 'x') weeklyRef.current.style.overflowY = 'hidden';
-    else weeklyRef.current.style.overflowX = 'hidden';
+    if (!t.locked) {
+      const dx = Math.abs(e.touches[0].clientX - t.x);
+      const dy = Math.abs(e.touches[0].clientY - t.y);
+      if (dx < 8 && dy < 8) return; // 방향이 정해질 때까지 대기
+      t.locked = dx > dy ? 'x' : 'y';
+    }
+    // 잠긴 축과 반대 방향은 원래 위치로 고정
+    if (t.locked === 'x') el.scrollTop = t.top;
+    else el.scrollLeft = t.left;
   };
   const onWeeklyTouchEnd = () => {
-    if (weeklyRef.current) {
-      weeklyRef.current.style.overflowX = '';
-      weeklyRef.current.style.overflowY = '';
-    }
     weeklyTouchRef.current.locked = null;
   };
 
