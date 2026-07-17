@@ -319,14 +319,18 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // ── 위클리 뷰 열 때 선택한 날짜가 보이도록 가로 스크롤 ───────
+  // ── 위클리 뷰 열 때 선택한 날짜(가로)와 현재 시간(세로)으로 스크롤 ─
   const weeklyRef = useRef(null);
   useEffect(() => {
     if (activeView !== 'weekly' || !weeklyRef.current) return;
     const container = weeklyRef.current;
-    const colWidth = container.scrollWidth / 7;
+    // 가로: 선택한 날짜 컬럼으로 (컬럼 너비 170px = CSS와 일치해야 함)
     const dayIndex = Math.round((new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()).getTime() - startOfWeek(selectedDate).getTime()) / 86400000);
-    container.scrollLeft = Math.max(0, (dayIndex - 1) * colWidth);
+    container.scrollLeft = Math.max(0, dayIndex * 170 - 20);
+    // 세로: 오늘이면 현재 시간, 아니면 오전 8시 근처로
+    const now = new Date();
+    const targetMin = isToday(selectedDate) ? now.getHours() * 60 + now.getMinutes() : 8 * 60;
+    container.scrollTop = Math.max(0, 52 + targetMin - container.clientHeight / 3);
   }, [activeView, selectedDate]);
 
   // ── 스케줄(타임로그) 뷰 열 때 현재 시간 위치로 자동 스크롤 ───
@@ -1322,58 +1326,98 @@ function App() {
   const weekTitle = `${format(weekStart, 'M월 d일', { locale: ko })} ~ ${format(endOfWeek(selectedDate), 'M월 d일', { locale: ko })}`;
   const memoGroups = groupMemosByHour(timelineMemos);
 
-  // ── 위클리 뷰 렌더 ───────────────────────────────────────────
+  // ── 위클리 뷰 렌더 (시간 그리드) ─────────────────────────────
   const renderWeeklyView = () => {
     const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+    const hours = Array.from({ length: 24 }, (_, i) => i);
 
     return (
       <div className="weekly-container" ref={weeklyRef}>
-        {days.map(day => {
-          const dayMemos = memos
-            .filter(m => isSameDay(new Date(m.recordedAt), day))
-            .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
-          const isDayToday = isToday(day);
+        <div className="weekly-grid-wrap">
+          {/* 좌측 시간 라벨 */}
+          <div className="weekly-hours-col">
+            <div className="weekly-corner" />
+            {hours.map(h => (
+              <div key={h} className="weekly-hour-label">{h.toString().padStart(2, '0')}:00</div>
+            ))}
+          </div>
 
-          return (
-            <div key={day.toISOString()} className={`weekly-day ${isDayToday ? 'weekly-day-today' : ''}`}>
-              <div
-                className="weekly-day-header"
-                onClick={() => { setSelectedDate(day); setActiveView('timeline'); }}
-                title="타임라인으로 이동"
-              >
-                <span className="weekly-day-date">{format(day, 'd')}</span>
-                <span className="weekly-day-name">{format(day, 'E', { locale: ko })}</span>
+          {days.map(day => {
+            const dayMemos = memos
+              .filter(m => isSameDay(new Date(m.recordedAt), day))
+              .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+            const isDayToday = isToday(day);
+            const dayStartTime = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+            const posOf = (iso) => (new Date(iso).getTime() - dayStartTime) / 60000;
+            const nowInDay = (nowTime.getTime() - dayStartTime) / 60000;
+
+            // 타임로그와 동일한 규칙으로 블록 생성 (하루 24시간 안에서)
+            const blocks = [];
+            for (let i = 0; i < dayMemos.length; i++) {
+              const cur = dayMemos[i];
+              const next = dayMemos[i + 1];
+              const startPos = posOf(cur.recordedAt);
+              let endPos = next
+                ? posOf(next.recordedAt)
+                : (nowInDay > startPos && nowInDay < 1440 ? nowInDay : startPos);
+              let isSingle = false;
+              if (startPos < 120 && endPos > 120) { // 새벽 메모 단일 처리
+                endPos = startPos;
+                isSingle = true;
+              }
+              endPos = Math.min(endPos, 1440);
+              blocks.push({ memo: cur, startPos, endPos, isLast: !next, isSingle });
+            }
+
+            return (
+              <div key={day.toISOString()} className={`weekly-day-col ${isDayToday ? 'weekly-day-today' : ''}`}>
+                <div
+                  className="weekly-day-header"
+                  onClick={() => { setSelectedDate(day); setActiveView('timeline'); }}
+                  title="타임라인으로 이동"
+                >
+                  <span className="weekly-day-date">{format(day, 'd')}</span>
+                  <span className="weekly-day-name">{format(day, 'E', { locale: ko })}</span>
+                </div>
+                <div className="weekly-day-grid">
+                  {isDayToday && nowInDay >= 0 && nowInDay < 1440 && (
+                    <div className="schedule-now-line" style={{ top: `${(nowInDay / 1440) * 100}%`, left: '2px' }} />
+                  )}
+                  {blocks.map(b => {
+                    const duration = b.endPos - b.startPos;
+                    const memo = b.memo;
+                    const habitMatch = (memo.color || 'default') === 'default' ? habitMatchFor(memo.content, memo.recordedAt) : null;
+                    const bg = habitMatch
+                      ? `var(--habit-${habitMatch.color})`
+                      : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb');
+                    const border = habitMatch
+                      ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
+                      : (COLOR_BORDER[memo.color || 'default'] || '#e8e8f0');
+                    const showTime = duration >= 60;
+                    const showContent = duration >= 30 || b.isLast || b.isSingle;
+                    return (
+                      <div
+                        key={memo.id}
+                        className="weekly-block"
+                        onClick={() => openContentEditor(memo)}
+                        style={{
+                          top: `${(b.startPos / 1440) * 100}%`,
+                          height: `${(duration / 1440) * 100}%`,
+                          backgroundColor: bg,
+                          borderColor: border,
+                          minHeight: (showTime || showContent) ? '38px' : 'auto'
+                        }}
+                      >
+                        {showTime && <div className="weekly-block-time">{format(new Date(memo.recordedAt), 'HH:mm')}</div>}
+                        {showContent && <div className="weekly-block-content">{memo.content}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="weekly-day-memos">
-                {dayMemos.length === 0 ? (
-                  <div className="weekly-empty">·</div>
-                ) : (
-                  groupMemosByHour(dayMemos).map((group, groupIdx) => (
-                    <div key={groupIdx} className="weekly-memo-group">
-                      {group.map(memo => {
-                        const habitMatch = (memo.color || 'default') === 'default' ? habitMatchFor(memo.content, memo.recordedAt) : null;
-                        const bg = habitMatch
-                          ? `var(--habit-${habitMatch.color})`
-                          : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb');
-                        const border = habitMatch
-                          ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
-                          : (COLOR_BORDER[memo.color || 'default'] || '#e8e8f0');
-                        return (
-                          <div key={memo.id} className="weekly-memo" onClick={() => openContentEditor(memo)}>
-                            <div className="weekly-memo-time">{format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}</div>
-                            <div className="weekly-memo-box" style={{ backgroundColor: bg, borderColor: border }}>
-                              {memo.content}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     );
   };
