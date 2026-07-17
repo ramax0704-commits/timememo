@@ -1,10 +1,16 @@
 -- ─────────────────────────────────────────────────────────────
 -- 타임메모 Supabase 초기 설정
 -- Supabase 대시보드 → SQL Editor 에 전체 붙여넣고 Run 하세요.
+-- (여러 번 실행해도 안전합니다 — 기존 테이블을 지우고 새로 만듭니다)
 -- ─────────────────────────────────────────────────────────────
 
 -- 읽기 전용 모드 해제 (이 세션에서만)
 set default_transaction_read_only = off;
+
+-- 0. 이전에 만들다 만 것들 정리
+drop table if exists public.memos cascade;
+drop table if exists public.settings cascade;
+drop function if exists public.delete_user();
 
 -- 1. 메모 테이블
 create table public.memos (
