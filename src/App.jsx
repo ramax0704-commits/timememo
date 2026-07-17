@@ -16,29 +16,17 @@ import {
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus } from 'lucide-react';
-import { db, auth } from './firebase';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, getDocs, setDoc, getDoc } from 'firebase/firestore';
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  GoogleAuthProvider,
-  signInWithPopup,
-  setPersistence,
-  browserLocalPersistence,
-  browserSessionPersistence,
-  sendEmailVerification,
-  sendPasswordResetEmail,
-  confirmPasswordReset,
-  updatePassword,
-  reauthenticateWithCredential,
-  EmailAuthProvider,
-  sendSignInLinkToEmail,
-  isSignInWithEmailLink,
-  signInWithEmailLink,
-  fetchSignInMethodsForEmail
-} from 'firebase/auth';
+import { supabase } from './supabase';
+
+// Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
+function rowToMemo(row) {
+  return {
+    id: row.id,
+    content: row.content,
+    color: row.color,
+    recordedAt: row.recorded_at,
+  };
+}
 
 // ── 컬러 팔레트 ──────────────────────────────────────────────
 const COLOR_PALETTE = [
@@ -221,7 +209,6 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice }) {
 function App() {
   // URL 파라미터 (비밀번호 재설정 페이지)
   const urlParams = new URLSearchParams(window.location.search);
-  const [resetOobCode] = useState(urlParams.get('oobCode'));
   const [urlMode] = useState(urlParams.get('mode'));
 
   // Global States
@@ -242,7 +229,6 @@ function App() {
   const [authConfirmPassword, setAuthConfirmPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [submittingAuth, setSubmittingAuth] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
   const [showMyPage, setShowMyPage] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
@@ -264,14 +250,6 @@ function App() {
   const [passwordChangeError, setPasswordChangeError] = useState('');
   const [passwordChangeSuccess, setPasswordChangeSuccess] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
-
-  // 이메일 링크 로그인 상태
-  const [emailLinkProcessing, setEmailLinkProcessing] = useState(false);
-  const [emailLinkError, setEmailLinkError] = useState('');
-  const [needPasswordSetup, setNeedPasswordSetup] = useState(false);
-  const [setupNewPw, setSetupNewPw] = useState('');
-  const [setupNewPwConfirm, setSetupNewPwConfirm] = useState('');
-  const [settingupPassword, setSettingupPassword] = useState(false);
 
   // Modal States
   const [editingMemoId, setEditingMemoId] = useState(null);
@@ -310,45 +288,6 @@ function App() {
   const [isCalendarScrolling, setIsCalendarScrolling] = useState(false);
   const calendarScrollTimeoutRef = useRef(null);
 
-  // ── 이메일 링크 로그인 처리 (회원가입 링크 클릭 시) ────────────────
-  useEffect(() => {
-    if (!isSignInWithEmailLink(auth, window.location.href)) return;
-
-    setEmailLinkProcessing(true);
-    const email = localStorage.getItem('emailForSignIn');
-
-    if (!email) {
-      setEmailLinkProcessing(false);
-      setEmailLinkError('이메일 정보를 찾을 수 없습니다. 다시 회원가입해주세요.');
-      return;
-    }
-
-    signInWithEmailLink(auth, email, window.location.href)
-      .then(async (result) => {
-        const pw = sessionStorage.getItem('pendingSignupPassword');
-        if (pw) {
-          try {
-            await updatePassword(result.user, pw);
-            sessionStorage.removeItem('pendingSignupPassword');
-            setAuthView('login');
-          } catch (error) {
-            setNeedPasswordSetup(true);
-          }
-        } else {
-          setNeedPasswordSetup(true);
-        }
-        localStorage.removeItem('emailForSignIn');
-        window.history.replaceState({}, '', '/');
-        setEmailLinkProcessing(false);
-      })
-      .catch((error) => {
-        setEmailLinkProcessing(false);
-        let errorMsg = '인증 링크가 만료되었거나 유효하지 않습니다. 다시 시도해주세요.';
-        if (error.code === 'auth/invalid-email') errorMsg = '유효하지 않은 이메일입니다.';
-        setEmailLinkError(errorMsg);
-      });
-  }, []);
-
   // ── 자정 자동 날짜 전환 ──────────────────────────────────────
   useEffect(() => {
     const interval = setInterval(() => {
@@ -368,55 +307,75 @@ function App() {
 
   // ── Auth 상태 변화 감지 ───────────────────────────────────────
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      if (!user) {
-        setMemos([]);
-      } else if (user.providerData[0]?.providerId === 'password' && !user.emailVerified) {
-        setAuthView('emailVerification');
-      }
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
       setAuthLoading(false);
     });
-    return () => unsubscribe();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(session?.user ?? null);
+      if (!session?.user) setMemos([]);
+      setAuthLoading(false);
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
-  // ── Firestore 메모 구독 ──────────────────────────────────────
+  // ── 메모 불러오기 + 실시간 동기화 ────────────────────────────
+  const userId = currentUser?.id;
   useEffect(() => {
-    if (!currentUser) return;
-    const q = query(
-      collection(db, 'users', currentUser.uid, 'memos'),
-      orderBy('recordedAt', 'asc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const memosData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      setMemos(memosData);
-    }, (error) => {
-      console.error('Error fetching memos:', error);
-    });
-    return () => unsubscribe();
-  }, [currentUser]);
+    if (!userId) return;
+
+    const sortByTime = (list) => [...list].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+
+    const fetchMemos = async () => {
+      const { data, error } = await supabase
+        .from('memos')
+        .select('*')
+        .order('recorded_at', { ascending: true });
+      if (error) {
+        console.error('Error fetching memos:', error);
+        return;
+      }
+      setMemos(data.map(rowToMemo));
+    };
+    fetchMemos();
+
+    const channel = supabase
+      .channel('memos-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'memos', filter: `user_id=eq.${userId}` }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const memo = rowToMemo(payload.new);
+          setMemos(prev => prev.some(m => m.id === memo.id) ? prev : sortByTime([...prev, memo]));
+        } else if (payload.eventType === 'UPDATE') {
+          const memo = rowToMemo(payload.new);
+          setMemos(prev => sortByTime(prev.map(m => (m.id === memo.id ? memo : m))));
+        } else if (payload.eventType === 'DELETE') {
+          setMemos(prev => prev.filter(m => m.id !== payload.old.id));
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [userId]);
 
   // ── Settings 불러오기 ────────────────────────────────────────
   useEffect(() => {
-    if (!currentUser) return;
+    if (!userId) return;
     const loadSettings = async () => {
-      try {
-        const settingsDoc = await getDoc(doc(db, 'users', currentUser.uid, 'settings', 'preferences'));
-        console.log('Settings doc exists:', settingsDoc.exists());
-        console.log('Settings data:', settingsDoc.data());
-        if (settingsDoc.exists()) {
-          const data = settingsDoc.data();
-          if (data.habitKeywords && Array.isArray(data.habitKeywords)) {
-            console.log('Loaded habitKeywords:', data.habitKeywords);
-            setHabitKeywords(data.habitKeywords);
-          }
-        }
-      } catch (e) {
-        console.error('Error loading settings:', e);
+      const { data, error } = await supabase
+        .from('settings')
+        .select('habit_keywords')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (error) {
+        console.error('Error loading settings:', error);
+        return;
+      }
+      if (data?.habit_keywords && Array.isArray(data.habit_keywords)) {
+        setHabitKeywords(data.habit_keywords);
       }
     };
     loadSettings();
-  }, [currentUser]);
+  }, [userId]);
 
   // ── 입력 포커스 ──────────────────────────────────────────────
   useEffect(() => {
@@ -513,10 +472,9 @@ function App() {
     setMemos(prev => prev.filter(m => m.id !== memo.id));
 
     const timer = setTimeout(async () => {
-      // 5초 후 실제 Firestore 삭제
-      try {
-        await deleteDoc(doc(db, 'users', currentUser.uid, 'memos', memo.id));
-      } catch (error) {
+      // 5초 후 실제 삭제
+      const { error } = await supabase.from('memos').delete().eq('id', memo.id);
+      if (error) {
         console.error('Error deleting memo:', error);
         setMemos(prev => [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
       }
@@ -564,46 +522,43 @@ function App() {
     }
     setSubmittingAuth(true);
     try {
-      const persistence = rememberMe ? browserLocalPersistence : browserSessionPersistence;
-      await setPersistence(auth, persistence);
       if (authView === 'signup') {
-        // 1. 이미 가입된 이메일인지 확인
-        const signInMethods = await fetchSignInMethodsForEmail(auth, authEmail);
-        if (signInMethods.length > 0) {
+        const { data, error } = await supabase.auth.signUp({
+          email: authEmail,
+          password: authPassword,
+          options: { emailRedirectTo: window.location.origin }
+        });
+        if (error) throw error;
+        // 이미 가입된 이메일이면 identities가 빈 배열로 반환됨
+        if (data.user && data.user.identities && data.user.identities.length === 0) {
           setAuthError('이미 가입된 이메일입니다.');
-          setSubmittingAuth(false);
           return;
         }
-        // 2. 이메일 링크로 로그인 링크 발송 (계정 생성 안 함)
-        await sendSignInLinkToEmail(auth, authEmail, {
-          url: 'https://timememo-23a3c.web.app',
-          handleCodeInApp: true
-        });
-        // 3. 클라이언트 저장소에 저장
-        localStorage.setItem('emailForSignIn', authEmail);
-        sessionStorage.setItem('pendingSignupPassword', authPassword);
-        // 4. 인증 메일 발송됨 화면으로
+        // 인증 메일 발송됨 화면으로 (재발송 위해 authEmail은 유지)
         setAuthView('emailVerification');
+        setAuthPassword('');
+        setAuthConfirmPassword('');
       } else {
-        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+        const { error } = await supabase.auth.signInWithPassword({
+          email: authEmail,
+          password: authPassword
+        });
+        if (error) throw error;
+        setAuthEmail('');
+        setAuthPassword('');
+        setAuthConfirmPassword('');
       }
-      setAuthEmail('');
-      setAuthPassword('');
-      setAuthConfirmPassword('');
     } catch (error) {
-      console.error('회원가입 에러:', error.code, error.message, error);
+      console.error('인증 에러:', error.message, error);
+      const msg = error.message || '';
       let errorMsg;
-      switch (error.code) {
-        case 'auth/invalid-email': errorMsg = '유효하지 않은 이메일 형식입니다.'; break;
-        case 'auth/user-disabled': errorMsg = '비활성화된 계정입니다.'; break;
-        case 'auth/user-not-found':
-        case 'auth/wrong-password':
-        case 'auth/invalid-credential': errorMsg = '이메일 또는 비밀번호가 올바르지 않습니다.'; break;
-        case 'auth/email-already-in-use': errorMsg = '이미 사용 중인 이메일입니다.'; break;
-        case 'auth/weak-password': errorMsg = '비밀번호 강도가 너무 약합니다. (최소 8자리)'; break;
-        case 'auth/too-many-requests': errorMsg = '너무 많은 요청을 보냈습니다. 나중에 다시 시도해주세요.'; break;
-        default: errorMsg = error.message || '인증에 실패했습니다. 다시 시도해주세요.';
-      }
+      if (msg.includes('Invalid login credentials')) errorMsg = '이메일 또는 비밀번호가 올바르지 않습니다.';
+      else if (msg.includes('Email not confirmed')) errorMsg = '이메일 인증이 완료되지 않았습니다. 받은편지함의 인증 링크를 클릭해주세요.';
+      else if (msg.includes('already registered')) errorMsg = '이미 가입된 이메일입니다.';
+      else if (msg.toLowerCase().includes('invalid') && msg.toLowerCase().includes('email')) errorMsg = '유효하지 않은 이메일 형식입니다.';
+      else if (msg.includes('rate limit') || msg.includes('Too many') || msg.includes('seconds')) errorMsg = '너무 많은 요청을 보냈습니다. 잠시 후 다시 시도해주세요.';
+      else if (msg.includes('Password should')) errorMsg = '비밀번호 강도가 너무 약합니다. (최소 8자리)';
+      else errorMsg = '인증에 실패했습니다. 다시 시도해주세요.';
       setAuthError(errorMsg);
     } finally {
       setSubmittingAuth(false);
@@ -620,48 +575,38 @@ function App() {
     }
     setSubmittingAuth(true);
     try {
-      await sendPasswordResetEmail(auth, forgotEmail);
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: `${window.location.origin}?mode=resetPassword`
+      });
+      if (error) throw error;
       setForgotEmailSent(true);
       setForgotEmail('');
     } catch (error) {
+      const msg = error.message || '';
       let errorMsg;
-      switch (error.code) {
-        case 'auth/invalid-email': errorMsg = '유효하지 않은 이메일 형식입니다.'; break;
-        case 'auth/user-not-found': errorMsg = '등록되지 않은 이메일입니다.'; break;
-        default: errorMsg = '비밀번호 재설정 이메일 발송에 실패했습니다.';
-      }
+      if (msg.toLowerCase().includes('invalid')) errorMsg = '유효하지 않은 이메일 형식입니다.';
+      else if (msg.includes('rate limit') || msg.includes('seconds')) errorMsg = '잠시 후 다시 시도해주세요.';
+      else errorMsg = '비밀번호 재설정 이메일 발송에 실패했습니다.';
       setForgotEmailError(errorMsg);
     } finally {
       setSubmittingAuth(false);
     }
   };
 
-  const handleVerifyEmail = async () => {
-    if (!currentUser) return;
-    setSubmittingAuth(true);
-    try {
-      await currentUser.reload();
-      if (currentUser.emailVerified) {
-        setAuthView('login');
-      } else {
-        setAuthError('아직 이메일이 인증되지 않았습니다. 받은편지함을 확인해주세요.');
-      }
-    } catch (error) {
-      setAuthError('인증 상태 확인에 실패했습니다.');
-    } finally {
-      setSubmittingAuth(false);
-    }
-  };
-
   const handleResendVerificationEmail = async () => {
-    if (!currentUser) return;
+    if (!authEmail) return;
     setSubmittingAuth(true);
     try {
-      await sendEmailVerification(currentUser);
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: authEmail,
+        options: { emailRedirectTo: window.location.origin }
+      });
+      if (error) throw error;
       setAuthError('');
       alert('인증 이메일이 재발송되었습니다.');
     } catch (error) {
-      setAuthError('인증 이메일 발송에 실패했습니다.');
+      setAuthError('인증 이메일 발송에 실패했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
       setSubmittingAuth(false);
     }
@@ -693,20 +638,19 @@ function App() {
     }
     setResetSubmitting(true);
     try {
-      await confirmPasswordReset(auth, resetOobCode, resetNewPw);
+      // 재설정 링크를 클릭하면 임시 로그인된 상태이므로 바로 비밀번호 변경 가능
+      const { error } = await supabase.auth.updateUser({ password: resetNewPw });
+      if (error) throw error;
       setResetSuccess(true);
       setResetNewPw('');
       setResetConfirmPw('');
     } catch (error) {
+      const msg = error.message || '';
       let errorMsg;
-      switch (error.code) {
-        case 'auth/expired-action-code': errorMsg = '비밀번호 재설정 링크가 만료되었습니다. 다시 요청해주세요.'; break;
-        case 'auth/invalid-action-code': errorMsg = '유효하지 않은 링크입니다.'; break;
-        case 'auth/user-disabled': errorMsg = '비활성화된 계정입니다.'; break;
-        case 'auth/user-not-found': errorMsg = '계정을 찾을 수 없습니다.'; break;
-        case 'auth/weak-password': errorMsg = '비밀번호 강도가 너무 약합니다.'; break;
-        default: errorMsg = '비밀번호 재설정에 실패했습니다. 다시 시도해주세요.';
-      }
+      if (msg.includes('session') || msg.includes('missing')) errorMsg = '비밀번호 재설정 링크가 만료되었습니다. 다시 요청해주세요.';
+      else if (msg.includes('different from')) errorMsg = '기존과 다른 비밀번호를 입력해주세요.';
+      else if (msg.includes('Password should')) errorMsg = '비밀번호 강도가 너무 약합니다.';
+      else errorMsg = '비밀번호 재설정에 실패했습니다. 다시 시도해주세요.';
       setResetError(errorMsg);
     } finally {
       setResetSubmitting(false);
@@ -738,9 +682,17 @@ function App() {
     }
     setChangingPassword(true);
     try {
-      const credential = EmailAuthProvider.credential(currentUser.email, currentPw);
-      await reauthenticateWithCredential(currentUser, credential);
-      await updatePassword(currentUser, newPw);
+      // 현재 비밀번호 확인 (재로그인으로 검증)
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email: currentUser.email,
+        password: currentPw
+      });
+      if (reauthError) {
+        setPasswordChangeError('현재 비밀번호가 올바르지 않습니다.');
+        return;
+      }
+      const { error } = await supabase.auth.updateUser({ password: newPw });
+      if (error) throw error;
       setPasswordChangeSuccess(true);
       setCurrentPw('');
       setNewPw('');
@@ -750,67 +702,29 @@ function App() {
         setPasswordChangeSuccess(false);
       }, 2000);
     } catch (error) {
+      const msg = error.message || '';
       let errorMsg;
-      switch (error.code) {
-        case 'auth/wrong-password': errorMsg = '현재 비밀번호가 올바르지 않습니다.'; break;
-        case 'auth/weak-password': errorMsg = '비밀번호 강도가 너무 약합니다.'; break;
-        default: errorMsg = '비밀번호 변경에 실패했습니다.';
-      }
+      if (msg.includes('different from')) errorMsg = '기존과 다른 비밀번호를 입력해주세요.';
+      else if (msg.includes('Password should')) errorMsg = '비밀번호 강도가 너무 약합니다.';
+      else errorMsg = '비밀번호 변경에 실패했습니다.';
       setPasswordChangeError(errorMsg);
     } finally {
       setChangingPassword(false);
     }
   };
 
-  const handleSetupPassword = async () => {
-    if (!setupNewPw.trim() || !setupNewPwConfirm.trim()) {
-      alert('비밀번호를 입력해주세요.');
-      return;
-    }
-    if (setupNewPw !== setupNewPwConfirm) {
-      alert('비밀번호가 일치하지 않습니다.');
-      return;
-    }
-    const hasLetter = /[A-Za-z]/.test(setupNewPw);
-    const hasNumber = /\d/.test(setupNewPw);
-    const hasSpecial = /[^A-Za-z0-9]/.test(setupNewPw);
-    const hasSpace = /\s/.test(setupNewPw);
-    const isLengthValid = setupNewPw.length >= 8 && setupNewPw.length <= 16;
-    if (hasSpace) {
-      alert('비밀번호에 공백을 포함할 수 없습니다.');
-      return;
-    }
-    if (!isLengthValid || !hasLetter || !hasNumber || !hasSpecial) {
-      alert('영문, 숫자, 특수문자를 포함하여 8자리 이상 16자리 이하로 설정해 주세요.');
-      return;
-    }
-    setSettingupPassword(true);
-    try {
-      await updatePassword(currentUser, setupNewPw);
-      setNeedPasswordSetup(false);
-      setSetupNewPw('');
-      setSetupNewPwConfirm('');
-    } catch (error) {
-      alert('비밀번호 설정에 실패했습니다. 다시 시도해주세요.');
-    } finally {
-      setSettingupPassword(false);
-    }
-  };
-
   const handleGoogleSignIn = async () => {
-    const provider = new GoogleAuthProvider();
     setSubmittingAuth(true);
     setAuthError('');
     try {
-      const persistence = rememberMe ? browserLocalPersistence : browserSessionPersistence;
-      await setPersistence(auth, persistence);
-      await signInWithPopup(auth, provider);
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin }
+      });
+      if (error) throw error;
+      // 구글 로그인 페이지로 이동되므로 이후 코드는 실행되지 않음
     } catch (error) {
-      let errorMsg = '구글 로그인에 실패했습니다. 다시 시도해주세요.';
-      if (error.code === 'auth/popup-closed-by-user') errorMsg = '구글 로그인 팝업이 닫혔습니다.';
-      else if (error.code === 'auth/blocked-by-popup-toggler') errorMsg = '브라우저 팝업 차단을 해제하고 다시 시도해주세요.';
-      setAuthError(errorMsg);
-    } finally {
+      setAuthError('구글 로그인에 실패했습니다. 다시 시도해주세요.');
       setSubmittingAuth(false);
     }
   };
@@ -820,18 +734,14 @@ function App() {
     if (!window.confirm('정말 회원탈퇴를 진행하시겠습니까?\n작성하신 모든 메모가 영구적으로 삭제되며 이 작업은 복구할 수 없습니다.')) return;
     setDeletingAccount(true);
     try {
-      const q = query(collection(db, 'users', currentUser.uid, 'memos'));
-      const querySnapshot = await getDocs(q);
-      await Promise.all(querySnapshot.docs.map(d => deleteDoc(doc(db, 'users', currentUser.uid, 'memos', d.id))));
-      await currentUser.delete();
+      // 계정 삭제 (메모/설정은 DB에서 자동으로 함께 삭제됨)
+      const { error } = await supabase.rpc('delete_user');
+      if (error) throw error;
+      await supabase.auth.signOut();
       alert('회원탈퇴가 정상적으로 완료되었습니다.');
       setShowMyPage(false);
     } catch (error) {
-      if (error.code === 'auth/requires-recent-login') {
-        alert('보안상 회원탈퇴를 진행하려면 최근에 로그인한 세션이 필요합니다.\n로그아웃 후 다시 로그인하셔서 탈퇴를 시도해 주세요.');
-      } else {
-        alert(`회원탈퇴 중 오류가 발생했습니다: ${error.message}`);
-      }
+      alert(`회원탈퇴 중 오류가 발생했습니다: ${error.message}`);
     } finally {
       setDeletingAccount(false);
     }
@@ -848,18 +758,21 @@ function App() {
     }
     // 항상 현재 시간과 날짜로 기록
     const newMemoData = {
+      user_id: currentUser.id,
       content: inputText,
       color: selectedColor,
-      recordedAt: now.toISOString(),
-      createdAt: serverTimestamp()
+      recorded_at: now.toISOString()
     };
     setInputText('');
-    try {
-      await addDoc(collection(db, 'users', currentUser.uid, 'memos'), newMemoData);
-    } catch (error) {
-      console.error('Error adding document:', error);
-      alert('메모 저장에 실패했습니다. Firestore 설정을 확인해주세요.');
+    const { data, error } = await supabase.from('memos').insert(newMemoData).select().single();
+    if (error) {
+      console.error('Error adding memo:', error);
+      alert('메모 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      return;
     }
+    // 바로 화면에 반영 (실시간 이벤트가 오면 중복은 무시됨)
+    const memo = rowToMemo(data);
+    setMemos(prev => prev.some(m => m.id === memo.id) ? prev : [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
   };
 
   const handleKeyDown = (e) => {
@@ -885,14 +798,12 @@ function App() {
     if (memoToEdit) {
       const [year, month, day] = editDateStr.split('-');
       const newDate = new Date(`${year}-${month}-${day}T${hours}:${mins}:00`);
-      console.log('🔄 Saving new date:', editDateStr, hours, mins, newDate.toISOString());
-      try {
-        await updateDoc(doc(db, 'users', currentUser.uid, 'memos', editingMemoId), {
-          recordedAt: newDate.toISOString()
-        });
-        console.log('✅ Successfully updated!');
-      } catch (error) {
-        console.error('❌ Error updating time:', error);
+      const { error } = await supabase.from('memos').update({ recorded_at: newDate.toISOString() }).eq('id', editingMemoId);
+      if (error) {
+        console.error('Error updating time:', error);
+      } else {
+        setMemos(prev => prev.map(m => m.id === editingMemoId ? { ...m, recordedAt: newDate.toISOString() } : m)
+          .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
       }
     }
     setEditingMemoId(null);
@@ -909,13 +820,13 @@ function App() {
 
   const saveContentEdit = async () => {
     if (!editContentStr.trim() || !editingContentMemo || !currentUser) return;
-    try {
-      await updateDoc(doc(db, 'users', currentUser.uid, 'memos', editingContentMemo.id), {
-        content: editContentStr,
-        color: editMemoColor
-      });
-    } catch (error) {
+    const { error } = await supabase.from('memos')
+      .update({ content: editContentStr, color: editMemoColor })
+      .eq('id', editingContentMemo.id);
+    if (error) {
       console.error('Error updating content:', error);
+    } else {
+      setMemos(prev => prev.map(m => m.id === editingContentMemo.id ? { ...m, content: editContentStr, color: editMemoColor } : m));
     }
     setEditingContentMemo(null);
   };
@@ -923,15 +834,12 @@ function App() {
   // ── 습관 키워드 저장 ─────────────────────────────────────────
   const saveHabitKeywords = async (keywords) => {
     if (!currentUser) return;
-    try {
-      console.log('Saving habitKeywords:', keywords);
-      await setDoc(doc(db, 'users', currentUser.uid, 'settings', 'preferences'), {
-        habitKeywords: keywords
-      }, { merge: true });
-      console.log('Saved successfully');
-    } catch (e) {
-      console.error('Error saving settings:', e);
-    }
+    const { error } = await supabase.from('settings').upsert({
+      user_id: currentUser.id,
+      habit_keywords: keywords,
+      updated_at: new Date().toISOString()
+    });
+    if (error) console.error('Error saving settings:', error);
   };
 
   const addHabitKeyword = async () => {
@@ -1330,86 +1238,8 @@ function App() {
     );
   };
 
-  // ── 이메일 링크 로그인 처리 중 ────────────────────────────────
-  if (emailLinkProcessing) {
-    return (
-      <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div className="spinner" style={{ marginBottom: '20px' }} />
-          <p style={{ fontSize: '1rem', color: '#666' }}>회원가입을 처리 중입니다...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // ── 이메일 링크 오류 ──────────────────────────────────────────
-  if (emailLinkError) {
-    return (
-      <div className="app-container auth-wrapper">
-        <div className="auth-card">
-          <div className="auth-logo">
-            <span className="auth-logo-icon">❌</span>
-            <h2>인증 오류</h2>
-            <p>{emailLinkError}</p>
-          </div>
-          <button
-            type="button"
-            className="btn-save auth-submit-btn"
-            onClick={() => {
-              setEmailLinkError('');
-              setAuthView('signup');
-            }}
-            style={{ marginTop: '20px' }}
-          >
-            다시 회원가입하기
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ── 비밀번호 설정 화면 (이메일 링크 로그인 후) ─────────────────
-  if (currentUser && needPasswordSetup) {
-    return (
-      <div className="app-container auth-wrapper">
-        <div className="auth-card">
-          <div className="auth-logo">
-            <span className="auth-logo-icon">🔐</span>
-            <h2>비밀번호 설정</h2>
-            <p>계정을 완성하기 위해 비밀번호를 설정해주세요</p>
-          </div>
-          <form onSubmit={(e) => { e.preventDefault(); handleSetupPassword(); }} className="auth-form">
-            <div className="form-group">
-              <label>비밀번호</label>
-              <input
-                type="password"
-                placeholder="8~16자 (영문, 숫자, 특수문자)"
-                value={setupNewPw}
-                onChange={e => setSetupNewPw(e.target.value)}
-                className="input-field auth-input"
-              />
-            </div>
-            <div className="form-group">
-              <label>비밀번호 확인</label>
-              <input
-                type="password"
-                placeholder="비밀번호 재입력"
-                value={setupNewPwConfirm}
-                onChange={e => setSetupNewPwConfirm(e.target.value)}
-                className="input-field auth-input"
-              />
-            </div>
-            <button type="submit" className="btn-save auth-submit-btn" disabled={settingupPassword}>
-              {settingupPassword ? <span className="spinner-small" /> : '비밀번호 설정 완료'}
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  // ── 비밀번호 재설정 페이지 (URL 파라미터로 접근) ───────────────
-  if (urlMode === 'resetPassword' && resetOobCode) {
+  // ── 비밀번호 재설정 페이지 (이메일 링크로 접근) ───────────────
+  if (urlMode === 'resetPassword') {
     return (
       <div className="app-container auth-wrapper">
         <div className="auth-card">
@@ -1477,8 +1307,8 @@ function App() {
     );
   }
 
-  // ── 이메일 인증 화면 (로그인됨 + 이메일 미인증 + 이메일/비밀번호 로그인) ─────
-  if (currentUser && !currentUser.emailVerified && currentUser.providerData[0]?.providerId === 'password') {
+  // ── 이메일 인증 안내 화면 (회원가입 직후) ─────────────────────
+  if (!currentUser && authView === 'emailVerification') {
     return (
       <div className="app-container auth-wrapper">
         <div className="auth-card">
@@ -1489,36 +1319,29 @@ function App() {
           </div>
           <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#f9f9fb', borderRadius: '12px', marginBottom: '20px' }}>
             <p style={{ fontSize: '0.95rem', color: '#666', marginBottom: '8px' }}>
-              <strong>{currentUser.email}</strong>
+              <strong>{authEmail}</strong>
             </p>
             <p style={{ fontSize: '0.85rem', color: '#999', margin: 0 }}>
-              받은편지함 또는 스팸함을 확인하고 인증 링크를 클릭해주세요.
+              받은편지함 또는 스팸함을 확인하고 인증 링크를 클릭해주세요.<br />
+              링크를 클릭하면 자동으로 로그인됩니다.
             </p>
           </div>
           {authError && <div className="auth-error-message">{authError}</div>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <button
               type="button"
-              className="btn-save auth-submit-btn"
-              onClick={handleVerifyEmail}
-              disabled={submittingAuth}
-            >
-              {submittingAuth ? <span className="spinner-small" /> : '인증 완료했어요'}
-            </button>
-            <button
-              type="button"
               className="btn-cancel"
               onClick={handleResendVerificationEmail}
               disabled={submittingAuth}
             >
-              인증 메일 재발송
+              {submittingAuth ? <span className="spinner-small" /> : '인증 메일 재발송'}
             </button>
             <button
               type="button"
               className="btn-cancel"
-              onClick={async () => { await signOut(auth); setAuthView('login'); }}
+              onClick={() => { setAuthView('login'); setAuthEmail(''); setAuthError(''); }}
             >
-              로그아웃
+              로그인으로 돌아가기
             </button>
           </div>
         </div>
@@ -1620,14 +1443,6 @@ function App() {
                     비밀번호가 일치하지 않습니다.
                   </div>
                 )}
-              </div>
-            )}
-            {authView === 'login' && (
-              <div className="auth-remember-container">
-                <label className="auth-remember-label">
-                  <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="auth-remember-checkbox" />
-                  로그인 상태 유지
-                </label>
               </div>
             )}
             {authError && !authError.includes('이메일') && !authError.includes('비밀번호') && !authError.includes('공백') && !authError.includes('일치') && (
@@ -1817,8 +1632,8 @@ function App() {
                       alignItems: 'center',
                       justifyContent: 'center'
                     }}>
-                      {currentUser.photoURL ? (
-                        <img src={currentUser.photoURL} alt="프로필" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                      {currentUser.user_metadata?.avatar_url ? (
+                        <img src={currentUser.user_metadata.avatar_url} alt="프로필" style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
                       ) : (
                         <User size={24} color="#999" />
                       )}
@@ -1826,7 +1641,7 @@ function App() {
                     <div>
                       <p style={{ fontSize: '0.9rem', color: '#666', margin: '0' }}>{currentUser.email}</p>
                       <p style={{ fontSize: '0.75rem', color: '#999', margin: '4px 0 0' }}>
-                        {currentUser.providerData[0]?.providerId === 'google.com' ? '구글 로그인' : '이메일 가입'}
+                        {currentUser.app_metadata?.provider === 'google' ? '구글 로그인' : '이메일 가입'}
                       </p>
                     </div>
                   </div>
@@ -2022,12 +1837,12 @@ function App() {
                   <h3>계정 및 보안</h3>
                 </div>
                 <div className="danger-zone-actions">
-                  {currentUser.providerData[0]?.providerId === 'password' && (
+                  {currentUser.app_metadata?.provider === 'email' && (
                     <button className="btn-cancel logout-action-btn" onClick={() => setShowPasswordChange(true)}>
                       비밀번호 변경
                     </button>
                   )}
-                  <button className="btn-cancel logout-action-btn" onClick={async () => { if (window.confirm('로그아웃 하시겠습니까?')) { await signOut(auth); setActiveView('timeline'); } }}>
+                  <button className="btn-cancel logout-action-btn" onClick={async () => { if (window.confirm('로그아웃 하시겠습니까?')) { await supabase.auth.signOut(); setActiveView('timeline'); } }}>
                     로그아웃
                   </button>
                   <button className="btn-cancel delete-account-btn" onClick={handleDeleteAccount} disabled={deletingAccount}>
@@ -2149,7 +1964,11 @@ function App() {
                     const newStartTime = new Date(startMemo.recordedAt);
                     newStartTime.setHours(editStartHour !== '' ? editStartHour : selectedSchedule.startHour);
                     newStartTime.setMinutes(editStartMin !== '' ? editStartMin : selectedSchedule.startMin);
-                    await updateDoc(doc(db, 'memos', startMemo.id), { recordedAt: newStartTime });
+                    const { error } = await supabase.from('memos').update({ recorded_at: newStartTime.toISOString() }).eq('id', startMemo.id);
+                    if (!error) {
+                      setMemos(prev => prev.map(m => m.id === startMemo.id ? { ...m, recordedAt: newStartTime.toISOString() } : m)
+                        .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
+                    }
                   }
                   setSelectedSchedule(null);
                   setEditStartHour('');
@@ -2526,8 +2345,8 @@ function App() {
               {/* Profile Card */}
               <div className="mypage-card profile-card">
                 <div className="profile-avatar">
-                  {currentUser.photoURL ? (
-                    <img src={currentUser.photoURL} alt="Avatar" className="user-photo" />
+                  {currentUser.user_metadata?.avatar_url ? (
+                    <img src={currentUser.user_metadata.avatar_url} alt="Avatar" className="user-photo" />
                   ) : (
                     <div className="avatar-placeholder"><User size={28} /></div>
                   )}
@@ -2535,7 +2354,7 @@ function App() {
                 <div className="profile-info">
                   <span className="profile-email">{currentUser.email}</span>
                   <span className="profile-provider-badge">
-                    {currentUser.providerData[0]?.providerId === 'google.com' ? '구글 로그인 계정' : '이메일 가입 계정'}
+                    {currentUser.app_metadata?.provider === 'google' ? '구글 로그인 계정' : '이메일 가입 계정'}
                   </span>
                 </div>
               </div>
@@ -2636,7 +2455,7 @@ function App() {
                   <h3>계정 및 보안</h3>
                 </div>
                 <div className="danger-zone-actions">
-                  <button className="btn-cancel logout-action-btn" onClick={async () => { if (window.confirm('로그아웃 하시겠습니까?')) { await signOut(auth); setShowMyPage(false); } }}>
+                  <button className="btn-cancel logout-action-btn" onClick={async () => { if (window.confirm('로그아웃 하시겠습니까?')) { await supabase.auth.signOut(); setShowMyPage(false); } }}>
                     로그아웃
                   </button>
                   <button className="btn-cancel delete-account-btn" onClick={handleDeleteAccount} disabled={deletingAccount}>
