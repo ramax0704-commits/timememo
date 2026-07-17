@@ -353,6 +353,28 @@ function App() {
     container.scrollTop = Math.max(0, 20 + targetMin - container.clientHeight / 3);
   }, [showScheduleView, selectedDate]);
 
+  // ── 모바일: 입력창에 포커스되면(키보드 올라오면) 하단 네비 숨김 ─
+  useEffect(() => {
+    if (!window.matchMedia('(pointer: coarse)').matches) return; // 터치 기기에서만
+    const isTextField = (el) =>
+      el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit'].includes(el.type)));
+    const onFocusIn = (e) => {
+      if (isTextField(e.target)) document.body.classList.add('keyboard-open');
+    };
+    const onFocusOut = () => {
+      setTimeout(() => {
+        if (!isTextField(document.activeElement)) document.body.classList.remove('keyboard-open');
+      }, 50);
+    };
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('focusout', onFocusOut);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('focusout', onFocusOut);
+      document.body.classList.remove('keyboard-open');
+    };
+  }, []);
+
   // ── 자정 자동 날짜 전환 ──────────────────────────────────────
   useEffect(() => {
     const interval = setInterval(() => {
@@ -483,9 +505,6 @@ function App() {
     const handleResize = () => {
       if (window.visualViewport) {
         document.documentElement.style.setProperty('--vh', `${window.visualViewport.height}px`);
-        // 키보드가 올라오면 하단 네비게이션 바 숨김
-        const keyboardOpen = window.innerHeight - window.visualViewport.height > 100;
-        document.body.classList.toggle('keyboard-open', keyboardOpen);
         window.scrollTo(0, 0);
       }
     };
@@ -1293,14 +1312,6 @@ function App() {
             );
           })()}
         </div>
-
-        {/* 습관 키워드 힌트 */}
-        {habitKeywords.filter(k => !k.endedAt).length > 0 && (
-          <div className="monthly-keywords-hint">
-            <Tag size={12} />
-            <span>습관: {habitKeywords.filter(k => !k.endedAt).map(k => k.name).join(', ')}</span>
-          </div>
-        )}
       </div>
     );
   };
@@ -1337,26 +1348,27 @@ function App() {
                 {dayMemos.length === 0 ? (
                   <div className="weekly-empty">·</div>
                 ) : (
-                  dayMemos.map(memo => {
-                    const habitMatch = (memo.color || 'default') === 'default' ? habitMatchFor(memo.content, memo.recordedAt) : null;
-                    const bg = habitMatch
-                      ? `var(--habit-${habitMatch.color})`
-                      : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb');
-                    const border = habitMatch
-                      ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
-                      : (COLOR_BORDER[memo.color || 'default'] || '#e8e8f0');
-                    return (
-                      <div
-                        key={memo.id}
-                        className="weekly-memo"
-                        style={{ backgroundColor: bg, borderColor: border }}
-                        onClick={() => openContentEditor(memo)}
-                      >
-                        <div className="weekly-memo-time">{format(new Date(memo.recordedAt), 'HH:mm')}</div>
-                        <div className="weekly-memo-content">{memo.content}</div>
-                      </div>
-                    );
-                  })
+                  groupMemosByHour(dayMemos).map((group, groupIdx) => (
+                    <div key={groupIdx} className="weekly-memo-group">
+                      {group.map(memo => {
+                        const habitMatch = (memo.color || 'default') === 'default' ? habitMatchFor(memo.content, memo.recordedAt) : null;
+                        const bg = habitMatch
+                          ? `var(--habit-${habitMatch.color})`
+                          : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb');
+                        const border = habitMatch
+                          ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
+                          : (COLOR_BORDER[memo.color || 'default'] || '#e8e8f0');
+                        return (
+                          <div key={memo.id} className="weekly-memo" onClick={() => openContentEditor(memo)}>
+                            <div className="weekly-memo-time">{format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}</div>
+                            <div className="weekly-memo-box" style={{ backgroundColor: bg, borderColor: border }}>
+                              {memo.content}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))
                 )}
               </div>
             </div>

@@ -563,21 +563,28 @@ body {
   gap: 6px;
 }
 
+.weekly-memo-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px; /* 시간대(시) 그룹 사이 간격 — 타임라인과 동일한 리듬 */
+}
+
 .weekly-memo {
-  border: 1px solid;
-  border-radius: 8px;
-  padding: 6px 8px;
   cursor: pointer;
 }
 
 .weekly-memo-time {
   font-size: 0.65rem;
-  color: #999;
-  font-weight: 600;
+  color: var(--primary-color);
+  font-weight: 700;
   margin-bottom: 2px;
 }
 
-.weekly-memo-content {
+.weekly-memo-box {
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 6px 8px;
   font-size: 0.78rem;
   line-height: 1.35;
   word-break: break-word;
@@ -593,10 +600,8 @@ body {
 /* ── 먼슬리 하단 패널 ────────────────────────────────────────── */
 .monthly-day-panel {
   margin-top: 12px;
-  background-color: white;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 14px;
+  border-top: 1px solid var(--border-color);
+  padding: 14px 8px 4px;
 }
 
 .monthly-day-panel-title {
@@ -751,6 +756,7 @@ body {
   overflow-y: auto;
   background-color: var(--bg-app);
 }
+.monthly-container { scrollbar-gutter: stable; } /* 스크롤바 생겼다 없어질 때 화면이 흔들리지 않게 */
 .monthly-container::-webkit-scrollbar { width: 4px; }
 .monthly-container::-webkit-scrollbar-thumb { background-color: #ddd; border-radius: 4px; }
 
@@ -814,7 +820,7 @@ body {
 .monthly-weekdays {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  padding: 0; /* 날짜 그리드와 동일한 폭이어야 요일-날짜 정렬이 맞음 */
+  padding: 0 4px; /* 날짜 그리드(.monthly-grid)와 반드시 동일해야 정렬이 맞음 */
   margin-top: 16px;
   margin-bottom: 8px;
 }
@@ -831,7 +837,7 @@ body {
 .monthly-grid {
   display: flex;
   flex-direction: column;
-  padding: 0;
+  padding: 0 4px; /* 요일 헤더(.monthly-weekdays)와 반드시 동일해야 정렬이 맞음 */
   gap: 0;
 }
 
@@ -879,6 +885,17 @@ body {
   .monthly-cell:focus-visible * {
     background-color: transparent !important;
     color: inherit !important;
+  }
+  /* 단, 선택된 날짜의 배경과 오늘 날짜의 파란 숫자는 유지 */
+  .monthly-cell.monthly-cell-selected,
+  .monthly-cell.monthly-cell-selected:hover,
+  .monthly-cell.monthly-cell-selected:active,
+  .monthly-cell.monthly-cell-selected:focus,
+  .monthly-cell.monthly-cell-selected:focus-visible {
+    background-color: #eef2ff !important;
+  }
+  .monthly-cell.monthly-cell-today .monthly-cell-date {
+    color: var(--primary-color) !important;
   }
 }
 .monthly-cell-disabled {
