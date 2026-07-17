@@ -323,23 +323,88 @@ function App() {
   }, []);
 
   // ── 위클리 뷰 열 때 선택한 날짜(가로)와 현재 시간(세로)으로 스크롤 ─
-  const weeklyHRef = useRef(null);   // 날짜 컬럼 가로 스크롤
-  const weeklyVRef = useRef(null);   // 시간 세로 스크롤
-  const weeklyHeadRef = useRef(null); // 상단 날짜 헤더 (가로 동기화용)
+  const weeklyRef = useRef(null);
   useEffect(() => {
-    if (activeView !== 'weekly') return;
+    if (activeView !== 'weekly' || !weeklyRef.current) return;
+    const container = weeklyRef.current;
     // 가로: 선택한 날짜 컬럼으로 (컬럼 너비 170px = CSS와 일치해야 함)
-    if (weeklyHRef.current) {
-      const dayIndex = Math.round((new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()).getTime() - startOfWeek(selectedDate).getTime()) / 86400000);
-      weeklyHRef.current.scrollLeft = Math.max(0, dayIndex * 170 - 20);
-    }
+    const dayIndex = Math.round((new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()).getTime() - startOfWeek(selectedDate).getTime()) / 86400000);
+    container.scrollLeft = Math.max(0, dayIndex * 170 - 20);
     // 세로: 오늘이면 현재 시간, 아니면 오전 8시 근처로
-    if (weeklyVRef.current) {
-      const now = new Date();
-      const targetMin = isToday(selectedDate) ? now.getHours() * 60 + now.getMinutes() : 8 * 60;
-      weeklyVRef.current.scrollTop = Math.max(0, 8 + targetMin - weeklyVRef.current.clientHeight / 3);
-    }
+    const now = new Date();
+    const targetMin = isToday(selectedDate) ? now.getHours() * 60 + now.getMinutes() : 8 * 60;
+    container.scrollTop = Math.max(0, 60 + targetMin - container.clientHeight / 3);
   }, [activeView, selectedDate]);
+
+  // ── 위클리 터치 스크롤: 축 고정 + 관성 (직접 처리로 헤더와 완전 동기화) ─
+  useEffect(() => {
+    if (activeView !== 'weekly' || !weeklyRef.current) return;
+    const el = weeklyRef.current;
+    let sx = 0, sy = 0, sl = 0, st = 0, locked = null;
+    let lastX = 0, lastY = 0, lastT = 0, vx = 0, vy = 0, raf = null;
+
+    const stopMomentum = () => { if (raf) cancelAnimationFrame(raf); raf = null; };
+
+    const onStart = (e) => {
+      stopMomentum();
+      const t = e.touches[0];
+      sx = lastX = t.clientX;
+      sy = lastY = t.clientY;
+      sl = el.scrollLeft;
+      st = el.scrollTop;
+      locked = null;
+      vx = vy = 0;
+      lastT = e.timeStamp;
+    };
+
+    const onMove = (e) => {
+      e.preventDefault(); // 브라우저 기본 스크롤 차단 — 아래에서 축 고정으로 직접 스크롤
+      const t = e.touches[0];
+      const dx = t.clientX - sx;
+      const dy = t.clientY - sy;
+      if (!locked) {
+        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+        locked = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      }
+      const dt = Math.max(1, e.timeStamp - lastT);
+      if (locked === 'x') {
+        el.scrollLeft = sl - dx;
+        vx = (t.clientX - lastX) / dt;
+      } else {
+        el.scrollTop = st - dy;
+        vy = (t.clientY - lastY) / dt;
+      }
+      lastX = t.clientX;
+      lastY = t.clientY;
+      lastT = e.timeStamp;
+    };
+
+    const onEnd = () => {
+      const axis = locked;
+      let v = axis === 'x' ? vx : vy;
+      locked = null;
+      if (!axis || Math.abs(v) < 0.1) return;
+      // 관성 스크롤
+      const step = () => {
+        v *= 0.95;
+        if (Math.abs(v) < 0.02) { raf = null; return; }
+        if (axis === 'x') el.scrollLeft -= v * 16;
+        else el.scrollTop -= v * 16;
+        raf = requestAnimationFrame(step);
+      };
+      raf = requestAnimationFrame(step);
+    };
+
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    return () => {
+      stopMomentum();
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+    };
+  }, [activeView]);
 
   // ── 스케줄(타임로그) 뷰 열 때 현재 시간 위치로 자동 스크롤 ───
   const scheduleViewRef = useRef(null);
@@ -1344,45 +1409,21 @@ function App() {
     const hours = Array.from({ length: 26 }, (_, i) => i);
 
     return (
-      <div className="weekly-container">
-        {/* 상단 날짜 헤더 (세로 고정, 가로는 아래 그리드와 동기화) */}
-        <div className="weekly-head-row">
-          <div className="weekly-head-spacer" />
-          <div className="weekly-head-scroll" ref={weeklyHeadRef}>
-            <div className="weekly-head-cols">
-              {days.map(day => (
-                <div
-                  key={day.toISOString()}
-                  className={`weekly-day-header ${isToday(day) ? 'weekly-day-today' : ''}`}
-                  onClick={() => { setSelectedDate(day); setActiveView('timeline'); }}
-                  title="타임라인으로 이동"
-                >
-                  <span className="weekly-day-date">{format(day, 'd')}</span>
-                  <span className="weekly-day-name">{format(day, 'E', { locale: ko })}</span>
-                </div>
-              ))}
-            </div>
+      <div className="weekly-container" ref={weeklyRef}>
+        <div className="weekly-grid-wrap">
+          {/* 좌측 시간 라벨 (가로 스크롤 시 고정) */}
+          <div className="weekly-hours-col">
+            <div className="weekly-corner" />
+            <div style={{ height: '5px' }} />
+            {hours.map(h => (
+              <div key={h} className="weekly-hour-label" style={h >= 24 ? { opacity: 0.4 } : undefined}>
+                {(h % 24).toString().padStart(2, '0')}:00
+              </div>
+            ))}
+            <div className="weekly-hour-label" style={{ height: 0, opacity: 0.4 }}>02:00</div>
           </div>
-        </div>
 
-        {/* 세로 스크롤 영역: 시간 라벨 + 날짜 컬럼 */}
-        <div className="weekly-vscroll" ref={weeklyVRef}>
-          <div className="weekly-body-row">
-            <div className="weekly-hours-col">
-              {hours.map(h => (
-                <div key={h} className="weekly-hour-label" style={h >= 24 ? { opacity: 0.4 } : undefined}>
-                  {(h % 24).toString().padStart(2, '0')}:00
-                </div>
-              ))}
-              <div className="weekly-hour-label" style={{ height: 0, opacity: 0.4 }}>02:00</div>
-            </div>
-            <div
-              className="weekly-hscroll"
-              ref={weeklyHRef}
-              onScroll={(e) => { if (weeklyHeadRef.current) weeklyHeadRef.current.scrollLeft = e.currentTarget.scrollLeft; }}
-            >
-              <div className="weekly-day-cols">
-                {days.map(day => {
+          {days.map(day => {
                   const isDayToday = isToday(day);
                   const dayStartTime = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
                   const posOf = (iso) => (new Date(iso).getTime() - dayStartTime) / 60000;
@@ -1412,7 +1453,15 @@ function App() {
                   }
 
                   return (
-                    <div key={day.toISOString()} className="weekly-day-col">
+                    <div key={day.toISOString()} className={`weekly-day-col ${isDayToday ? 'weekly-day-today' : ''}`}>
+                      <div
+                        className="weekly-day-header"
+                        onClick={() => { setSelectedDate(day); setActiveView('timeline'); }}
+                        title="타임라인으로 이동"
+                      >
+                        <span className="weekly-day-date">{format(day, 'd')}</span>
+                        <span className="weekly-day-name">{format(day, 'E', { locale: ko })}</span>
+                      </div>
                       <div className={`weekly-day-grid ${isDayToday ? 'weekly-day-grid-today' : ''}`}>
                         {isDayToday && nowInDay >= 0 && nowInDay < WEEKLY_GRID_MINUTES && (
                           <div className="schedule-now-line" style={{ top: `${(nowInDay / WEEKLY_GRID_MINUTES) * 100}%`, left: '2px' }} />
@@ -1452,9 +1501,6 @@ function App() {
                     </div>
                   );
                 })}
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     );
