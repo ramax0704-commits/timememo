@@ -1238,6 +1238,17 @@ function App() {
           endPos = startPos; // 최소 높이 블록으로 표시됨
         }
       }
+
+      // 새벽(00:00~01:59) 메모는 밤의 마지막 기록으로 보고,
+      // 다음 기록이 새벽 2시를 넘기면 이어지지 않고 단일 블록으로 표시
+      let isSingle = false;
+      const dawnCutoff = startPos < 120 ? 120 : (startPos >= 1440 && startPos < 1560 ? 1560 : null);
+      if (dawnCutoff !== null && endPos > dawnCutoff) {
+        endTime = startTime;
+        endPos = startPos;
+        isSingle = true;
+      }
+
       endPos = Math.min(endPos, gridMinutes);
 
       schedules.push({
@@ -1250,8 +1261,9 @@ function App() {
         content: currentMemo.content,
         color: currentMemo.color || 'default',
         isCarry: startPos >= 1440, // 다음날 새벽 메모 (흐리게 표시)
+        isSingle, // 새벽 단일 블록 (다음 메모와 이어지지 않음)
         startMemoId: currentMemo.id,
-        endMemoId: nextMemo ? nextMemo.id : null
+        endMemoId: nextMemo && !isSingle ? nextMemo.id : null
       });
     }
 
