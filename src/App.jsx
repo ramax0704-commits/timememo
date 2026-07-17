@@ -49,6 +49,9 @@ const COLOR_BORDER = {
   orange:  '#fed7aa',
 };
 
+// 터치 기기 여부 (모바일에서는 입력창 자동 포커스를 하지 않음)
+const IS_TOUCH_DEVICE = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+
 // 습관 키워드 색상 (배경은 --habit-* CSS 변수, 테두리는 한 톤 진하게)
 const HABIT_BORDER = {
   purple: '#d8b4fe',
@@ -468,9 +471,9 @@ function App() {
     loadSettings();
   }, [userId]);
 
-  // ── 입력 포커스 ──────────────────────────────────────────────
+  // ── 입력 포커스 (터치 기기에서는 키보드가 멋대로 안 뜨게 제외) ─
   useEffect(() => {
-    if (currentUser && activeView === 'timeline') {
+    if (currentUser && activeView === 'timeline' && !IS_TOUCH_DEVICE) {
       inputRef.current?.focus();
     }
   }, [selectedDate, currentUser, activeView]);
@@ -1326,13 +1329,42 @@ function App() {
   const weekTitle = `${format(weekStart, 'M월 d일', { locale: ko })} ~ ${format(endOfWeek(selectedDate), 'M월 d일', { locale: ko })}`;
   const memoGroups = groupMemosByHour(timelineMemos);
 
+  // ── 위클리 스크롤 축 잠금 (대각선 스크롤 방지) ────────────────
+  const weeklyTouchRef = useRef({ x: 0, y: 0, locked: null });
+  const onWeeklyTouchStart = (e) => {
+    weeklyTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, locked: null };
+  };
+  const onWeeklyTouchMove = (e) => {
+    const t = weeklyTouchRef.current;
+    if (t.locked || !weeklyRef.current) return;
+    const dx = Math.abs(e.touches[0].clientX - t.x);
+    const dy = Math.abs(e.touches[0].clientY - t.y);
+    if (dx < 8 && dy < 8) return; // 방향이 정해질 때까지 대기
+    t.locked = dx > dy ? 'x' : 'y';
+    if (t.locked === 'x') weeklyRef.current.style.overflowY = 'hidden';
+    else weeklyRef.current.style.overflowX = 'hidden';
+  };
+  const onWeeklyTouchEnd = () => {
+    if (weeklyRef.current) {
+      weeklyRef.current.style.overflowX = '';
+      weeklyRef.current.style.overflowY = '';
+    }
+    weeklyTouchRef.current.locked = null;
+  };
+
   // ── 위클리 뷰 렌더 (시간 그리드) ─────────────────────────────
   const renderWeeklyView = () => {
     const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
     const hours = Array.from({ length: 24 }, (_, i) => i);
 
     return (
-      <div className="weekly-container" ref={weeklyRef}>
+      <div
+        className="weekly-container"
+        ref={weeklyRef}
+        onTouchStart={onWeeklyTouchStart}
+        onTouchMove={onWeeklyTouchMove}
+        onTouchEnd={onWeeklyTouchEnd}
+      >
         <div className="weekly-grid-wrap">
           {/* 좌측 시간 라벨 */}
           <div className="weekly-hours-col">
@@ -2117,7 +2149,7 @@ function App() {
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            autoFocus
+            autoFocus={!IS_TOUCH_DEVICE}
           />
           <button className="send-btn" onClick={handleAddMemo} disabled={!inputText.trim()}>
             <Send size={18} />
