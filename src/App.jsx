@@ -240,6 +240,78 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
   );
 }
 
+// ── 하루치 블록 구간 계산 (스케줄 뷰와 위클리 뷰가 함께 쓴다) ──
+// 기본은 30분짜리 짧은 블록. 자동으로 이어 붙이면 실제보다 오래 한 것처럼 보여
+// 부담을 주기 때문에, 앞뒤로 늘리는 건 기록마다 켜는 선택제다.
+const MIN_BLOCK_MINUTES = 30;
+
+function buildDayBlocks(sortedMemos, { dayStartMs, nowMs, gridMinutes }) {
+  const posOf = (iso) => (new Date(iso).getTime() - dayStartMs) / 60000;
+  const blocks = [];
+
+  for (let i = 0; i < sortedMemos.length; i++) {
+    const memo = sortedMemos[i];
+    const prevMemo = sortedMemos[i - 1];
+    const nextMemo = sortedMemos[i + 1];
+    const spansNext = !!memo.spansToNext;
+    const spansPrev = !!memo.spansFromPrev;
+    const backMin = Math.max(0, memo.backMinutes || 0);
+
+    const ownPos = posOf(memo.recordedAt);
+    const prevPos = prevMemo ? posOf(prevMemo.recordedAt) : null;
+    const nextPos = nextMemo ? posOf(nextMemo.recordedAt) : null;
+
+    // 시작 — 끝나고 남긴 기록은 이전 기록 시각부터.
+    // 시작 시각을 직접 고쳤으면(backMinutes) 그 값이 우선한다.
+    const startsEarlier = spansPrev || backMin > 0;
+    let startPos = ownPos;
+    if (backMin > 0) {
+      startPos = ownPos - backMin;
+    } else if (spansPrev) {
+      startPos = prevPos !== null ? prevPos : ownPos - MIN_BLOCK_MINUTES;
+    }
+    if (startsEarlier) {
+      // 새벽(00:00~01:59) 기록은 밤의 마지막으로 보고 그 너머까지 거슬러 올라가지 않는다
+      if (ownPos >= 120 && startPos < 120) startPos = 120;
+      if (startPos > ownPos) startPos = ownPos;
+    }
+
+    // 끝 — '다음 기록까지'를 켜면 다음 기록 시각(없으면 지금)까지 늘어난다
+    let endPos;
+    if (spansNext) {
+      if (nextPos !== null) {
+        endPos = nextPos;
+      } else {
+        const nowPosInDay = (nowMs - dayStartMs) / 60000;
+        endPos = (nowPosInDay > ownPos && nowPosInDay < gridMinutes)
+          ? nowPosInDay
+          : ownPos + MIN_BLOCK_MINUTES;
+      }
+      // 새벽 기록이 새벽 2시를 넘겨 이어지지 않게 자른다
+      const dawnCutoff = ownPos < 120 ? 120 : (ownPos >= 1440 && ownPos < gridMinutes ? gridMinutes : null);
+      if (dawnCutoff !== null && endPos > dawnCutoff) endPos = dawnCutoff;
+    } else if (startsEarlier) {
+      endPos = ownPos; // 끝나고 남긴 기록이므로 이 기록 시각에서 끝난다
+    } else {
+      // 다음 기록이 30분 안에 있으면 겹치지 않게 거기까지만
+      endPos = ownPos + MIN_BLOCK_MINUTES;
+      if (nextPos !== null && nextPos > ownPos) endPos = Math.min(endPos, nextPos);
+    }
+
+    if (endPos < startPos) endPos = startPos;
+    startPos = Math.max(startPos, 0);
+    endPos = Math.min(endPos, gridMinutes);
+
+    blocks.push({
+      memo, prevMemo, nextMemo,
+      startPos, endPos, ownPos,
+      spansNext, spansPrev, backMin, startsEarlier,
+      isCarry: ownPos >= 1440, // 다음날 새벽 기록 (흐리게)
+    });
+  }
+  return blocks;
+}
+
 // ── 메인 앱 ───────────────────────────────────────────────────
 function App() {
   // 비밀번호 재설정 링크로 들어왔는지 판별
@@ -335,89 +407,7 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // ── 위클리 뷰 열 때 선택한 날짜(가로)와 현재 시간(세로)으로 스크롤 ─
-  const weeklyRef = useRef(null);
-  useEffect(() => {
-    if (activeView !== 'weekly' || !weeklyRef.current) return;
-    const container = weeklyRef.current;
-    // 가로: 선택한 날짜 컬럼으로 (컬럼 너비 170px = CSS와 일치해야 함)
-    const dayIndex = Math.round((new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()).getTime() - startOfWeek(selectedDate).getTime()) / 86400000);
-    container.scrollLeft = Math.max(0, dayIndex * 170 - 20);
-    // 세로: 오늘이면 현재 시간, 아니면 오전 8시 근처로
-    const now = new Date();
-    const targetMin = isToday(selectedDate) ? now.getHours() * 60 + now.getMinutes() : 8 * 60;
-    container.scrollTop = Math.max(0, 60 + targetMin - container.clientHeight / 3);
-  }, [activeView, selectedDate]);
-
-  // ── 위클리 터치 스크롤: 축 고정 + 관성 (직접 처리로 헤더와 완전 동기화) ─
-  useEffect(() => {
-    if (activeView !== 'weekly' || !weeklyRef.current) return;
-    const el = weeklyRef.current;
-    let sx = 0, sy = 0, sl = 0, st = 0, locked = null;
-    let lastX = 0, lastY = 0, lastT = 0, vx = 0, vy = 0, raf = null;
-
-    const stopMomentum = () => { if (raf) cancelAnimationFrame(raf); raf = null; };
-
-    const onStart = (e) => {
-      stopMomentum();
-      const t = e.touches[0];
-      sx = lastX = t.clientX;
-      sy = lastY = t.clientY;
-      sl = el.scrollLeft;
-      st = el.scrollTop;
-      locked = null;
-      vx = vy = 0;
-      lastT = e.timeStamp;
-    };
-
-    const onMove = (e) => {
-      e.preventDefault(); // 브라우저 기본 스크롤 차단 — 아래에서 축 고정으로 직접 스크롤
-      const t = e.touches[0];
-      const dx = t.clientX - sx;
-      const dy = t.clientY - sy;
-      if (!locked) {
-        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
-        locked = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
-      }
-      const dt = Math.max(1, e.timeStamp - lastT);
-      if (locked === 'x') {
-        el.scrollLeft = sl - dx;
-        vx = (t.clientX - lastX) / dt;
-      } else {
-        el.scrollTop = st - dy;
-        vy = (t.clientY - lastY) / dt;
-      }
-      lastX = t.clientX;
-      lastY = t.clientY;
-      lastT = e.timeStamp;
-    };
-
-    const onEnd = () => {
-      const axis = locked;
-      let v = axis === 'x' ? vx : vy;
-      locked = null;
-      if (!axis || Math.abs(v) < 0.1) return;
-      // 관성 스크롤
-      const step = () => {
-        v *= 0.95;
-        if (Math.abs(v) < 0.02) { raf = null; return; }
-        if (axis === 'x') el.scrollLeft -= v * 16;
-        else el.scrollTop -= v * 16;
-        raf = requestAnimationFrame(step);
-      };
-      raf = requestAnimationFrame(step);
-    };
-
-    el.addEventListener('touchstart', onStart, { passive: true });
-    el.addEventListener('touchmove', onMove, { passive: false });
-    el.addEventListener('touchend', onEnd, { passive: true });
-    return () => {
-      stopMomentum();
-      el.removeEventListener('touchstart', onStart);
-      el.removeEventListener('touchmove', onMove);
-      el.removeEventListener('touchend', onEnd);
-    };
-  }, [activeView]);
+  // 위클리는 스크롤이 없어(7일 × 하루 전체가 한 화면) 자동 스크롤/터치 처리도 필요 없다
 
   // ── 스케줄(타임로그) 뷰 열 때 현재 시간 위치로 자동 스크롤 ───
   const scheduleViewRef = useRef(null);
@@ -1524,118 +1514,144 @@ function App() {
   const weekTitle = `${format(weekStart, 'M월 d일', { locale: ko })} ~ ${format(endOfWeek(selectedDate), 'M월 d일', { locale: ko })}`;
   const memoGroups = groupMemosByHour(timelineMemos);
 
-  // ── 위클리 뷰 렌더 (시간 그리드) ─────────────────────────────
-  // 가로 스크롤(.weekly-hscroll)과 세로 스크롤(.weekly-vscroll)을 분리해
-  // 대각선 스크롤이 발생하지 않고, 날짜 헤더는 상단에 고정됨
+  // ── 위클리 뷰 렌더 (한 주의 '모양'을 보는 곳) ────────────────
+  // 글자를 읽는 곳이 아니라 리듬을 보는 곳이다. 색 띠만 그리므로 하루 칸이 좁아도 되고,
+  // 7일 × 하루 전체가 스크롤 없이 한 화면에 들어간다. 내용이 궁금하면 탭해서 그 날로 간다.
   const WEEKLY_GRID_MINUTES = 26 * 60; // 다음날 새벽 02:00까지
 
   const renderWeeklyView = () => {
     const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-    const hours = Array.from({ length: 26 }, (_, i) => i);
+
+    // 기록이 있는 시간대만 보여준다 (새벽 빈 구간을 매번 볼 이유가 없다)
+    let minPos = 7 * 60;
+    let maxPos = 23 * 60;
+    for (const m of memos) {
+      for (const day of days) {
+        const ds = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+        const p = (new Date(m.recordedAt).getTime() - ds) / 60000;
+        if (p >= 0 && p < WEEKLY_GRID_MINUTES) {
+          minPos = Math.min(minPos, Math.floor(p / 60) * 60);
+          maxPos = Math.max(maxPos, Math.ceil(p / 60) * 60);
+        }
+      }
+    }
+    const rangeStart = Math.max(0, minPos - 60);
+    const rangeEnd = Math.min(WEEKLY_GRID_MINUTES, maxPos + 60);
+    const rangeMin = Math.max(60, rangeEnd - rangeStart);
+    const pct = (pos) => ((pos - rangeStart) / rangeMin) * 100;
+    // 눈금은 2시간마다 (칸이 좁아 매시간은 빽빽하다)
+    const labelHours = [];
+    for (let h = Math.ceil(rangeStart / 120) * 2; h * 60 <= rangeEnd; h += 2) labelHours.push(h);
 
     return (
-      <div className="weekly-container" ref={weeklyRef}>
-        <div className="weekly-grid-wrap">
-          {/* 좌측 시간 라벨 (가로 스크롤 시 고정) */}
+      <div className="weekly-container">
+        <div className="weekly-board">
+          {/* 좌측 시간 눈금 */}
           <div className="weekly-hours-col">
-            <div className="weekly-corner" />
-            <div style={{ height: '5px' }} />
-            {hours.map(h => (
-              <div key={h} className="weekly-hour-label" style={h >= 24 ? { opacity: 0.4 } : undefined}>
-                {(h % 24).toString().padStart(2, '0')}:00
-              </div>
-            ))}
-            <div className="weekly-hour-label" style={{ height: 0, opacity: 0.4 }}>02:00</div>
+            <div className="weekly-day-header weekly-corner" />
+            <div className="weekly-hours-track">
+              {labelHours.map(h => (
+                <div
+                  key={h}
+                  className="weekly-hour-label"
+                  style={{ top: `${pct(h * 60)}%`, opacity: h >= 24 ? 0.4 : undefined }}
+                >
+                  {(h % 24).toString().padStart(2, '0')}시
+                </div>
+              ))}
+            </div>
           </div>
 
           {days.map(day => {
-                  const isDayToday = isToday(day);
-                  const dayStartTime = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
-                  const posOf = (iso) => (new Date(iso).getTime() - dayStartTime) / 60000;
-                  const nowInDay = (nowTime.getTime() - dayStartTime) / 60000;
+            const isDayToday = isToday(day);
+            const dayStartTime = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+            const posOf = (iso) => (new Date(iso).getTime() - dayStartTime) / 60000;
+            const nowInDay = (nowTime.getTime() - dayStartTime) / 60000;
 
-                  // 해당 날짜 00:00 ~ 다음날 02:00 사이의 메모 (다음날 새벽은 흐리게)
-                  const windowMemos = memos
-                    .filter(m => { const p = posOf(m.recordedAt); return p >= 0 && p < WEEKLY_GRID_MINUTES; })
-                    .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+            // 해당 날짜 00:00 ~ 다음날 02:00 사이의 메모 (다음날 새벽은 흐리게)
+            const windowMemos = memos
+              .filter(m => { const p = posOf(m.recordedAt); return p >= 0 && p < WEEKLY_GRID_MINUTES; })
+              .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
 
-                  const blocks = [];
-                  for (let i = 0; i < windowMemos.length; i++) {
-                    const cur = windowMemos[i];
-                    const next = windowMemos[i + 1];
-                    const startPos = posOf(cur.recordedAt);
-                    let endPos = next
-                      ? posOf(next.recordedAt)
-                      : (nowInDay > startPos && nowInDay < WEEKLY_GRID_MINUTES ? nowInDay : startPos);
-                    let isSingle = false;
-                    const dawnCutoff = startPos < 120 ? 120 : (startPos >= 1440 ? WEEKLY_GRID_MINUTES : null);
-                    if (dawnCutoff !== null && endPos > dawnCutoff) {
-                      endPos = startPos;
-                      isSingle = true;
-                    }
-                    endPos = Math.min(endPos, WEEKLY_GRID_MINUTES);
-                    blocks.push({ memo: cur, startPos, endPos, isLast: !next, isSingle, isCarry: startPos >= 1440 });
-                  }
+            // 스케줄 뷰와 똑같은 규칙으로 구간을 만든다
+            const blocks = buildDayBlocks(windowMemos, {
+              dayStartMs: dayStartTime,
+              nowMs: nowTime.getTime(),
+              gridMinutes: WEEKLY_GRID_MINUTES,
+            });
 
-                  return (
-                    <div key={day.toISOString()} className={`weekly-day-col ${isDayToday ? 'weekly-day-today' : ''}`}>
+            // 겹치는 띠는 좌우로 나눈다 (글자가 없으므로 좁아도 읽힌다)
+            const ordered = [...blocks].sort((a, b) => a.startPos - b.startPos || a.endPos - b.endPos);
+            let group = [];
+            let groupEnd = -Infinity;
+            const closeGroup = () => {
+              if (!group.length) return;
+              const colEnds = [];
+              for (const s of group) {
+                let ci = colEnds.findIndex(end => end <= s.startPos);
+                if (ci === -1) { ci = colEnds.length; colEnds.push(s.endPos); }
+                else colEnds[ci] = s.endPos;
+                s.col = ci;
+              }
+              for (const s of group) s.colCount = colEnds.length;
+              group = [];
+            };
+            for (const s of ordered) {
+              if (s.startPos >= groupEnd) { closeGroup(); groupEnd = s.endPos; }
+              else groupEnd = Math.max(groupEnd, s.endPos);
+              group.push(s);
+            }
+            closeGroup();
+
+            return (
+              <div
+                key={day.toISOString()}
+                className={`weekly-day-col ${isDayToday ? 'weekly-day-today' : ''}`}
+                onClick={() => { setSelectedDate(day); setActiveView('timeline'); setShowScheduleView(true); }}
+                title={`${format(day, 'M월 d일', { locale: ko })} 자세히 보기`}
+              >
+                <div className="weekly-day-header">
+                  <span className="weekly-day-date">{format(day, 'd')}</span>
+                  <span className="weekly-day-name">{format(day, 'E', { locale: ko })}</span>
+                </div>
+                <div className={`weekly-day-grid ${isDayToday ? 'weekly-day-grid-today' : ''}`}>
+                  {labelHours.map(h => (
+                    <div key={h} className="weekly-hour-line" style={{ top: `${pct(h * 60)}%` }} />
+                  ))}
+                  {isDayToday && nowInDay >= rangeStart && nowInDay <= rangeEnd && (
+                    <div className="weekly-now-line" style={{ top: `${pct(nowInDay)}%` }} />
+                  )}
+                  {blocks.map(b => {
+                    const memo = b.memo;
+                    const habitMatch = (memo.color || 'default') === 'default' ? habitMatchFor(memo.content, memo.recordedAt) : null;
+                    const bg = habitMatch
+                      ? `var(--habit-${habitMatch.color})`
+                      : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#ececf2');
+                    const border = habitMatch
+                      ? (HABIT_BORDER[habitMatch.color] || '#d8d8e4')
+                      : (COLOR_BORDER[memo.color || 'default'] || '#d8d8e4');
+                    const colCount = b.colCount || 1;
+                    const col = b.col || 0;
+                    return (
                       <div
-                        className="weekly-day-header"
-                        onClick={() => { setSelectedDate(day); setActiveView('timeline'); }}
-                        title="타임라인으로 이동"
-                      >
-                        <span className="weekly-day-date">{format(day, 'd')}</span>
-                        <span className="weekly-day-name">{format(day, 'E', { locale: ko })}</span>
-                      </div>
-                      <div className={`weekly-day-grid ${isDayToday ? 'weekly-day-grid-today' : ''}`}>
-                        {isDayToday && nowInDay >= 0 && nowInDay < WEEKLY_GRID_MINUTES && (
-                          <div className="schedule-now-line" style={{ top: `${(nowInDay / WEEKLY_GRID_MINUTES) * 100}%`, left: '2px' }} />
-                        )}
-                        {blocks.map(b => {
-                          const duration = b.endPos - b.startPos;
-                          const memo = b.memo;
-                          const habitMatch = (memo.color || 'default') === 'default' ? habitMatchFor(memo.content, memo.recordedAt) : null;
-                          const bg = habitMatch
-                            ? `var(--habit-${habitMatch.color})`
-                            : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb');
-                          const border = habitMatch
-                            ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
-                            : (COLOR_BORDER[memo.color || 'default'] || '#e8e8f0');
-                          // 짧은 블록(단일 기록)은 시간+내용을 한 줄로 두고 넘치면 …으로 자른다.
-                          // 긴 블록은 여러 줄을 쓰되, 들어갈 수 있는 줄 수만큼만 보여준다.
-                          const WEEKLY_MIN_PX = 38;
-                          const blockPx = Math.max(duration, WEEKLY_MIN_PX);
-                          const isCompact = blockPx < 46;
-                          // 위아래 패딩 8 + 시간줄 10 + 간격 2를 뺀 나머지를 줄 높이(15.6px)로 나눈다
-                          const contentLines = Math.max(1, Math.floor((blockPx - 20) / 15.6));
-                          return (
-                            <div
-                              key={memo.id}
-                              className={`weekly-block${isCompact ? ' weekly-block--compact' : ''}`}
-                              onClick={() => openContentEditor(memo)}
-                              style={{
-                                top: `${(b.startPos / WEEKLY_GRID_MINUTES) * 100}%`,
-                                height: `${(duration / WEEKLY_GRID_MINUTES) * 100}%`,
-                                backgroundColor: bg,
-                                borderColor: border,
-                                opacity: b.isCarry ? 0.45 : 1,
-                                minHeight: `${WEEKLY_MIN_PX}px`
-                              }}
-                            >
-                              <div className="weekly-block-time">{format(new Date(memo.recordedAt), 'HH:mm')}</div>
-                              <div
-                                className="weekly-block-content"
-                                style={isCompact ? undefined : { WebkitLineClamp: contentLines }}
-                              >
-                                {memo.content}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
+                        key={memo.id}
+                        className="weekly-band"
+                        style={{
+                          top: `${pct(b.startPos)}%`,
+                          height: `${Math.max(0, pct(b.endPos) - pct(b.startPos))}%`,
+                          left: `${(col / colCount) * 100}%`,
+                          width: `calc(${100 / colCount}% - 1px)`,
+                          backgroundColor: bg,
+                          borderColor: border,
+                          opacity: b.isCarry ? 0.45 : 1,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -1652,65 +1668,14 @@ function App() {
     const gridMinutes = gridHours * 60;
     const schedules = [];
 
-    // 기본은 30분짜리 짧은 블록.
-    // '다음 기록까지 이어서 표시'(spansToNext)를 켠 기록만 다음 기록까지 길게 늘어난다.
-    // 자동으로 이어 붙이면 실제보다 오래 한 것처럼 보여 부담을 주기 때문에 선택제로 둔다.
-    const MIN_BLOCK_MINUTES = 30;
+    const dayBlocks = buildDayBlocks(sortedMemos, {
+      dayStartMs, nowMs: nowTime.getTime(), gridMinutes,
+    });
 
-    for (let i = 0; i < sortedMemos.length; i++) {
-      const currentMemo = sortedMemos[i];
-      const prevMemo = sortedMemos[i - 1];
-      const nextMemo = sortedMemos[i + 1];
-      const spansNext = !!currentMemo.spansToNext;
-      const spansPrev = !!currentMemo.spansFromPrev;
-      const backMin = Math.max(0, currentMemo.backMinutes || 0);
-
+    for (const b of dayBlocks) {
+      const { memo: currentMemo, prevMemo, nextMemo, startPos, endPos, ownPos } = b;
+      const { spansNext, spansPrev, backMin, startsEarlier } = b;
       const ownTime = new Date(currentMemo.recordedAt);
-      const ownPos = minutesFromDayStart(currentMemo.recordedAt);
-      const prevPos = prevMemo ? minutesFromDayStart(prevMemo.recordedAt) : null;
-      const nextPos = nextMemo ? minutesFromDayStart(nextMemo.recordedAt) : null;
-
-      // 시작 — 끝나고 남긴 기록은 이전 기록 시각부터.
-      // 시작 시각을 직접 고쳤으면(backMinutes) 그 값이 우선한다.
-      const startsEarlier = spansPrev || backMin > 0;
-      let startPos = ownPos;
-      if (backMin > 0) {
-        startPos = ownPos - backMin;
-      } else if (spansPrev) {
-        startPos = prevPos !== null ? prevPos : ownPos - MIN_BLOCK_MINUTES;
-      }
-      if (startsEarlier) {
-        // 새벽(00:00~01:59) 기록은 밤의 마지막으로 보고 그 너머까지 거슬러 올라가지 않는다
-        if (ownPos >= 120 && startPos < 120) startPos = 120;
-        if (startPos > ownPos) startPos = ownPos;
-      }
-
-      // 끝 — '다음 기록까지'를 켜면 다음 기록 시각(없으면 지금)까지 늘어난다
-      let endPos;
-      if (spansNext) {
-        if (nextPos !== null) {
-          endPos = nextPos;
-        } else {
-          // 마지막 기록이면 지금까지 진행 중으로 표시
-          const nowPosInDay = (nowTime.getTime() - dayStartMs) / 60000;
-          endPos = (nowPosInDay > ownPos && nowPosInDay < gridMinutes)
-            ? nowPosInDay
-            : ownPos + MIN_BLOCK_MINUTES;
-        }
-        // 새벽 기록이 새벽 2시를 넘겨 이어지지 않게 자른다
-        const dawnCutoff = ownPos < 120 ? 120 : (ownPos >= 1440 && ownPos < 1560 ? 1560 : null);
-        if (dawnCutoff !== null && endPos > dawnCutoff) endPos = dawnCutoff;
-      } else if (startsEarlier) {
-        endPos = ownPos; // 끝나고 남긴 기록이므로 이 기록 시각에서 끝난다
-      } else {
-        // 다음 기록이 30분 안에 있으면 겹치지 않게 거기까지만
-        endPos = ownPos + MIN_BLOCK_MINUTES;
-        if (nextPos !== null && nextPos > ownPos) endPos = Math.min(endPos, nextPos);
-      }
-
-      if (endPos < startPos) endPos = startPos;
-      startPos = Math.max(startPos, 0);
-      endPos = Math.min(endPos, gridMinutes);
       const startTime = new Date(dayStartMs + startPos * 60000);
       const endTime = new Date(dayStartMs + endPos * 60000);
 
