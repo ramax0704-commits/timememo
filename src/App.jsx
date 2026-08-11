@@ -1723,10 +1723,29 @@ function App() {
     const MIN_COMPACT_PX = 34 + BLOCK_GAP_PX;
     const minPxFor = (s) => (s.isCompact ? MIN_COMPACT_PX : MIN_BLOCK_PX);
 
-    // 1) 시간이 겹치는 블록끼리 묶는다
     const ordered = [...schedules].sort((a, b) => a.startPos - b.startPos || a.endPos - b.endPos);
-    const clusters = [];
+
+    // 1) 긴 블록 '안에' 완전히 들어가는 짧은 기록은 따로 뺀다.
+    //    (예: 09:20~12:30 일하는 중에 11:13에 남긴 결제 기록)
+    //    이런 건 겹친 게 아니라 그 시간 안에 일어난 일이므로, 아래로 밀어내면
+    //    11:13 기록이 12시 넘어서 그려져 시각이 어긋난다. 위에 얹어서 제자리에 둔다.
     for (const s of ordered) {
+      let host = null;
+      for (const a of ordered) {
+        if (a === s) continue;
+        const inside = a.startPos < s.startPos && s.endPos <= a.endPos;
+        const longer = (a.endPos - a.startPos) > (s.endPos - s.startPos);
+        if (!inside || !longer) continue;
+        // 가장 가까이 감싸는 블록을 고른다
+        if (!host || (a.endPos - a.startPos) < (host.endPos - host.startPos)) host = a;
+      }
+      s.host = host;
+    }
+    const outerBlocks = ordered.filter(s => !s.host);
+
+    // 2) 시간이 겹치는 (감싸이지 않은) 블록끼리 묶는다
+    const clusters = [];
+    for (const s of outerBlocks) {
       const last = clusters[clusters.length - 1];
       if (last && s.startPos < last.end) {
         last.end = Math.max(last.end, s.endPos);
@@ -1736,12 +1755,25 @@ function App() {
       }
     }
 
-    // 2) 쌓는 데 필요한 높이가 실제 시간 길이보다 크면 그만큼 구간을 늘린다
+    // 3) 쌓는 데 필요한 높이가 실제 시간 길이보다 크면 그만큼 구간을 늘린다.
+    //    감싸는 블록은 안쪽 기록들이 다 들어갈 만큼도 확보해야 한다.
+    const innerOf = (host) => ordered.filter(s => s.host === host);
+    const innerNeedPx = (host) => {
+      let y = 0;
+      for (const s of innerOf(host)) {
+        y = Math.max(y, (s.startPos - host.startPos) * PX_PER_MIN) + minPxFor(s);
+      }
+      return y;
+    };
+    const slotPxFor = (s) => Math.max(
+      minPxFor(s),
+      (s.endPos - s.startPos) * PX_PER_MIN,
+      innerNeedPx(s)
+    );
+
     const expansions = [];
     for (const c of clusters) {
-      c.needPx = c.items.reduce(
-        (sum, s) => sum + Math.max(minPxFor(s), (s.endPos - s.startPos) * PX_PER_MIN), 0
-      );
+      c.needPx = c.items.reduce((sum, s) => sum + slotPxFor(s), 0);
       const naturalPx = (c.end - c.start) * PX_PER_MIN;
       if (c.needPx > naturalPx) expansions.push({ from: c.start, to: c.end, extra: c.needPx - naturalPx });
     }
@@ -1761,10 +1793,25 @@ function App() {
     for (const c of clusters) {
       let y = timeToPx(c.start);
       for (const s of c.items) {
-        const slot = Math.max(minPxFor(s), (s.endPos - s.startPos) * PX_PER_MIN);
+        const slot = slotPxFor(s);
         s.top = y;
         s.height = slot - BLOCK_GAP_PX; // 아래 여백만큼 덜 그려서 어디서나 같은 간격이 되게
         y += slot;
+      }
+    }
+
+    // 5) 감싸인 기록은 감싸는 블록 위에, 자기 시각 자리에 얹는다
+    for (const host of outerBlocks) {
+      const inner = innerOf(host);
+      if (!inner.length) continue;
+      let y = host.top;
+      for (const s of inner) {
+        const slot = minPxFor(s);
+        // 자기 시각 자리에 두되, 앞의 안쪽 기록과 겹치면 그만큼만 내린다
+        s.top = Math.max(host.top + (s.startPos - host.startPos) * PX_PER_MIN, y);
+        s.height = slot - BLOCK_GAP_PX;
+        s.isInner = true;
+        y = s.top + slot;
       }
     }
 
@@ -1820,7 +1867,7 @@ function App() {
               return (
                 <div
                   key={idx}
-                  className={`schedule-block${isCompact ? ' schedule-block--compact' : ''}`}
+                  className={`schedule-block${isCompact ? ' schedule-block--compact' : ''}${schedule.isInner ? ' schedule-block--inner' : ''}`}
                   onClick={() => openScheduleDetail(schedule)}
                   style={{
                     top: `${schedule.top}px`,
