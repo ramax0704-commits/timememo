@@ -673,7 +673,7 @@ body {
   flex-direction: column;
   gap: 4px;
   box-sizing: border-box;
-  min-height: 48px;
+  overflow: hidden; /* 높이는 JS가 정확히 계산하므로 넘치면 잘라낸다 */
 }
 
 /* 이어지지 않은 짧은 블록: 시간과 내용을 한 줄로 붙여 낮은 높이에 맞춘다 */
@@ -682,7 +682,6 @@ body {
   align-items: baseline;
   gap: 6px;
   padding: 6px 8px;
-  min-height: 34px; /* App.jsx의 MIN_COMPACT_PX와 일치 */
 }
 
 .schedule-block--compact .schedule-block-time {

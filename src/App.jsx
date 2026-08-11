@@ -1741,9 +1741,11 @@ function App() {
     const PX_PER_MIN = 1;
     // 최소 높이는 CSS의 min-height와 일치시켜야 겹치지 않는다.
     // 한 줄짜리(시간+내용 인라인, 넘치면 …으로 잘림)는 낮게, 두 줄짜리는 그대로.
-    const MIN_BLOCK_PX = 48;
-    const MIN_COMPACT_PX = 34;
-    const BLOCK_GAP_PX = 4;
+    // 블록끼리의 간격은 자리(slot)에서 아래 여백을 떼는 방식으로 준다.
+    // 쌓인 블록 사이에만 간격을 넣으면 시간대가 다른 이웃과 규칙이 달라져 들쭉날쭉해 보인다.
+    const BLOCK_GAP_PX = 2;
+    const MIN_BLOCK_PX = 48 + BLOCK_GAP_PX;
+    const MIN_COMPACT_PX = 34 + BLOCK_GAP_PX;
     const minPxFor = (s) => (s.isCompact ? MIN_COMPACT_PX : MIN_BLOCK_PX);
 
     // 1) 시간이 겹치는 블록끼리 묶는다
@@ -1764,7 +1766,7 @@ function App() {
     for (const c of clusters) {
       c.needPx = c.items.reduce(
         (sum, s) => sum + Math.max(minPxFor(s), (s.endPos - s.startPos) * PX_PER_MIN), 0
-      ) + BLOCK_GAP_PX * (c.items.length - 1);
+      );
       const naturalPx = (c.end - c.start) * PX_PER_MIN;
       if (c.needPx > naturalPx) expansions.push({ from: c.start, to: c.end, extra: c.needPx - naturalPx });
     }
@@ -1784,9 +1786,10 @@ function App() {
     for (const c of clusters) {
       let y = timeToPx(c.start);
       for (const s of c.items) {
+        const slot = Math.max(minPxFor(s), (s.endPos - s.startPos) * PX_PER_MIN);
         s.top = y;
-        s.height = Math.max(minPxFor(s), (s.endPos - s.startPos) * PX_PER_MIN);
-        y += s.height + BLOCK_GAP_PX;
+        s.height = slot - BLOCK_GAP_PX; // 아래 여백만큼 덜 그려서 어디서나 같은 간격이 되게
+        y += slot;
       }
     }
 
