@@ -1601,12 +1601,17 @@ function App() {
                           const border = habitMatch
                             ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
                             : (COLOR_BORDER[memo.color || 'default'] || '#e8e8f0');
-                          const showTime = duration >= 60;
-                          const showContent = duration >= 30 || b.isLast || b.isSingle;
+                          // 짧은 블록(단일 기록)은 시간+내용을 한 줄로 두고 넘치면 …으로 자른다.
+                          // 긴 블록은 여러 줄을 쓰되, 들어갈 수 있는 줄 수만큼만 보여준다.
+                          const WEEKLY_MIN_PX = 38;
+                          const blockPx = Math.max(duration, WEEKLY_MIN_PX);
+                          const isCompact = blockPx < 46;
+                          // 위아래 패딩 8 + 시간줄 10 + 간격 2를 뺀 나머지를 줄 높이(15.6px)로 나눈다
+                          const contentLines = Math.max(1, Math.floor((blockPx - 20) / 15.6));
                           return (
                             <div
                               key={memo.id}
-                              className="weekly-block"
+                              className={`weekly-block${isCompact ? ' weekly-block--compact' : ''}`}
                               onClick={() => openContentEditor(memo)}
                               style={{
                                 top: `${(b.startPos / WEEKLY_GRID_MINUTES) * 100}%`,
@@ -1614,11 +1619,16 @@ function App() {
                                 backgroundColor: bg,
                                 borderColor: border,
                                 opacity: b.isCarry ? 0.45 : 1,
-                                minHeight: (showTime || showContent) ? '38px' : 'auto'
+                                minHeight: `${WEEKLY_MIN_PX}px`
                               }}
                             >
-                              {showTime && <div className="weekly-block-time">{format(new Date(memo.recordedAt), 'HH:mm')}</div>}
-                              {showContent && <div className="weekly-block-content">{memo.content}</div>}
+                              <div className="weekly-block-time">{format(new Date(memo.recordedAt), 'HH:mm')}</div>
+                              <div
+                                className="weekly-block-content"
+                                style={isCompact ? undefined : { WebkitLineClamp: contentLines }}
+                              >
+                                {memo.content}
+                              </div>
                             </div>
                           );
                         })}
