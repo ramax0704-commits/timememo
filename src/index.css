@@ -735,73 +735,40 @@ body {
   margin-bottom: 16px;
 }
 
-/* 끝나고 남긴 기록의 소요 시간 선택 */
-.schedule-duration {
-  padding: 14px;
-  margin: 4px 0 10px;
-  background: #f7f7fa;
+/* 시작 시각 직접 조절 (이전 기록이 실제 시작보다 훨씬 이를 때) */
+.schedule-start-adjust {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+  margin: -8px 0 16px;
+  background: #f2f2f7;
   border-radius: 12px;
 }
 
-.schedule-duration-label {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-bottom: 10px;
-}
-
-.schedule-duration-label strong {
-  font-size: 0.9rem;
+.schedule-start-adjust-label {
+  font-size: 0.82rem;
   font-weight: 600;
   color: var(--text-main);
 }
 
-.schedule-duration-label small {
+.schedule-start-adjust .time-input {
+  width: 60px;
+}
+
+.schedule-start-reset {
+  margin-left: auto;
+  padding: 6px 10px;
   font-size: 0.78rem;
-  color: #8a8a99;
-  line-height: 1.4;
-}
-
-.schedule-duration-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.schedule-duration-chip {
-  flex: 1 1 auto;
-  min-width: 62px;
-  padding: 8px 10px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--text-main);
+  color: var(--primary, #4a6cf7);
   background: white;
   border: 1px solid #e2e2ea;
   border-radius: 8px;
   cursor: pointer;
 }
 
-.schedule-duration-chip.active {
-  background: var(--primary, #4a6cf7);
-  border-color: var(--primary, #4a6cf7);
-  color: white;
-  font-weight: 600;
-}
-
-.schedule-duration-custom {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  font-size: 0.82rem;
-  color: #8a8a99;
-}
-
-.schedule-duration-custom .time-input {
-  width: 72px;
-}
-
-/* 다음 기록까지 이어서 표시 스위치 */
+/* 이어서 표시 스위치 */
 .schedule-span-toggle {
   display: flex;
   align-items: flex-start;
