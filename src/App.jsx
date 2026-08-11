@@ -236,9 +236,14 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
 
 // ── 메인 앱 ───────────────────────────────────────────────────
 function App() {
-  // URL 파라미터 (비밀번호 재설정 페이지)
+  // 비밀번호 재설정 링크로 들어왔는지 판별
+  // Site URL 설정에 따라 ?mode=resetPassword 쿼리가 유실될 수 있으므로
+  // Supabase가 붙여주는 해시(type=recovery)와 PASSWORD_RECOVERY 이벤트로도 감지한다
   const urlParams = new URLSearchParams(window.location.search);
-  const [urlMode] = useState(urlParams.get('mode'));
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const [isRecovery, setIsRecovery] = useState(
+    urlParams.get('mode') === 'resetPassword' || hashParams.get('type') === 'recovery'
+  );
 
   // Global States
   const [memos, setMemos] = useState([]);
@@ -475,7 +480,9 @@ function App() {
       setCurrentUser(session?.user ?? null);
       setAuthLoading(false);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // 재설정 링크 클릭 시 임시 로그인되므로, 홈이 아니라 새 비밀번호 화면을 띄운다
+      if (event === 'PASSWORD_RECOVERY') setIsRecovery(true);
       setCurrentUser(session?.user ?? null);
       if (!session?.user) setMemos([]);
       setAuthLoading(false);
@@ -757,7 +764,7 @@ function App() {
     setSubmittingAuth(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
-        redirectTo: `${window.location.origin}?mode=resetPassword`
+        redirectTo: `${window.location.origin}/?mode=resetPassword`
       });
       if (error) throw error;
       setForgotEmailSent(true);
@@ -1659,7 +1666,7 @@ function App() {
   };
 
   // ── 비밀번호 재설정 페이지 (이메일 링크로 접근) ───────────────
-  if (urlMode === 'resetPassword') {
+  if (isRecovery) {
     return (
       <div className="app-container auth-wrapper">
         <div className="auth-card">
@@ -1679,7 +1686,11 @@ function App() {
               <button
                 type="button"
                 className="btn-save auth-submit-btn"
-                onClick={() => window.location.href = '/'}
+                onClick={async () => {
+                  // 재설정 링크의 임시 세션을 끊고 새 비밀번호로 다시 로그인하게 한다
+                  await supabase.auth.signOut();
+                  window.location.href = '/';
+                }}
                 style={{ marginTop: '16px' }}
               >
                 로그인 페이지로 이동
