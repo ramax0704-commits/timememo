@@ -310,7 +310,45 @@ body {
 }
 .input-field::placeholder { color: #aaaaaa; }
 
+/* 전송 버튼: 누른 채 위/아래로 끌면 이어서 표시 방식이 바뀐다 */
+.send-wrap {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+}
+
+.send-hint {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: rgba(30, 30, 40, 0.92);
+  border-radius: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.send-hint-item {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.send-hint-item.active {
+  color: #fff;
+  font-weight: 700;
+}
+
+.send-btn--dragging {
+  transform: scale(1.08);
+}
+
 .send-btn {
+  touch-action: none; /* 끌어올릴 때 화면이 같이 스크롤되지 않게 */
   background-color: var(--primary-color);
   color: white;
   border: none;
@@ -629,10 +667,25 @@ body {
   padding: 14px 20px 4px;
 }
 
+/* 날짜(왼쪽) + 수입·지출(오른쪽)을 한 줄에 */
+.monthly-day-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
 .monthly-day-panel-title {
   font-size: 0.95rem;
   font-weight: 700;
-  margin-bottom: 10px;
+}
+
+.monthly-day-panel-money {
+  display: flex;
+  gap: 10px;
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 /* 시간 눈금선은 간격이 일정하지 않으므로 배경 대신 실제 요소로 그린다 */

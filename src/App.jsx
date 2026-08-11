@@ -409,6 +409,13 @@ function App() {
 
   // 위클리는 스크롤이 없어(7일 × 하루 전체가 한 화면) 자동 스크롤/터치 처리도 필요 없다
 
+  // ── 먼슬리는 항상 달력부터 보이게 (스크롤 위치가 남아 기록 목록이 먼저 보이던 문제) ─
+  const monthlyRef = useRef(null);
+  useEffect(() => {
+    if (activeView !== 'monthly' || !monthlyRef.current) return;
+    monthlyRef.current.scrollTop = 0;
+  }, [activeView]);
+
   // ── 스케줄(타임로그) 뷰 열 때 현재 시간 위치로 자동 스크롤 ───
   const scheduleViewRef = useRef(null);
   useEffect(() => {
@@ -1045,7 +1052,8 @@ function App() {
   };
 
   // ── 메모 추가 ────────────────────────────────────────────────
-  const handleAddMemo = async (e) => {
+  // mode: 'single'(기본) | 'prev'(이전 기록부터) | 'next'(다음 기록까지)
+  const handleAddMemo = async (e, mode = 'single') => {
     e?.preventDefault();
     if (!inputText.trim() || !currentUser) return;
     const now = new Date();
@@ -1058,7 +1066,9 @@ function App() {
       user_id: currentUser.id,
       content: inputText,
       color: selectedColor,
-      recorded_at: now.toISOString()
+      recorded_at: now.toISOString(),
+      spans_from_prev: mode === 'prev',
+      spans_to_next: mode === 'next',
     };
     setInputText('');
     const { data, error } = await supabase.from('memos').insert(newMemoData).select().single();
@@ -1070,6 +1080,47 @@ function App() {
     // 바로 화면에 반영 (실시간 이벤트가 오면 중복은 무시됨)
     const memo = rowToMemo(data);
     setMemos(prev => prev.some(m => m.id === memo.id) ? prev : [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
+  };
+
+  // ── 전송 버튼 제스처 ─────────────────────────────────────────
+  // 짧게 누르면 단일 기록, 누른 채 위로 올리면 '이전 기록부터',
+  // 아래로 내리면 '다음 기록까지'로 저장한다.
+  const SEND_DRAG_THRESHOLD = 24;
+  const sendDragRef = useRef(null);
+  const [sendMode, setSendMode] = useState(null); // 누르고 있는 동안의 선택 표시
+
+  const modeFromDy = (dy) => {
+    if (dy <= -SEND_DRAG_THRESHOLD) return 'prev';
+    if (dy >= SEND_DRAG_THRESHOLD) return 'next';
+    return 'single';
+  };
+
+  const onSendPointerDown = (e) => {
+    if (!inputText.trim()) return;
+    sendDragRef.current = { startY: e.clientY, mode: 'single' };
+    setSendMode('single');
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
+  const onSendPointerMove = (e) => {
+    if (!sendDragRef.current) return;
+    const mode = modeFromDy(e.clientY - sendDragRef.current.startY);
+    if (mode !== sendDragRef.current.mode) {
+      sendDragRef.current.mode = mode;
+      setSendMode(mode);
+    }
+  };
+
+  const onSendPointerUp = () => {
+    const drag = sendDragRef.current;
+    sendDragRef.current = null;
+    setSendMode(null);
+    if (drag) handleAddMemo(null, drag.mode);
+  };
+
+  const onSendPointerCancel = () => {
+    sendDragRef.current = null;
+    setSendMode(null);
   };
 
   const handleKeyDown = (e) => {
@@ -1441,7 +1492,20 @@ function App() {
 
         {/* 선택한 날짜의 기록 (하단 패널) */}
         <div className="monthly-day-panel">
-          <div className="monthly-day-panel-title">{format(selectedDate, 'M월 d일 (E)', { locale: ko })}</div>
+          {/* 날짜는 왼쪽, 수입/지출은 같은 줄 오른쪽 */}
+          <div className="monthly-day-panel-head">
+            <span className="monthly-day-panel-title">{format(selectedDate, 'M월 d일 (E)', { locale: ko })}</span>
+            {(() => {
+              const d = monthlyData[format(selectedDate, 'yyyy-MM-dd')];
+              if (!d || (d.income <= 0 && d.expense <= 0)) return null;
+              return (
+                <span className="monthly-day-panel-money">
+                  {d.income > 0 && <span className="monthly-income">+{d.income.toLocaleString()}</span>}
+                  {d.expense > 0 && <span className="monthly-expense">-{d.expense.toLocaleString()}</span>}
+                </span>
+              );
+            })()}
+          </div>
           {(() => {
             const dateKey = format(selectedDate, 'yyyy-MM-dd');
             const dayData = monthlyData[dateKey];
@@ -1492,12 +1556,6 @@ function App() {
                         </div>
                       );
                     })}
-                  </div>
-                )}
-                {dayData && (dayData.income > 0 || dayData.expense > 0) && (
-                  <div style={{ display: 'flex', gap: '16px', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #f0f0f0', fontSize: '0.85rem' }}>
-                    {dayData.income > 0 && <span style={{ color: '#2563eb', fontWeight: '600' }}>수입 +{dayData.income.toLocaleString()}</span>}
-                    {dayData.expense > 0 && <span style={{ color: '#dc2626', fontWeight: '600' }}>지출 -{dayData.expense.toLocaleString()}</span>}
                   </div>
                 )}
               </>
@@ -2252,6 +2310,7 @@ function App() {
           /* ── 먼슬리 뷰 ── */
           <div
             className="monthly-container"
+            ref={monthlyRef}
             onScroll={handleCalendarScroll}
             style={{ pointerEvents: isCalendarScrolling ? 'none' : 'auto' }}
           >
@@ -2443,9 +2502,25 @@ function App() {
             onKeyDown={handleKeyDown}
             autoFocus={!IS_TOUCH_DEVICE}
           />
-          <button className="send-btn" onClick={handleAddMemo} disabled={!inputText.trim()}>
-            <Send size={18} />
-          </button>
+          <div className="send-wrap">
+            {sendMode && (
+              <div className="send-hint">
+                <span className={`send-hint-item ${sendMode === 'prev' ? 'active' : ''}`}>↑ 이전 기록부터</span>
+                <span className={`send-hint-item ${sendMode === 'single' ? 'active' : ''}`}>단일 기록</span>
+                <span className={`send-hint-item ${sendMode === 'next' ? 'active' : ''}`}>↓ 다음 기록까지</span>
+              </div>
+            )}
+            <button
+              className={`send-btn${sendMode && sendMode !== 'single' ? ' send-btn--dragging' : ''}`}
+              onPointerDown={onSendPointerDown}
+              onPointerMove={onSendPointerMove}
+              onPointerUp={onSendPointerUp}
+              onPointerCancel={onSendPointerCancel}
+              disabled={!inputText.trim()}
+            >
+              <Send size={18} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -2620,7 +2695,12 @@ function App() {
       <nav className="bottom-tab-bar">
         <button
           className={`tab-btn ${activeView === 'timeline' ? 'active' : ''}`}
-          onClick={() => setActiveView('timeline')}
+          onClick={() => {
+            // 이미 타임라인이면 한 번 더 누를 때 채팅형 ↔ 시간대별 전환
+            // (다른 탭에서 오면 첫 탭은 이동, 두 번째 탭부터 전환된다)
+            if (activeView === 'timeline') setShowScheduleView(v => !v);
+            else setActiveView('timeline');
+          }}
         >
           <Clock size={20} />
           <span>타임라인</span>
