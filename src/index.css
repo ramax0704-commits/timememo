@@ -682,6 +682,7 @@ body {
   align-items: baseline;
   gap: 6px;
   padding: 6px 8px;
+  min-height: 34px; /* App.jsx의 MIN_COMPACT_PX와 일치 */
 }
 
 .schedule-block--compact .schedule-block-time {

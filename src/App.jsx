@@ -1720,6 +1720,8 @@ function App() {
         backMinutes: backMin,
         // 앞뒤 어느 쪽으로든 늘어난 블록 (시각을 범위로 표시한다)
         isSpanning: startsEarlier || spansNext,
+        // 늘어나지 않은 블록은 시간+내용을 한 줄로 표시하므로 높이를 낮게 잡는다
+        isCompact: !(startsEarlier || spansNext),
         // 이 기록 자체의 시간 (블록 시작과 다를 수 있어 따로 보관)
         ownHour: ownTime.getHours(),
         ownMin: ownTime.getMinutes(),
@@ -1737,8 +1739,12 @@ function App() {
     // 대신 그 시간대의 세로 칸을 늘려서(= 시간 축을 부분적으로 확대) 자리를 만든다.
     // 예: 9~10시에 기록 3개가 몰리면 9~10시 구간만 넓어지고 블록은 차례로 쌓인다.
     const PX_PER_MIN = 1;
-    const MIN_BLOCK_PX = 48; // .schedule-block의 min-height와 일치시켜야 겹치지 않는다
+    // 최소 높이는 CSS의 min-height와 일치시켜야 겹치지 않는다.
+    // 한 줄짜리(시간+내용 인라인, 넘치면 …으로 잘림)는 낮게, 두 줄짜리는 그대로.
+    const MIN_BLOCK_PX = 48;
+    const MIN_COMPACT_PX = 34;
     const BLOCK_GAP_PX = 4;
+    const minPxFor = (s) => (s.isCompact ? MIN_COMPACT_PX : MIN_BLOCK_PX);
 
     // 1) 시간이 겹치는 블록끼리 묶는다
     const ordered = [...schedules].sort((a, b) => a.startPos - b.startPos || a.endPos - b.endPos);
@@ -1757,7 +1763,7 @@ function App() {
     const expansions = [];
     for (const c of clusters) {
       c.needPx = c.items.reduce(
-        (sum, s) => sum + Math.max(MIN_BLOCK_PX, (s.endPos - s.startPos) * PX_PER_MIN), 0
+        (sum, s) => sum + Math.max(minPxFor(s), (s.endPos - s.startPos) * PX_PER_MIN), 0
       ) + BLOCK_GAP_PX * (c.items.length - 1);
       const naturalPx = (c.end - c.start) * PX_PER_MIN;
       if (c.needPx > naturalPx) expansions.push({ from: c.start, to: c.end, extra: c.needPx - naturalPx });
@@ -1779,7 +1785,7 @@ function App() {
       let y = timeToPx(c.start);
       for (const s of c.items) {
         s.top = y;
-        s.height = Math.max(MIN_BLOCK_PX, (s.endPos - s.startPos) * PX_PER_MIN);
+        s.height = Math.max(minPxFor(s), (s.endPos - s.startPos) * PX_PER_MIN);
         y += s.height + BLOCK_GAP_PX;
       }
     }
@@ -1814,7 +1820,6 @@ function App() {
             )}
             <div className="schedule-blocks-layer">
             {schedules.map((schedule, idx) => {
-              const duration = schedule.endPos - schedule.startPos;
               // 습관 키워드 포함 시 키워드 색으로 (직접 고른 색이 있으면 그대로)
               const habitMatch = schedule.color === 'default'
                 ? habitMatchFor(schedule.content, schedule.recordedAt)
@@ -1832,8 +1837,7 @@ function App() {
               const timeLabel = schedule.isSpanning
                 ? `${pad(schedule.startHour)}:${pad(schedule.startMin)} → ${pad(schedule.endHour)}:${pad(schedule.endMin)}`
                 : `${pad(schedule.startHour)}:${pad(schedule.startMin)}`;
-              // 짧은 블록은 시간+내용을 한 줄로 (40px 안에 들어가도록)
-              const isCompact = !schedule.isSpanning && duration < 45;
+              const isCompact = schedule.isCompact;
 
               return (
                 <div
