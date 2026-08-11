@@ -645,11 +645,18 @@ body {
   background-size: 100% 60px;
 }
 
+/* 블록이 놓이는 층. 시간 라벨과의 여백을 여기서 주고,
+   블록은 이 층 안에서 left/width(%)로 배치돼 겹칠 때 나란히 놓인다 */
+.schedule-blocks-layer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 14px;
+  right: 4px;
+}
+
 .schedule-block {
   position: absolute;
-  left: 0;
-  right: 0;
-  margin: 0 4px 0 14px; /* 시간 라벨과 살짝 간격 */
   padding: 8px;
   border: 1px solid;
   border-radius: 8px;
