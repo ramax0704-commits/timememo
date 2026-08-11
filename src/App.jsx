@@ -808,6 +808,28 @@ function App() {
     }
   };
 
+  // '이전 기록부터'/직접 지정 상태에 따른 블록 시작 시각 (분 단위, 자정 기준)
+  const derivedStartMinutes = (schedule) => {
+    const own = schedule.ownHour * 60 + schedule.ownMin;
+    if (schedule.backMinutes > 0) return own - schedule.backMinutes;
+    if (schedule.spansFromPrev) {
+      return schedule.prevHour !== null ? schedule.prevHour * 60 + schedule.prevMin : own - 30;
+    }
+    return own;
+  };
+
+  const openScheduleDetail = (schedule) => {
+    setSelectedSchedule(schedule);
+    // 입력칸은 열 때 한 번만 채운다. (매번 다시 채우면 지우는 도중 값이 되살아난다)
+    setEditStartHour(String(schedule.ownHour));
+    setEditStartMin(String(schedule.ownMin));
+    setEditEndHour(schedule.nextHour !== null ? String(schedule.nextHour) : '');
+    setEditEndMin(schedule.nextMin !== null ? String(schedule.nextMin) : '');
+    const s = derivedStartMinutes(schedule);
+    setAdjustStartHour(String(Math.floor(((s % 1440) + 1440) % 1440 / 60)));
+    setAdjustStartMin(String(((s % 60) + 60) % 60));
+  };
+
   const closeScheduleDetail = () => {
     setSelectedSchedule(null);
     setEditStartHour('');
@@ -853,24 +875,33 @@ function App() {
   const handleToggleFromPrev = async (schedule, forceReset = false) => {
     const isOn = schedule.spansFromPrev || schedule.backMinutes > 0;
     const turningOn = forceReset ? true : !isOn;
-    setAdjustStartHour('');
-    setAdjustStartMin('');
-    await writeMemoFields(
+    const ok = await writeMemoFields(
       schedule.startMemoId,
       { spans_from_prev: turningOn, back_minutes: 0 },
       { spansFromPrev: turningOn, backMinutes: 0 }
     );
+    if (!ok) return;
+    // 켜면 시작 시각 칸이 이전 기록 시각을 가리켜야 한다 (블록 스냅샷은 아직 옛 값이라 직접 계산)
+    const s = derivedStartMinutes({ ...schedule, spansFromPrev: turningOn, backMinutes: 0 });
+    setAdjustStartHour(String(Math.floor(((s % 1440) + 1440) % 1440 / 60)));
+    setAdjustStartMin(String(((s % 60) + 60) % 60));
   };
 
   // 시작 시각을 직접 고치면 '이 기록 시각에서 몇 분 전'으로 환산해 저장한다.
   // (이전 기록을 따라가지 않고 고정되도록)
   const commitStartAdjust = async (schedule) => {
-    if (adjustStartHour === '' && adjustStartMin === '') return;
-    const h = adjustStartHour === '' ? schedule.startHour : parseInt(adjustStartHour);
-    const m = adjustStartMin === '' ? schedule.startMin : parseInt(adjustStartMin);
-    setAdjustStartHour('');
-    setAdjustStartMin('');
-    if (isNaN(h) || isNaN(m)) return;
+    // 비워둔 채 벗어나면 원래 값으로 되돌린다 (지우는 중일 수 있으므로 저장하지 않음)
+    const restore = () => {
+      const s = derivedStartMinutes(schedule);
+      setAdjustStartHour(String(Math.floor(((s % 1440) + 1440) % 1440 / 60)));
+      setAdjustStartMin(String(((s % 60) + 60) % 60));
+    };
+    if (adjustStartHour === '' || adjustStartMin === '') return restore();
+    const h = Math.max(0, Math.min(23, parseInt(adjustStartHour)));
+    const m = Math.max(0, Math.min(59, parseInt(adjustStartMin)));
+    if (isNaN(h) || isNaN(m)) return restore();
+    setAdjustStartHour(String(h));
+    setAdjustStartMin(String(m));
 
     const ownMinutes = schedule.ownHour * 60 + schedule.ownMin;
     let startMinutes = h * 60 + m;
@@ -1692,6 +1723,9 @@ function App() {
         // 이 기록 자체의 시간 (블록 시작과 다를 수 있어 따로 보관)
         ownHour: ownTime.getHours(),
         ownMin: ownTime.getMinutes(),
+        // 이전 기록 시각 — '이전 기록부터'를 켜면 여기가 블록 시작이 된다
+        prevHour: prevMemo ? new Date(prevMemo.recordedAt).getHours() : null,
+        prevMin: prevMemo ? new Date(prevMemo.recordedAt).getMinutes() : null,
         nextHour: nextMemo ? new Date(nextMemo.recordedAt).getHours() : null,
         nextMin: nextMemo ? new Date(nextMemo.recordedAt).getMinutes() : null,
         startMemoId: currentMemo.id,
@@ -1699,38 +1733,55 @@ function App() {
       });
     }
 
-    // 겹치는 블록은 가로로 나눠 배치한다.
-    // (예: '기상' 8:00 짧은 블록 위로, 9:00 기록이 '이전부터'를 켜서 8:00~9:00을 차지하는 경우)
-    {
-      const ordered = [...schedules].sort((a, b) => a.startPos - b.startPos || a.endPos - b.endPos);
-      let cluster = [];
-      let clusterEnd = -Infinity;
-      const layoutCluster = () => {
-        if (!cluster.length) return;
-        const colEnds = [];
-        for (const s of cluster) {
-          let ci = colEnds.findIndex(end => end <= s.startPos);
-          if (ci === -1) {
-            ci = colEnds.length;
-            colEnds.push(s.endPos);
-          } else {
-            colEnds[ci] = s.endPos;
-          }
-          s.col = ci;
-        }
-        for (const s of cluster) s.colCount = colEnds.length;
-        cluster = [];
-      };
-      for (const s of ordered) {
-        if (s.startPos >= clusterEnd) {
-          layoutCluster();
-          clusterEnd = s.endPos;
-        } else {
-          clusterEnd = Math.max(clusterEnd, s.endPos);
-        }
-        cluster.push(s);
+    // 겹치는 블록은 좌우로 나누지 않고 위아래로 쌓는다.
+    // 대신 그 시간대의 세로 칸을 늘려서(= 시간 축을 부분적으로 확대) 자리를 만든다.
+    // 예: 9~10시에 기록 3개가 몰리면 9~10시 구간만 넓어지고 블록은 차례로 쌓인다.
+    const PX_PER_MIN = 1;
+    const MIN_BLOCK_PX = 48; // .schedule-block의 min-height와 일치시켜야 겹치지 않는다
+    const BLOCK_GAP_PX = 4;
+
+    // 1) 시간이 겹치는 블록끼리 묶는다
+    const ordered = [...schedules].sort((a, b) => a.startPos - b.startPos || a.endPos - b.endPos);
+    const clusters = [];
+    for (const s of ordered) {
+      const last = clusters[clusters.length - 1];
+      if (last && s.startPos < last.end) {
+        last.end = Math.max(last.end, s.endPos);
+        last.items.push(s);
+      } else {
+        clusters.push({ start: s.startPos, end: s.endPos, items: [s] });
       }
-      layoutCluster();
+    }
+
+    // 2) 쌓는 데 필요한 높이가 실제 시간 길이보다 크면 그만큼 구간을 늘린다
+    const expansions = [];
+    for (const c of clusters) {
+      c.needPx = c.items.reduce(
+        (sum, s) => sum + Math.max(MIN_BLOCK_PX, (s.endPos - s.startPos) * PX_PER_MIN), 0
+      ) + BLOCK_GAP_PX * (c.items.length - 1);
+      const naturalPx = (c.end - c.start) * PX_PER_MIN;
+      if (c.needPx > naturalPx) expansions.push({ from: c.start, to: c.end, extra: c.needPx - naturalPx });
+    }
+
+    // 3) 늘린 구간을 반영한 시간 → 픽셀 변환 (시간 눈금도 이걸 따라간다)
+    const timeToPx = (t) => {
+      let px = t * PX_PER_MIN;
+      for (const e of expansions) {
+        if (t >= e.to) px += e.extra;
+        else if (t > e.from) px += e.extra * ((t - e.from) / (e.to - e.from));
+      }
+      return px;
+    };
+    const totalPx = timeToPx(gridMinutes);
+
+    // 4) 각 묶음 안에서 블록을 위에서부터 차례로 쌓는다
+    for (const c of clusters) {
+      let y = timeToPx(c.start);
+      for (const s of c.items) {
+        s.top = y;
+        s.height = Math.max(MIN_BLOCK_PX, (s.endPos - s.startPos) * PX_PER_MIN);
+        y += s.height + BLOCK_GAP_PX;
+      }
     }
 
     // 현재 시간 위치 (0~1440분)
@@ -1742,30 +1793,28 @@ function App() {
     return (
       <div className="schedule-view" ref={scheduleViewRef}>
         <div className="schedule-header">
-          <div className="schedule-times">
-            {hours.map(hour => (
-              <div key={hour} className="schedule-hour-label" style={hour >= 24 ? { opacity: 0.4 } : undefined}>
+          <div className="schedule-times" style={{ height: `${totalPx}px` }}>
+            {[...hours, gridHours].map(hour => (
+              <div
+                key={hour}
+                className="schedule-hour-label"
+                style={{ top: `${timeToPx(hour * 60)}px`, opacity: hour >= 24 ? 0.4 : undefined }}
+              >
                 {(hour % 24).toString().padStart(2, '0')}:00
               </div>
             ))}
-            {/* 그리드 끝(다음날 02:00) 라벨 */}
-            <div className="schedule-hour-label" style={{ height: 0, opacity: 0.4 }}>02:00</div>
           </div>
-          <div className="schedule-grid" style={{ height: `${gridMinutes}px` }}>
+          <div className="schedule-grid" style={{ height: `${totalPx}px` }}>
             {hours.map(hour => (
-              <div key={hour} className="schedule-hour-slot" />
+              <div key={hour} className="schedule-hour-slot" style={{ top: `${timeToPx(hour * 60)}px` }} />
             ))}
             {/* 현재 시간 빨간 줄 (오늘만) */}
             {isViewingToday && (
-              <div className="schedule-now-line" style={{ top: `${(nowPos / gridMinutes) * 100}%` }} />
+              <div className="schedule-now-line" style={{ top: `${timeToPx(nowPos)}px` }} />
             )}
             <div className="schedule-blocks-layer">
             {schedules.map((schedule, idx) => {
-              const startPos = schedule.startPos;
-              const endPos = schedule.endPos;
-              const duration = endPos - startPos;
-              const colCount = schedule.colCount || 1;
-              const col = schedule.col || 0;
+              const duration = schedule.endPos - schedule.startPos;
               // 습관 키워드 포함 시 키워드 색으로 (직접 고른 색이 있으면 그대로)
               const habitMatch = schedule.color === 'default'
                 ? habitMatchFor(schedule.content, schedule.recordedAt)
@@ -1790,16 +1839,13 @@ function App() {
                 <div
                   key={idx}
                   className={`schedule-block${isCompact ? ' schedule-block--compact' : ''}`}
-                  onClick={() => setSelectedSchedule(schedule)}
+                  onClick={() => openScheduleDetail(schedule)}
                   style={{
-                    top: `${(startPos / gridMinutes) * 100}%`,
-                    height: `${(duration / gridMinutes) * 100}%`,
-                    left: `${(col / colCount) * 100}%`,
-                    width: `calc(${100 / colCount}% - ${colCount > 1 ? 3 : 0}px)`,
+                    top: `${schedule.top}px`,
+                    height: `${schedule.height}px`,
                     backgroundColor: bgColor,
                     borderColor: borderColor,
                     opacity: schedule.isCarry ? 0.45 : 1,
-                    minHeight: '40px',
                     cursor: 'pointer',
                     justifyContent: 'flex-start',
                     paddingTop: '6px'
@@ -2388,20 +2434,22 @@ function App() {
                 <div className="time-input-row">
                   <input
                     type="number"
+                    inputMode="numeric"
                     min="0"
                     max="23"
-                    value={editStartHour !== '' ? editStartHour : selectedSchedule.ownHour}
-                    onChange={e => setEditStartHour(parseInt(e.target.value))}
+                    value={editStartHour}
+                    onChange={e => setEditStartHour(e.target.value)}
                     className="time-input"
                     placeholder="시"
                   />
                   <span>:</span>
                   <input
                     type="number"
+                    inputMode="numeric"
                     min="0"
                     max="59"
-                    value={editStartMin !== '' ? editStartMin : selectedSchedule.ownMin}
-                    onChange={e => setEditStartMin(parseInt(e.target.value))}
+                    value={editStartMin}
+                    onChange={e => setEditStartMin(e.target.value)}
                     className="time-input"
                     placeholder="분"
                   />
@@ -2413,20 +2461,22 @@ function App() {
                 <div className="time-input-row">
                   <input
                     type="number"
+                    inputMode="numeric"
                     min="0"
                     max="23"
-                    value={editEndHour !== '' ? editEndHour : selectedSchedule.nextHour}
-                    onChange={e => setEditEndHour(parseInt(e.target.value))}
+                    value={editEndHour}
+                    onChange={e => setEditEndHour(e.target.value)}
                     className="time-input"
                     placeholder="시"
                   />
                   <span>:</span>
                   <input
                     type="number"
+                    inputMode="numeric"
                     min="0"
                     max="59"
-                    value={editEndMin !== '' ? editEndMin : selectedSchedule.nextMin}
-                    onChange={e => setEditEndMin(parseInt(e.target.value))}
+                    value={editEndMin}
+                    onChange={e => setEditEndMin(e.target.value)}
                     className="time-input"
                     placeholder="분"
                   />
@@ -2450,10 +2500,11 @@ function App() {
               <span className="schedule-start-adjust-label">시작 시각</span>
               <input
                 type="number"
+                inputMode="numeric"
                 min="0"
                 max="23"
                 className="time-input"
-                value={adjustStartHour !== '' ? adjustStartHour : selectedSchedule.startHour}
+                value={adjustStartHour}
                 onChange={e => setAdjustStartHour(e.target.value)}
                 onBlur={() => commitStartAdjust(selectedSchedule)}
                 onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
@@ -2461,10 +2512,11 @@ function App() {
               <span>:</span>
               <input
                 type="number"
+                inputMode="numeric"
                 min="0"
                 max="59"
                 className="time-input"
-                value={adjustStartMin !== '' ? adjustStartMin : selectedSchedule.startMin}
+                value={adjustStartMin}
                 onChange={e => setAdjustStartMin(e.target.value)}
                 onBlur={() => commitStartAdjust(selectedSchedule)}
                 onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
@@ -2497,6 +2549,7 @@ function App() {
             </label>
             <div className="schedule-detail-time-edit">
               <div className="schedule-detail-actions">
+                <button className="btn-cancel" onClick={closeScheduleDetail}>취소</button>
                 <button className="btn-save" onClick={async () => {
                   // 각 칸은 해당 기록의 시각을 직접 고친다
                   const edits = [
@@ -2511,9 +2564,12 @@ function App() {
                     if (!e.memoId) continue;
                     const memo = memos.find(m => m.id === e.memoId);
                     if (!memo) continue;
+                    // 비워둔 칸은 원래 값을 그대로 쓴다
+                    const h = e.h === '' || isNaN(parseInt(e.h)) ? e.fallbackH : parseInt(e.h);
+                    const m = e.m === '' || isNaN(parseInt(e.m)) ? e.fallbackM : parseInt(e.m);
                     const t = new Date(memo.recordedAt);
-                    t.setHours(e.h !== '' ? e.h : e.fallbackH);
-                    t.setMinutes(e.m !== '' ? e.m : e.fallbackM);
+                    t.setHours(Math.max(0, Math.min(23, h)));
+                    t.setMinutes(Math.max(0, Math.min(59, m)));
                     updates.push({ id: memo.id, time: t.toISOString() });
                   }
                   for (const u of updates) {
@@ -2525,7 +2581,6 @@ function App() {
                   }
                   closeScheduleDetail();
                 }}>저장</button>
-                <button className="btn-cancel" onClick={closeScheduleDetail}>취소</button>
               </div>
             </div>
           </div>

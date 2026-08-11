@@ -469,17 +469,19 @@ body {
 .schedule-times {
   width: 38px;
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
+  position: relative;
 }
 
+/* 시간 눈금은 기록이 몰린 구간에서 간격이 늘어나므로 위치를 직접 지정한다 */
 .schedule-hour-label {
+  position: absolute;
+  right: 0;
   font-size: 0.75rem;
   color: #999;
   font-weight: 600;
   line-height: 1;
   text-align: right;
-  height: 60px; /* 그리드 1시간(60px)과 정확히 일치해야 눈금이 맞음 */
+  white-space: nowrap;
   transform: translateY(-6px); /* 텍스트 중심을 그리드 선 위에 맞춤 */
 }
 
@@ -637,16 +639,21 @@ body {
   margin-bottom: 10px;
 }
 
+/* 시간 눈금선은 간격이 일정하지 않으므로 배경 대신 실제 요소로 그린다 */
 .schedule-grid {
   flex: 1;
   position: relative;
-  height: 1440px;
-  background: linear-gradient(to bottom, #f0f0f0 1px, transparent 1px);
-  background-size: 100% 60px;
 }
 
-/* 블록이 놓이는 층. 시간 라벨과의 여백을 여기서 주고,
-   블록은 이 층 안에서 left/width(%)로 배치돼 겹칠 때 나란히 놓인다 */
+.schedule-hour-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-color: #f0f0f0;
+}
+
+/* 블록이 놓이는 층. 시간 라벨과의 여백을 여기서 준다 */
 .schedule-blocks-layer {
   position: absolute;
   top: 0;
@@ -657,6 +664,8 @@ body {
 
 .schedule-block {
   position: absolute;
+  left: 0;
+  right: 0;
   padding: 8px;
   border: 1px solid;
   border-radius: 8px;
