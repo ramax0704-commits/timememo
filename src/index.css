@@ -735,6 +735,72 @@ body {
   margin-bottom: 16px;
 }
 
+/* 끝나고 남긴 기록의 소요 시간 선택 */
+.schedule-duration {
+  padding: 14px;
+  margin: 4px 0 10px;
+  background: #f7f7fa;
+  border-radius: 12px;
+}
+
+.schedule-duration-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+}
+
+.schedule-duration-label strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.schedule-duration-label small {
+  font-size: 0.78rem;
+  color: #8a8a99;
+  line-height: 1.4;
+}
+
+.schedule-duration-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.schedule-duration-chip {
+  flex: 1 1 auto;
+  min-width: 62px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-main);
+  background: white;
+  border: 1px solid #e2e2ea;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.schedule-duration-chip.active {
+  background: var(--primary, #4a6cf7);
+  border-color: var(--primary, #4a6cf7);
+  color: white;
+  font-weight: 600;
+}
+
+.schedule-duration-custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: #8a8a99;
+}
+
+.schedule-duration-custom .time-input {
+  width: 72px;
+}
+
 /* 다음 기록까지 이어서 표시 스위치 */
 .schedule-span-toggle {
   display: flex;

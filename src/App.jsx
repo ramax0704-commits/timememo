@@ -25,9 +25,10 @@ function rowToMemo(row) {
     content: row.content,
     color: row.color,
     recordedAt: row.recorded_at,
-    // 스케줄 뷰에서 앞뒤로 길게 이어 그릴지 (기본은 짧은 블록)
-    spansToNext: row.spans_to_next ?? false,   // 이 기록 시각 → 다음 기록 시각
-    spansFromPrev: row.spans_from_prev ?? false, // 이전 기록 시각 → 이 기록 시각
+    // 스케줄 뷰 블록 길이 (기본은 짧은 블록)
+    spansToNext: row.spans_to_next ?? false, // 이 기록 시각 → 다음 기록 시각
+    // 끝나고 남긴 기록의 소요 시간(분). 기록 시각에서 이만큼 뒤로 그린다. 0이면 안 이음
+    backMinutes: row.back_minutes ?? 0,
   };
 }
 
@@ -304,8 +305,7 @@ function App() {
   const [editStartMin, setEditStartMin] = useState('');
   const [editEndHour, setEditEndHour] = useState('');
   const [editEndMin, setEditEndMin] = useState('');
-  const [editPrevHour, setEditPrevHour] = useState('');
-  const [editPrevMin, setEditPrevMin] = useState('');
+  const [customBackMin, setCustomBackMin] = useState('');
 
   // Undo Toast
   const [undoToast, setUndoToast] = useState(null); // { memo, timer }
@@ -811,42 +811,42 @@ function App() {
     setEditStartMin('');
     setEditEndHour('');
     setEditEndMin('');
-    setEditPrevHour('');
-    setEditPrevMin('');
+    setCustomBackMin('');
   };
 
-  // 스케줄 블록을 앞/뒤로 길게 이을지 토글 (스위치는 즉시 저장)
-  // 두 기록 사이의 한 구간은 앞 기록이나 뒤 기록 중 하나만 차지할 수 있으므로,
-  // 같은 구간을 두고 겹치는 설정은 자동으로 꺼서 블록이 포개지지 않게 한다.
-  const handleToggleSpans = async (schedule, direction) => {
-    const turningOn = direction === 'prev' ? !schedule.spansFromPrev : !schedule.spansToNext;
-    const field = direction === 'prev' ? 'spans_from_prev' : 'spans_to_next';
-    const localField = direction === 'prev' ? 'spansFromPrev' : 'spansToNext';
-
-    const writes = [{ id: schedule.startMemoId, field, localField, value: turningOn }];
-    if (turningOn) {
-      // 같은 구간을 차지하던 이웃 기록의 반대편 설정을 끈다
-      const neighborId = direction === 'prev' ? schedule.prevMemoId : schedule.nextMemoId;
-      const neighborField = direction === 'prev' ? 'spans_to_next' : 'spans_from_prev';
-      const neighborLocal = direction === 'prev' ? 'spansToNext' : 'spansFromPrev';
-      const neighbor = neighborId ? memos.find(m => m.id === neighborId) : null;
-      if (neighbor && neighbor[neighborLocal]) {
-        writes.push({ id: neighborId, field: neighborField, localField: neighborLocal, value: false });
-      }
+  // 다음 기록까지 이을지 토글 (스위치는 즉시 저장)
+  const handleToggleSpans = async (schedule) => {
+    const next = !schedule.spansToNext;
+    const { error } = await supabase
+      .from('memos')
+      .update({ spans_to_next: next })
+      .eq('id', schedule.startMemoId);
+    if (error) {
+      console.error('Error toggling spans_to_next:', error);
+      alert('변경에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      return;
     }
-
-    for (const w of writes) {
-      const { error } = await supabase.from('memos').update({ [w.field]: w.value }).eq('id', w.id);
-      if (error) {
-        console.error(`Error toggling ${w.field}:`, error);
-        alert('변경에 실패했습니다. 잠시 후 다시 시도해주세요.');
-        return;
-      }
-      setMemos(prev => prev.map(m => m.id === w.id ? { ...m, [w.localField]: w.value } : m));
-    }
-
+    setMemos(prev => prev.map(m => m.id === schedule.startMemoId ? { ...m, spansToNext: next } : m));
     setSelectedSchedule(s => s && s.startMemoId === schedule.startMemoId
-      ? { ...s, [localField]: turningOn }
+      ? { ...s, spansToNext: next }
+      : s);
+  };
+
+  // 끝나고 남긴 기록의 소요 시간(분) 설정 — 기록 시각에서 뒤로 그린다
+  const handleSetBackMinutes = async (schedule, minutes) => {
+    const value = Math.max(0, Math.min(1440, Math.round(minutes) || 0));
+    const { error } = await supabase
+      .from('memos')
+      .update({ back_minutes: value })
+      .eq('id', schedule.startMemoId);
+    if (error) {
+      console.error('Error updating back_minutes:', error);
+      alert('변경에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      return;
+    }
+    setMemos(prev => prev.map(m => m.id === schedule.startMemoId ? { ...m, backMinutes: value } : m));
+    setSelectedSchedule(s => s && s.startMemoId === schedule.startMemoId
+      ? { ...s, backMinutes: value }
       : s);
   };
 
@@ -1581,23 +1581,20 @@ function App() {
 
     for (let i = 0; i < sortedMemos.length; i++) {
       const currentMemo = sortedMemos[i];
-      const prevMemo = sortedMemos[i - 1];
       const nextMemo = sortedMemos[i + 1];
       const spansNext = !!currentMemo.spansToNext;
-      const spansPrev = !!currentMemo.spansFromPrev;
+      const backMin = Math.max(0, currentMemo.backMinutes || 0);
 
       const ownTime = new Date(currentMemo.recordedAt);
       const ownPos = minutesFromDayStart(currentMemo.recordedAt);
-      const prevPos = prevMemo ? minutesFromDayStart(prevMemo.recordedAt) : null;
       const nextPos = nextMemo ? minutesFromDayStart(nextMemo.recordedAt) : null;
 
-      // 시작 — '이전 기록부터'를 켜면 이전 기록 시각까지 거슬러 올라간다 (끝나고 남긴 기록)
+      // 시작 — 끝나고 남긴 기록은 소요 시간만큼 기록 시각에서 뒤로 그린다
       let startPos = ownPos;
-      if (spansPrev) {
-        startPos = prevPos !== null ? prevPos : ownPos - MIN_BLOCK_MINUTES;
+      if (backMin > 0) {
+        startPos = ownPos - backMin;
         // 새벽(00:00~01:59) 기록은 밤의 마지막으로 보고 그 너머까지 거슬러 올라가지 않는다
         if (ownPos >= 120 && startPos < 120) startPos = 120;
-        if (startPos > ownPos) startPos = ownPos;
       }
 
       // 끝 — '다음 기록까지'를 켜면 다음 기록 시각(없으면 지금)까지 늘어난다
@@ -1615,7 +1612,7 @@ function App() {
         // 새벽 기록이 새벽 2시를 넘겨 이어지지 않게 자른다
         const dawnCutoff = ownPos < 120 ? 120 : (ownPos >= 1440 && ownPos < 1560 ? 1560 : null);
         if (dawnCutoff !== null && endPos > dawnCutoff) endPos = dawnCutoff;
-      } else if (spansPrev) {
+      } else if (backMin > 0) {
         endPos = ownPos; // 끝나고 남긴 기록이므로 이 기록 시각에서 끝난다
       } else {
         // 다음 기록이 30분 안에 있으면 겹치지 않게 거기까지만
@@ -1641,16 +1638,13 @@ function App() {
         recordedAt: currentMemo.recordedAt,
         isCarry: ownPos >= 1440, // 다음날 새벽 메모 (흐리게 표시)
         spansToNext: spansNext,
-        spansFromPrev: spansPrev,
+        backMinutes: backMin,
         // 이 기록 자체의 시간 (블록 시작과 다를 수 있어 따로 보관)
         ownHour: ownTime.getHours(),
         ownMin: ownTime.getMinutes(),
-        prevHour: prevMemo ? new Date(prevMemo.recordedAt).getHours() : null,
-        prevMin: prevMemo ? new Date(prevMemo.recordedAt).getMinutes() : null,
         nextHour: nextMemo ? new Date(nextMemo.recordedAt).getHours() : null,
         nextMin: nextMemo ? new Date(nextMemo.recordedAt).getMinutes() : null,
         startMemoId: currentMemo.id,
-        prevMemoId: prevMemo ? prevMemo.id : null,
         nextMemoId: nextMemo ? nextMemo.id : null
       });
     }
@@ -2341,32 +2335,6 @@ function App() {
               <button className="schedule-detail-close" onClick={closeScheduleDetail}>×</button>
             </div>
             <div className="schedule-detail-time-edit">
-              {selectedSchedule.spansFromPrev && selectedSchedule.prevMemoId && (
-              <div className="time-input-group">
-                <label>이전 기록 시간</label>
-                <div className="time-input-row">
-                  <input
-                    type="number"
-                    min="0"
-                    max="23"
-                    value={editPrevHour !== '' ? editPrevHour : selectedSchedule.prevHour}
-                    onChange={e => setEditPrevHour(parseInt(e.target.value))}
-                    className="time-input"
-                    placeholder="시"
-                  />
-                  <span>:</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    value={editPrevMin !== '' ? editPrevMin : selectedSchedule.prevMin}
-                    onChange={e => setEditPrevMin(parseInt(e.target.value))}
-                    className="time-input"
-                    placeholder="분"
-                  />
-                </div>
-              </div>
-              )}
               <div className="time-input-group">
                 <label>기록 시간</label>
                 <div className="time-input-row">
@@ -2418,26 +2386,53 @@ function App() {
               </div>
               )}
             </div>
-            <label className="schedule-span-toggle">
-              <input
-                type="checkbox"
-                checked={!!selectedSchedule.spansFromPrev}
-                onChange={() => handleToggleSpans(selectedSchedule, 'prev')}
-              />
-              <span className="schedule-span-toggle-text">
-                <strong>이전 기록부터 이어서 표시</strong>
-                <small>
-                  {selectedSchedule.prevMemoId
-                    ? '끝나고 남긴 기록일 때. 이전 기록 시각부터 이 기록 시각까지 하나의 블록이 됩니다.'
-                    : '앞에 기록이 없어 30분 전부터 그려집니다.'}
-                </small>
-              </span>
-            </label>
+            <div className="schedule-duration">
+              <div className="schedule-duration-label">
+                <strong>얼마 동안 했나요?</strong>
+                <small>끝나고 적은 기록이면 골라주세요. 기록 시각에서 그만큼 뒤로 그려집니다.</small>
+              </div>
+              <div className="schedule-duration-chips">
+                {[
+                  { min: 0, label: '안 이음' },
+                  { min: 30, label: '30분' },
+                  { min: 60, label: '1시간' },
+                  { min: 120, label: '2시간' },
+                ].map(opt => (
+                  <button
+                    key={opt.min}
+                    type="button"
+                    className={`schedule-duration-chip${selectedSchedule.backMinutes === opt.min ? ' active' : ''}`}
+                    onClick={() => handleSetBackMinutes(selectedSchedule, opt.min)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <div className="schedule-duration-custom">
+                <span>직접 입력</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="1440"
+                  className="time-input"
+                  value={customBackMin !== '' ? customBackMin : (selectedSchedule.backMinutes || '')}
+                  onChange={e => setCustomBackMin(e.target.value)}
+                  onBlur={() => {
+                    if (customBackMin === '') return;
+                    handleSetBackMinutes(selectedSchedule, parseInt(customBackMin) || 0);
+                    setCustomBackMin('');
+                  }}
+                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  placeholder="분"
+                />
+                <span>분</span>
+              </div>
+            </div>
             <label className="schedule-span-toggle">
               <input
                 type="checkbox"
                 checked={!!selectedSchedule.spansToNext}
-                onChange={() => handleToggleSpans(selectedSchedule, 'next')}
+                onChange={() => handleToggleSpans(selectedSchedule)}
               />
               <span className="schedule-span-toggle-text">
                 <strong>다음 기록까지 이어서 표시</strong>
@@ -2455,9 +2450,6 @@ function App() {
                   const edits = [
                     { memoId: selectedSchedule.startMemoId, h: editStartHour, m: editStartMin,
                       fallbackH: selectedSchedule.ownHour, fallbackM: selectedSchedule.ownMin },
-                    { memoId: (selectedSchedule.spansFromPrev && selectedSchedule.prevMemoId) || null,
-                      h: editPrevHour, m: editPrevMin,
-                      fallbackH: selectedSchedule.prevHour, fallbackM: selectedSchedule.prevMin },
                     { memoId: (selectedSchedule.spansToNext && selectedSchedule.nextMemoId) || null,
                       h: editEndHour, m: editEndMin,
                       fallbackH: selectedSchedule.nextHour, fallbackM: selectedSchedule.nextMin },
