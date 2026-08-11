@@ -25,6 +25,8 @@ function rowToMemo(row) {
     content: row.content,
     color: row.color,
     recordedAt: row.recorded_at,
+    // 스케줄 뷰에서 다음 기록까지 길게 이어 그릴지 (기본은 짧은 블록)
+    spansToNext: row.spans_to_next ?? false,
   };
 }
 
@@ -800,6 +802,24 @@ function App() {
     }
   };
 
+  // 스케줄 블록을 다음 기록까지 길게 이을지 토글 (스위치는 즉시 저장)
+  const handleToggleSpans = async (schedule) => {
+    const next = !schedule.spansToNext;
+    const { error } = await supabase
+      .from('memos')
+      .update({ spans_to_next: next })
+      .eq('id', schedule.startMemoId);
+    if (error) {
+      console.error('Error toggling spans_to_next:', error);
+      alert('변경에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      return;
+    }
+    setMemos(prev => prev.map(m => m.id === schedule.startMemoId ? { ...m, spansToNext: next } : m));
+    setSelectedSchedule(s => s && s.startMemoId === schedule.startMemoId
+      ? { ...s, spansToNext: next, endMemoId: next ? s.nextMemoId : null }
+      : s);
+  };
+
   const handleResetPasswordSubmit = async (e) => {
     e.preventDefault();
     setResetError('');
@@ -1524,40 +1544,43 @@ function App() {
     const gridMinutes = gridHours * 60;
     const schedules = [];
 
-    // 각 메모 = 자기 시간부터 다음 메모 시간까지의 블록
-    // 마지막 메모는 현재 시간이 그리드 범위 안이면 지금까지 진행 중으로 표시
+    // 기본은 30분짜리 짧은 블록.
+    // '다음 기록까지 이어서 표시'(spansToNext)를 켠 기록만 다음 기록까지 길게 늘어난다.
+    // 자동으로 이어 붙이면 실제보다 오래 한 것처럼 보여 부담을 주기 때문에 선택제로 둔다.
+    const MIN_BLOCK_MINUTES = 30;
+
     for (let i = 0; i < sortedMemos.length; i++) {
       const currentMemo = sortedMemos[i];
       const nextMemo = sortedMemos[i + 1];
+      const spans = !!currentMemo.spansToNext;
 
       const startTime = new Date(currentMemo.recordedAt);
       const startPos = minutesFromDayStart(currentMemo.recordedAt);
-      let endTime, endPos;
-      if (nextMemo) {
-        endTime = new Date(nextMemo.recordedAt);
-        endPos = minutesFromDayStart(nextMemo.recordedAt);
-      } else {
-        const nowPosInDay = (nowTime.getTime() - dayStartMs) / 60000;
-        if (nowPosInDay > startPos && nowPosInDay < gridMinutes) {
-          endTime = nowTime;
-          endPos = nowPosInDay;
+      const nextPos = nextMemo ? minutesFromDayStart(nextMemo.recordedAt) : null;
+
+      let endPos;
+      if (spans) {
+        if (nextPos !== null) {
+          endPos = nextPos;
         } else {
-          endTime = startTime;
-          endPos = startPos; // 최소 높이 블록으로 표시됨
+          // 마지막 기록이면 지금까지 진행 중으로 표시
+          const nowPosInDay = (nowTime.getTime() - dayStartMs) / 60000;
+          endPos = (nowPosInDay > startPos && nowPosInDay < gridMinutes)
+            ? nowPosInDay
+            : startPos + MIN_BLOCK_MINUTES;
         }
+        // 새벽(00:00~01:59) 기록은 밤의 마지막으로 보고 새벽 2시를 넘겨 이어지지 않게 자른다
+        const dawnCutoff = startPos < 120 ? 120 : (startPos >= 1440 && startPos < 1560 ? 1560 : null);
+        if (dawnCutoff !== null && endPos > dawnCutoff) endPos = dawnCutoff;
+      } else {
+        // 다음 기록이 30분 안에 있으면 겹치지 않게 거기까지만
+        endPos = startPos + MIN_BLOCK_MINUTES;
+        if (nextPos !== null && nextPos > startPos) endPos = Math.min(endPos, nextPos);
       }
 
-      // 새벽(00:00~01:59) 메모는 밤의 마지막 기록으로 보고,
-      // 다음 기록이 새벽 2시를 넘기면 이어지지 않고 단일 블록으로 표시
-      let isSingle = false;
-      const dawnCutoff = startPos < 120 ? 120 : (startPos >= 1440 && startPos < 1560 ? 1560 : null);
-      if (dawnCutoff !== null && endPos > dawnCutoff) {
-        endTime = startTime;
-        endPos = startPos;
-        isSingle = true;
-      }
-
+      if (endPos < startPos) endPos = startPos;
       endPos = Math.min(endPos, gridMinutes);
+      const endTime = new Date(dayStartMs + endPos * 60000);
 
       schedules.push({
         startPos,
@@ -1570,9 +1593,11 @@ function App() {
         color: currentMemo.color || 'default',
         recordedAt: currentMemo.recordedAt,
         isCarry: startPos >= 1440, // 다음날 새벽 메모 (흐리게 표시)
-        isSingle, // 새벽 단일 블록 (다음 메모와 이어지지 않음)
+        spansToNext: spans,
         startMemoId: currentMemo.id,
-        endMemoId: nextMemo && !isSingle ? nextMemo.id : null
+        nextMemoId: nextMemo ? nextMemo.id : null,
+        // 이어서 표시 중일 때만 '종료 시간'이 다음 기록의 시작 시간을 뜻한다
+        endMemoId: spans && nextMemo ? nextMemo.id : null
       });
     }
 
@@ -1617,24 +1642,22 @@ function App() {
                 ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
                 : (COLOR_BORDER[schedule.color] || '#e8e8f0');
 
+              // 이어지지 않은 짧은 블록은 시간+내용을 한 줄로 (40px 안에 들어가도록)
+              const isCompact = !schedule.spansToNext;
               // 시간 길이에 따른 표시 결정
               let showTime = false;
               let showContent = false;
-              if (duration >= 60) {
+              if (isCompact || duration >= 60) {
                 showTime = true;
                 showContent = true;
               } else if (duration >= 30) {
-                showContent = true;
-              }
-              // 마지막(진행 중) 블록은 짧아도 내용이 보이게
-              if (!schedule.endMemoId) {
                 showContent = true;
               }
 
               return (
                 <div
                   key={idx}
-                  className="schedule-block"
+                  className={`schedule-block${isCompact ? ' schedule-block--compact' : ''}`}
                   onClick={() => setSelectedSchedule(schedule)}
                   style={{
                     top: `${(startPos / gridMinutes) * 100}%`,
@@ -2255,7 +2278,7 @@ function App() {
                   />
                 </div>
               </div>
-              {selectedSchedule.endMemoId && (
+              {selectedSchedule.spansToNext && selectedSchedule.nextMemoId && (
               <div className="time-input-group">
                 <label>종료 시간</label>
                 <div className="time-input-row">
@@ -2281,6 +2304,23 @@ function App() {
                 </div>
               </div>
               )}
+            </div>
+            <label className="schedule-span-toggle">
+              <input
+                type="checkbox"
+                checked={!!selectedSchedule.spansToNext}
+                onChange={() => handleToggleSpans(selectedSchedule)}
+              />
+              <span className="schedule-span-toggle-text">
+                <strong>다음 기록까지 이어서 표시</strong>
+                <small>
+                  {selectedSchedule.nextMemoId
+                    ? '켜면 다음 기록이 시작될 때까지 하나의 시간 블록으로 그려집니다.'
+                    : '켜면 지금 이 순간까지 진행 중인 것으로 그려집니다.'}
+                </small>
+              </span>
+            </label>
+            <div className="schedule-detail-time-edit">
               <div className="schedule-detail-actions">
                 <button className="btn-save" onClick={async () => {
                   const updates = [];
@@ -2291,7 +2331,10 @@ function App() {
                     newStartTime.setMinutes(editStartMin !== '' ? editStartMin : selectedSchedule.startMin);
                     updates.push({ id: startMemo.id, time: newStartTime.toISOString() });
                   }
-                  const endMemo = selectedSchedule.endMemoId ? memos.find(m => m.id === selectedSchedule.endMemoId) : null;
+                  // '종료 시간'은 이어서 표시 중일 때만 편집 가능하다 (= 다음 기록의 시작 시간)
+                  const endMemo = (selectedSchedule.spansToNext && selectedSchedule.nextMemoId)
+                    ? memos.find(m => m.id === selectedSchedule.nextMemoId)
+                    : null;
                   if (endMemo) {
                     const newEndTime = new Date(endMemo.recordedAt);
                     newEndTime.setHours(editEndHour !== '' ? editEndHour : selectedSchedule.endHour);

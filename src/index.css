@@ -660,6 +660,26 @@ body {
   min-height: 48px;
 }
 
+/* 이어지지 않은 짧은 블록: 시간과 내용을 한 줄로 붙여 낮은 높이에 맞춘다 */
+.schedule-block--compact {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.schedule-block--compact .schedule-block-time {
+  flex: none;
+}
+
+.schedule-block--compact .schedule-block-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .schedule-block-time {
   font-size: 0.7rem;
   color: #999;
@@ -706,6 +726,45 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 16px;
+}
+
+/* 다음 기록까지 이어서 표시 스위치 */
+.schedule-span-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  margin: 4px 0 16px;
+  background: #f7f7fa;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.schedule-span-toggle input {
+  width: 20px;
+  height: 20px;
+  margin: 1px 0 0;
+  flex: none;
+  accent-color: var(--primary, #4a6cf7);
+  cursor: pointer;
+}
+
+.schedule-span-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.schedule-span-toggle-text strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.schedule-span-toggle-text small {
+  font-size: 0.78rem;
+  color: #8a8a99;
+  line-height: 1.4;
 }
 
 .schedule-detail-header h3 {
