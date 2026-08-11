@@ -681,11 +681,17 @@ body {
   font-weight: 700;
 }
 
+/* 달력 칸의 작은 글씨(0.6rem)를 그대로 쓰지 않고 날짜와 같은 크기로 */
 .monthly-day-panel-money {
   display: flex;
   gap: 10px;
-  font-size: 0.85rem;
   white-space: nowrap;
+}
+
+.monthly-day-panel-money .monthly-income,
+.monthly-day-panel-money .monthly-expense {
+  font-size: 0.95rem;
+  font-weight: 700;
 }
 
 /* 시간 눈금선은 간격이 일정하지 않으므로 배경 대신 실제 요소로 그린다 */
