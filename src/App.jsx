@@ -15,7 +15,7 @@ import {
   parse
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus } from 'lucide-react';
+import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft } from 'lucide-react';
 import { supabase, setRememberMe, getRememberMe } from './supabase';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
@@ -375,6 +375,10 @@ function App() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [showScheduleView, setShowScheduleView] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState(null);
+  // 할 일 리스트 (날짜에 묶지 않는다 — 이월도 독촉도 없음)
+  const [todos, setTodos] = useState([]);
+  const [showTodoSheet, setShowTodoSheet] = useState(false);
+  const [todoInput, setTodoInput] = useState('');
   const [editStartHour, setEditStartHour] = useState('');
   const [editStartMin, setEditStartMin] = useState('');
   const [editEndHour, setEditEndHour] = useState('');
@@ -551,6 +555,43 @@ function App() {
       }
     };
     loadSettings();
+  }, [userId]);
+
+  // ── 할 일 불러오기 ──────────────────────────────────────────
+  useEffect(() => {
+    if (!userId) return;
+
+    const sortTodos = (list) =>
+      [...list].sort((a, b) => {
+        // 완료한 건 아래로, 그 안에서는 만든 순서대로
+        if (a.done !== b.done) return a.done ? 1 : -1;
+        return new Date(a.created_at) - new Date(b.created_at);
+      });
+
+    const fetchTodos = async () => {
+      const { data, error } = await supabase.from('todos').select('*');
+      if (error) {
+        console.error('Error fetching todos:', error);
+        return;
+      }
+      setTodos(sortTodos(data));
+    };
+    fetchTodos();
+
+    const channel = supabase
+      .channel('todos-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'todos', filter: `user_id=eq.${userId}` }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setTodos(prev => prev.some(t => t.id === payload.new.id) ? prev : sortTodos([...prev, payload.new]));
+        } else if (payload.eventType === 'UPDATE') {
+          setTodos(prev => sortTodos(prev.map(t => (t.id === payload.new.id ? payload.new : t))));
+        } else if (payload.eventType === 'DELETE') {
+          setTodos(prev => prev.filter(t => t.id !== payload.old.id));
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [userId]);
 
   // ── 입력 포커스 (터치 기기에서는 키보드가 멋대로 안 뜨게 제외) ─
@@ -1080,6 +1121,70 @@ function App() {
     // 바로 화면에 반영 (실시간 이벤트가 오면 중복은 무시됨)
     const memo = rowToMemo(data);
     setMemos(prev => prev.some(m => m.id === memo.id) ? prev : [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
+  };
+
+  // ── 할 일 ───────────────────────────────────────────────────
+  const handleAddTodo = async (e) => {
+    e?.preventDefault();
+    const text = todoInput.trim();
+    if (!text || !currentUser) return;
+    setTodoInput('');
+    const { data, error } = await supabase
+      .from('todos')
+      .insert({ user_id: currentUser.id, content: text })
+      .select()
+      .single();
+    if (error) {
+      console.error('Error adding todo:', error);
+      setTodoInput(text); // 입력한 내용은 돌려준다
+      return;
+    }
+    setTodos(prev => prev.some(t => t.id === data.id) ? prev : [...prev, data]);
+  };
+
+  const handleToggleTodo = async (todo) => {
+    const next = !todo.done;
+    setTodos(prev => prev.map(t => (t.id === todo.id ? { ...t, done: next } : t)));
+    const { error } = await supabase.from('todos').update({ done: next }).eq('id', todo.id);
+    if (error) {
+      console.error('Error toggling todo:', error);
+      setTodos(prev => prev.map(t => (t.id === todo.id ? { ...t, done: todo.done } : t)));
+    }
+  };
+
+  const handleDeleteTodo = async (todo) => {
+    setTodos(prev => prev.filter(t => t.id !== todo.id));
+    const { error } = await supabase.from('todos').delete().eq('id', todo.id);
+    if (error) {
+      console.error('Error deleting todo:', error);
+      setTodos(prev => [...prev, todo]);
+    }
+  };
+
+  // 할 일을 지금 시각의 기록으로 옮긴다. 옮기면 그 할 일은 완료 처리.
+  const handleTodoToMemo = async (todo) => {
+    if (!currentUser) return;
+    const now = new Date();
+    if (!isSameDay(selectedDate, now)) setSelectedDate(now);
+    const { data, error } = await supabase
+      .from('memos')
+      .insert({
+        user_id: currentUser.id,
+        content: todo.content,
+        color: selectedColor,
+        recorded_at: now.toISOString(),
+        spans_from_prev: false,
+        spans_to_next: false,
+      })
+      .select()
+      .single();
+    if (error) {
+      console.error('Error moving todo to memo:', error);
+      return;
+    }
+    const memo = rowToMemo(data);
+    setMemos(prev => prev.some(m => m.id === memo.id) ? prev : [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
+    if (!todo.done) handleToggleTodo(todo);
   };
 
   // ── 전송 버튼 제스처 ─────────────────────────────────────────
@@ -2242,6 +2347,18 @@ function App() {
             {activeView === 'timeline' && (
               <>
                 <button
+                  className={`header-nav-btn ${showTodoSheet ? 'active' : ''}`}
+                  onClick={() => setShowTodoSheet(v => !v)}
+                  title="할 일"
+                  style={{
+                    backgroundColor: showTodoSheet ? 'var(--primary-color)' : 'transparent',
+                    color: showTodoSheet ? 'white' : 'var(--text-muted)',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <ListChecks size={20} />
+                </button>
+                <button
                   className={`header-nav-btn ${showScheduleView ? 'active' : ''}`}
                   onClick={() => setShowScheduleView(!showScheduleView)}
                   title="일정 보기"
@@ -2739,6 +2856,61 @@ function App() {
         <div className="undo-toast">
           <span>메모가 삭제되었습니다</span>
           <button className="undo-btn" onClick={handleUndo}>취소</button>
+        </div>
+      )}
+
+      {/* 할 일 시트 — 화면을 옮기지 않고 아래에서 올라온다 */}
+      {showTodoSheet && (
+        <div className="todo-backdrop" onClick={() => setShowTodoSheet(false)}>
+          <div className="todo-sheet" onClick={e => e.stopPropagation()}>
+            <div className="todo-sheet-handle" />
+            <div className="todo-sheet-head">
+              <h3>할 일</h3>
+              <button className="todo-close-btn" onClick={() => setShowTodoSheet(false)} title="닫기">
+                <X size={18} />
+              </button>
+            </div>
+
+            <form className="todo-add-row" onSubmit={handleAddTodo}>
+              <input
+                type="text"
+                className="todo-add-input"
+                placeholder="할 일을 적어두세요"
+                value={todoInput}
+                onChange={e => setTodoInput(e.target.value)}
+              />
+              <button type="submit" className="todo-add-btn" disabled={!todoInput.trim()} title="추가">
+                <Plus size={18} />
+              </button>
+            </form>
+
+            <div className="todo-list">
+              {todos.length === 0 ? (
+                <p className="todo-empty">적어두면 여기에 남아있어요.</p>
+              ) : (
+                todos.map(todo => (
+                  <div key={todo.id} className={`todo-item${todo.done ? ' todo-item--done' : ''}`}>
+                    <button
+                      className={`todo-check${todo.done ? ' checked' : ''}`}
+                      onClick={() => handleToggleTodo(todo)}
+                      title={todo.done ? '되돌리기' : '완료'}
+                    />
+                    <span className="todo-text">{todo.content}</span>
+                    <button
+                      className="todo-move-btn"
+                      onClick={() => handleTodoToMemo(todo)}
+                      title="지금 기록으로 옮기기"
+                    >
+                      <CornerDownLeft size={16} />
+                    </button>
+                    <button className="todo-del-btn" onClick={() => handleDeleteTodo(todo)} title="삭제">
+                      <X size={15} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
 

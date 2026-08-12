@@ -1540,6 +1540,144 @@ body {
 
 .auth-google-hint { margin: 10px 0 0; text-align: center; font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; }
 
+/* ── 할 일 시트 ──────────────────────────────────────────────
+   화면을 옮기지 않고 아래에서 올라오는 형태.
+   날짜에 묶지 않으므로 '오늘 몇 개 남음' 같은 표시는 두지 않는다. */
+.todo-backdrop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-end;
+  z-index: 100;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.todo-sheet {
+  background-color: white;
+  width: 100%;
+  max-height: 62%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px 20px 0 0;
+  padding: 8px 16px max(env(safe-area-inset-bottom), 16px);
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.12);
+  animation: sheetUp 0.25s ease-out;
+}
+
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+.todo-sheet-handle {
+  width: 36px; height: 4px;
+  border-radius: 2px;
+  background-color: #e2e5ea;
+  margin: 4px auto 10px;
+  flex-shrink: 0;
+}
+
+.todo-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+.todo-sheet-head h3 { margin: 0; font-size: 1rem; font-weight: 700; }
+
+.todo-close-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); padding: 4px;
+  display: flex; align-items: center;
+}
+
+.todo-add-row {
+  display: flex; gap: 8px; align-items: center;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+.todo-add-input {
+  flex: 1;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  outline: none;
+  background-color: #f7f8fa;
+}
+.todo-add-input:focus { border-color: var(--primary-color); background-color: white; }
+
+.todo-add-btn {
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  border: none;
+  background-color: var(--primary-color);
+  color: white;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.todo-add-btn:disabled { background-color: #e2e5ea; color: #b8bec9; cursor: not-allowed; }
+
+.todo-list { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+.todo-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  padding: 28px 0;
+  margin: 0;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px;
+  border-bottom: 1px solid #f1f3f5;
+}
+.todo-item:last-child { border-bottom: none; }
+
+.todo-check {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid #cfd4dc;
+  background: white;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.todo-check.checked {
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.todo-text {
+  flex: 1;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.todo-item--done .todo-text { color: #b8bec9; text-decoration: line-through; }
+.todo-item--done .todo-move-btn { display: none; }
+
+.todo-move-btn, .todo-del-btn {
+  background: none; border: none; cursor: pointer;
+  padding: 5px;
+  display: flex; align-items: center;
+  flex-shrink: 0;
+  border-radius: 8px;
+}
+.todo-move-btn { color: var(--primary-color); }
+.todo-move-btn:hover { background-color: rgba(74, 114, 255, 0.1); }
+.todo-del-btn { color: #cfd4dc; }
+.todo-del-btn:hover { color: #e53e3e; }
+
 /* ── Spinners ────────────────────────────────────────────────── */
 .spinner { width: 40px; height: 40px; border: 3.5px solid #eef0f2; border-top: 3.5px solid var(--primary-color); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .spinner-small { width: 18px; height: 18px; border: 2px solid rgba(255, 255, 255, 0.35); border-top: 2px solid white; border-radius: 50%; animation: spin 0.8s linear infinite; }
