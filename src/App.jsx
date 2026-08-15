@@ -77,6 +77,12 @@ const HABIT_BORDER = {
 // 커스텀 SMTP(Resend 등)를 붙이면 이 값만 true로 바꾸면 된다.
 const EMAIL_SIGNUP_ENABLED = false;
 
+// 이메일 로그인 개폐 스위치.
+// 2026-08-16에 운영자 계정 데이터를 구글 계정으로 옮기면서 이메일 계정이 하나도
+// 남지 않았다. 아무도 안 쓰는 입구를 열어둘 이유가 없어 닫는다.
+// 이메일 가입자가 다시 생기면(= EMAIL_SIGNUP_ENABLED를 켜면) 이것도 같이 켜야 한다.
+const EMAIL_LOGIN_ENABLED = false;
+
 // ── 가계부 파싱 ───────────────────────────────────────────────
 const INCOME_KEYWORDS = ['수입', '월급', '입금', '받음', '용돈', '환급', '이체받음', '급여'];
 const EXPENSE_KEYWORDS = ['지출', '결제', '구매', '구입', '샀', '먹음', '소비', '납부', '지불'];
@@ -778,8 +784,8 @@ function App() {
       setAuthError('이메일과 비밀번호를 입력해주세요.');
       return;
     }
-    if (authView === 'signup' && !EMAIL_SIGNUP_ENABLED) {
-      setAuthError('지금은 구글로만 가입할 수 있어요.');
+    if (authView === 'signup' ? !EMAIL_SIGNUP_ENABLED : !EMAIL_LOGIN_ENABLED) {
+      setAuthError('지금은 구글 계정으로만 이용할 수 있어요.');
       return;
     }
     if (authView === 'signup') {
@@ -2328,9 +2334,25 @@ function App() {
     }
 
     // 일반 로그인/회원가입 화면
-    // 이메일 가입을 닫아둔 동안 '회원가입' 탭에서는 구글 버튼만 남긴다.
-    // 로그인 탭은 그대로 — 기존 이메일 계정 사용자가 못 들어오면 안 된다.
-    const showEmailFields = authView === 'login' || EMAIL_SIGNUP_ENABLED;
+    // 이메일 입력칸은 그 경로가 열려 있을 때만 보여준다.
+    const showEmailFields = authView === 'login' ? EMAIL_LOGIN_ENABLED : EMAIL_SIGNUP_ENABLED;
+    // 둘 다 닫혀 있으면 로그인/회원가입을 나눌 이유가 없다 — 탭도 없애고 구글 버튼만 남긴다.
+    const emailAuthOpen = EMAIL_LOGIN_ENABLED || EMAIL_SIGNUP_ENABLED;
+    // 자동 로그인은 구글 로그인에도 그대로 적용된다(세션 저장 위치를 정하는 값).
+    // 이메일 칸이 없어지면 이 체크박스만 붕 뜨므로, 그때는 구글 버튼 아래로 내린다.
+    const rememberMeCheckbox = (
+      <div className="auth-remember-container">
+        <label className="auth-remember-label">
+          <input
+            type="checkbox"
+            checked={rememberMe}
+            onChange={e => setRememberMeState(e.target.checked)}
+            className="auth-remember-checkbox"
+          />
+          자동 로그인
+        </label>
+      </div>
+    );
     return (
       <div className="app-container auth-wrapper">
         <div className="auth-card">
@@ -2339,10 +2361,12 @@ function App() {
             <h2>타임메모</h2>
             <p>오늘 하루를 시간 단위로 꼼꼼하게 기록하세요</p>
           </div>
+          {emailAuthOpen && (
           <div className="auth-tabs">
             <button type="button" className={`auth-tab ${authView === 'login' ? 'active' : ''}`} onClick={() => { setAuthView('login'); setAuthError(''); }}>로그인</button>
             <button type="button" className={`auth-tab ${authView === 'signup' ? 'active' : ''}`} onClick={() => { setAuthView('signup'); setAuthError(''); }}>회원가입</button>
           </div>
+          )}
           <form onSubmit={handleAuthSubmit} className="auth-form">
             {showEmailFields && (
             <div className="form-group">
@@ -2377,19 +2401,7 @@ function App() {
                 )}
               </div>
             )}
-            {authView === 'login' && (
-              <div className="auth-remember-container">
-                <label className="auth-remember-label">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={e => setRememberMeState(e.target.checked)}
-                    className="auth-remember-checkbox"
-                  />
-                  자동 로그인
-                </label>
-              </div>
-            )}
+            {authView === 'login' && EMAIL_LOGIN_ENABLED && rememberMeCheckbox}
             {authError && (authView === 'login' || (!authError.includes('이메일') && !authError.includes('비밀번호') && !authError.includes('공백') && !authError.includes('일치'))) && (
               <div className="auth-error-message">{authError}</div>
             )}
@@ -2407,15 +2419,15 @@ function App() {
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.85z" />
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.85c.87-2.6 3.3-4.53 6.16-4.53z" />
               </svg>
-              {authView === 'signup' ? '구글로 시작하기' : '구글로 로그인'}
+              {authView === 'signup' || !emailAuthOpen ? '구글로 시작하기' : '구글로 로그인'}
             </button>
-            {authView === 'signup' && (
+            {!emailAuthOpen && rememberMeCheckbox}
+            {(authView === 'signup' || !emailAuthOpen) && (
               <p className="auth-google-hint">
-                구글로 시작하면 따로 가입할 필요 없이 바로 사용할 수 있어요.
-                {!EMAIL_SIGNUP_ENABLED && ' 지금은 구글로만 가입할 수 있어요.'}
+                구글 계정으로 바로 시작할 수 있어요. 따로 가입할 필요 없습니다.
               </p>
             )}
-            {authView === 'login' && (
+            {authView === 'login' && EMAIL_LOGIN_ENABLED && (
               <div style={{ textAlign: 'center', marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e5e5e5' }}>
                 <button
                   type="button"
