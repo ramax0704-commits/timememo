@@ -49,12 +49,14 @@ if (!key) {
 
 const headers = { apikey: key, Authorization: `Bearer ${key}` };
 
-// 한 번에 다 받으면 큰 테이블에서 잘리므로 1000개씩 끊어 받는다
-async function fetchAll(table) {
+// 한 번에 다 받으면 큰 테이블에서 잘리므로 1000개씩 끊어 받는다.
+// 페이지를 나눠 받을 때 순서가 고정돼야 빠지거나 겹치는 행이 안 생기므로
+// 테이블마다 기본키로 정렬한다 (settings 는 id 가 없고 user_id 가 기본키다).
+async function fetchAll(table, orderBy) {
   const rows = [];
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
-    const res = await fetch(`${url}/rest/v1/${table}?select=*&order=id`, {
+    const res = await fetch(`${url}/rest/v1/${table}?select=*&order=${orderBy}`, {
       headers: { ...headers, Range: `${from}-${from + pageSize - 1}` },
     });
     if (!res.ok) throw new Error(`${table}: HTTP ${res.status} ${await res.text()}`);
@@ -85,9 +87,9 @@ const outPath = join(outDir, `timememo-${stamp}.json`);
 
 try {
   const [memos, settings, todos, users] = await Promise.all([
-    fetchAll('memos'),
-    fetchAll('settings'),
-    fetchAll('todos'),
+    fetchAll('memos', 'id'),
+    fetchAll('settings', 'user_id'),
+    fetchAll('todos', 'id'),
     fetchUsers(),
   ]);
 
