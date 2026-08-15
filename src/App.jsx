@@ -68,6 +68,15 @@ const HABIT_BORDER = {
   orange: '#fdba74',
 };
 
+// 이메일 회원가입 개폐 스위치.
+// Supabase 기본 SMTP는 시간당 2통 + 팀 멤버 주소로만 발송이라, 모르는 사람이
+// 이메일로 가입하면 인증 메일을 못 받고 그대로 막힌다. 그래서 신규 가입은
+// 구글로만 받는다(구글은 인증 메일 자체가 없음).
+// 기존 이메일 계정의 '로그인'은 그대로 열려 있다 — 막으면 기존 사용자가 자기
+// 데이터에 못 들어간다.
+// 커스텀 SMTP(Resend 등)를 붙이면 이 값만 true로 바꾸면 된다.
+const EMAIL_SIGNUP_ENABLED = false;
+
 // ── 가계부 파싱 ───────────────────────────────────────────────
 const INCOME_KEYWORDS = ['수입', '월급', '입금', '받음', '용돈', '환급', '이체받음', '급여'];
 const EXPENSE_KEYWORDS = ['지출', '결제', '구매', '구입', '샀', '먹음', '소비', '납부', '지불'];
@@ -767,6 +776,10 @@ function App() {
     setAuthError('');
     if (!authEmail.trim() || !authPassword.trim()) {
       setAuthError('이메일과 비밀번호를 입력해주세요.');
+      return;
+    }
+    if (authView === 'signup' && !EMAIL_SIGNUP_ENABLED) {
+      setAuthError('지금은 구글로만 가입할 수 있어요.');
       return;
     }
     if (authView === 'signup') {
@@ -2315,6 +2328,9 @@ function App() {
     }
 
     // 일반 로그인/회원가입 화면
+    // 이메일 가입을 닫아둔 동안 '회원가입' 탭에서는 구글 버튼만 남긴다.
+    // 로그인 탭은 그대로 — 기존 이메일 계정 사용자가 못 들어오면 안 된다.
+    const showEmailFields = authView === 'login' || EMAIL_SIGNUP_ENABLED;
     return (
       <div className="app-container auth-wrapper">
         <div className="auth-card">
@@ -2328,6 +2344,7 @@ function App() {
             <button type="button" className={`auth-tab ${authView === 'signup' ? 'active' : ''}`} onClick={() => { setAuthView('signup'); setAuthError(''); }}>회원가입</button>
           </div>
           <form onSubmit={handleAuthSubmit} className="auth-form">
+            {showEmailFields && (
             <div className="form-group">
               <label>이메일</label>
               <input type="text" placeholder="example@email.com" value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="input-field auth-input" />
@@ -2337,6 +2354,8 @@ function App() {
                 </div>
               )}
             </div>
+            )}
+            {showEmailFields && (
             <div className="form-group">
               <label>비밀번호</label>
               <input type="password" placeholder={authView === 'signup' ? '8~16자 (영문, 숫자, 특수문자)' : '비밀번호 입력'} value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="input-field auth-input" />
@@ -2346,7 +2365,8 @@ function App() {
                 </div>
               )}
             </div>
-            {authView === 'signup' && (
+            )}
+            {authView === 'signup' && showEmailFields && (
               <div className="form-group animate-fade-in">
                 <label>비밀번호 확인</label>
                 <input type="password" placeholder="비밀번호 재입력" value={authConfirmPassword} onChange={e => setAuthConfirmPassword(e.target.value)} className="input-field auth-input" />
@@ -2373,11 +2393,13 @@ function App() {
             {authError && (authView === 'login' || (!authError.includes('이메일') && !authError.includes('비밀번호') && !authError.includes('공백') && !authError.includes('일치'))) && (
               <div className="auth-error-message">{authError}</div>
             )}
+            {showEmailFields && (
             <button type="submit" className="btn-save auth-submit-btn" disabled={submittingAuth}>
               {submittingAuth ? <span className="spinner-small" /> : (authView === 'signup' ? '회원가입하기' : '로그인하기')}
             </button>
+            )}
             {/* 구글은 가입 절차가 따로 없어 로그인/회원가입 양쪽에 둔다 */}
-            <div className="auth-divider"><span>또는</span></div>
+            {showEmailFields && <div className="auth-divider"><span>또는</span></div>}
             <button type="button" className="google-signin-btn" onClick={handleGoogleSignIn} disabled={submittingAuth}>
               <svg viewBox="0 0 24 24" width="18" height="18" style={{ marginRight: '10px' }}>
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -2388,7 +2410,10 @@ function App() {
               {authView === 'signup' ? '구글로 시작하기' : '구글로 로그인'}
             </button>
             {authView === 'signup' && (
-              <p className="auth-google-hint">구글로 시작하면 따로 가입할 필요 없이 바로 사용할 수 있어요.</p>
+              <p className="auth-google-hint">
+                구글로 시작하면 따로 가입할 필요 없이 바로 사용할 수 있어요.
+                {!EMAIL_SIGNUP_ENABLED && ' 지금은 구글로만 가입할 수 있어요.'}
+              </p>
             )}
             {authView === 'login' && (
               <div style={{ textAlign: 'center', marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e5e5e5' }}>
@@ -2410,6 +2435,12 @@ function App() {
               </div>
             )}
           </form>
+          {/* 처음 들어온 사람이 가입 전에 확인할 수 있어야 해서 로그인 화면에 둔다 */}
+          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '0.8rem', color: '#999' }}>
+            <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: '#999' }}>
+              개인정보처리방침
+            </a>
+          </p>
         </div>
       </div>
     );

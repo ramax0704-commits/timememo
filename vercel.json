@@ -1,6 +1,6 @@
 {
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|privacy).*)", "destination": "/index.html" }
   ],
   "crons": [
     { "path": "/api/keepalive", "schedule": "0 3 * * *" }

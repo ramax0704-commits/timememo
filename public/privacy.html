@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>타임메모 개인정보처리방침</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    max-width: 40rem; margin: 0 auto; padding: 2rem 1.25rem 4rem;
+    font-family: Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+    line-height: 1.75; color: #222; background: #fff;
+    word-break: keep-all;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.05rem; margin-top: 2.25rem; }
+  .updated { color: #777; font-size: .875rem; margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .925rem; }
+  th, td { border: 1px solid #e2e2e2; padding: .5rem .625rem; text-align: left; vertical-align: top; }
+  th { background: #fafafa; font-weight: 600; }
+  .note { background: #f7f7f9; border-left: 3px solid #5b6bf5; padding: .75rem 1rem; margin: 1.5rem 0; font-size: .95rem; }
+  a { color: #3b5bdb; }
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid #eee; font-size: .875rem; color: #777; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #16171a; color: #e6e6e6; }
+    th { background: #1f2024; }
+    th, td { border-color: #303136; }
+    .note { background: #1d1e23; }
+    .updated, footer { color: #999; }
+    a { color: #8fa3ff; }
+  }
+</style>
+</head>
+<body>
+
+<h1>타임메모 개인정보처리방침</h1>
+<p class="updated">최종 수정일: 2026년 8월 16일</p>
+
+<p>타임메모(이하 "서비스")는 이용자가 직접 남긴 기록을 다루는 서비스입니다. 기록은 이용자 본인만 볼 수 있으며, 운영자는 이용자의 기록 내용을 열람하지 않습니다.</p>
+
+<h2>1. 수집하는 정보</h2>
+<table>
+  <tr><th>항목</th><th>수집 방법</th><th>목적</th></tr>
+  <tr><td>이메일 주소</td><td>구글 로그인 또는 이메일 가입 시</td><td>계정 식별, 로그인</td></tr>
+  <tr><td>이용자가 작성한 기록 (메모, 할 일, 습관 키워드, 색상, 기록 시각)</td><td>이용자가 직접 입력</td><td>서비스 제공 (기록 저장 및 표시)</td></tr>
+  <tr><td>서비스 이용 기록 (화면 이동, 기능 사용 여부, 접속 시각, 기기·브라우저 종류)</td><td>자동 수집</td><td>어떤 기능이 쓰이는지 파악해 서비스 개선</td></tr>
+</table>
+
+<div class="note">
+  <strong>기록의 내용은 분석 도구로 전송되지 않습니다.</strong>
+  이용 기록 분석에는 Mixpanel을 사용하며, "기록을 작성했다"는 사실과 글자 수, 지출·습관 키워드 포함 여부 같은 형태 정보만 전달됩니다.
+  메모·할 일의 <em>실제 내용</em>, 습관 키워드의 <em>이름</em>, 이메일 주소는 전달되지 않습니다.
+  또한 IP 기반 위치 수집은 꺼져 있습니다.
+</div>
+
+<h2>2. 보관 장소와 처리 위탁</h2>
+<p>서비스는 아래 사업자의 인프라를 이용하며, 이들 서버는 국외에 있을 수 있습니다.</p>
+<table>
+  <tr><th>수탁 업체</th><th>역할</th><th>전달되는 정보</th></tr>
+  <tr><td>Supabase</td><td>계정 인증, 데이터베이스</td><td>이메일 주소, 이용자가 작성한 기록</td></tr>
+  <tr><td>Vercel</td><td>웹사이트 호스팅</td><td>접속 요청 처리에 필요한 정보</td></tr>
+  <tr><td>Google</td><td>구글 로그인</td><td>로그인에 사용한 계정의 이메일 주소</td></tr>
+  <tr><td>Mixpanel</td><td>이용 기록 분석</td><td>1항의 "서비스 이용 기록" (기록 내용 제외)</td></tr>
+</table>
+
+<h2>3. 보관 기간과 파기</h2>
+<ul>
+  <li>이용자의 계정과 기록은 <strong>회원 탈퇴 시 즉시 삭제</strong>되며 복구되지 않습니다.</li>
+  <li>탈퇴는 앱 안에서 <strong>마이페이지 → 회원탈퇴</strong>로 직접 하실 수 있습니다.</li>
+  <li>서비스 이용 기록(분석 데이터)은 개인을 식별할 수 없는 형태로 남을 수 있습니다.</li>
+</ul>
+
+<h2>4. 이용자의 권리</h2>
+<p>이용자는 언제든지 자신의 기록을 조회·수정·삭제할 수 있고, 계정을 삭제할 수 있습니다. 그 외 개인정보의 열람이나 처리 정지를 원하시면 아래 연락처로 요청해 주세요.</p>
+
+<h2>5. 안전성 확보 조치</h2>
+<ul>
+  <li>모든 통신은 HTTPS로 암호화됩니다.</li>
+  <li>데이터베이스에 행 수준 보안(RLS)을 적용해, 로그인한 본인의 기록만 읽고 쓸 수 있습니다.</li>
+  <li>비밀번호는 인증 사업자(Supabase)가 암호화하여 보관하며, 운영자는 확인할 수 없습니다.</li>
+</ul>
+
+<h2>6. 유의사항</h2>
+<div class="note">
+  타임메모는 개인이 만들어 운영하는 서비스이며, 현재 무료 요금제 인프라를 사용합니다.
+  운영자가 주기적으로 백업하고 있으나 <strong>데이터 손실에 대한 보증은 제공하지 않습니다.</strong>
+  잃어버리면 안 되는 기록은 별도로 보관해 주세요.
+</div>
+
+<h2>7. 문의</h2>
+<p>개인정보 관련 문의: <a href="mailto:ramax0704@gmail.com">ramax0704@gmail.com</a></p>
+
+<footer>
+  이 방침이 변경되면 이 페이지에 수정일과 함께 공지합니다.<br />
+  <a href="/">← 타임메모로 돌아가기</a>
+</footer>
+
+</body>
+</html>

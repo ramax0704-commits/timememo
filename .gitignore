@@ -25,3 +25,6 @@ dist-ssr
 .gstack/
 .vercel
 .env*
+
+# 백업 파일에는 사용자 이메일과 기록 전체가 들어간다. 저장소가 Public이므로 절대 올리면 안 된다.
+backups/
