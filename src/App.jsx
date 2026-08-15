@@ -2657,6 +2657,21 @@ function App() {
                   {isToday(selectedDate) ? '오늘의' : `${format(selectedDate, 'M월 d일')}의`} 기록이 없습니다.<br />
                   아래에서 첫 메모를 남겨보세요!
                 </p>
+                {/* 로그인이 풀린 채로 돌아온 사람은 여기서 텅 빈 화면을 만난다.
+                    기록은 서버에 멀쩡히 있는데 사라진 줄 알고 떠나므로, 돌아갈 길을 여기 둔다.
+                    체험 기록이 하나라도 있으면 굳이 안 띄운다 — 지금 쓰고 있는 사람에겐 방해다. */}
+                {isGuest && memos.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowLogin(true)}
+                    style={{
+                      marginTop: '18px', background: 'none', border: 'none', padding: 0,
+                      color: 'var(--primary-color)', fontSize: '0.875rem', cursor: 'pointer',
+                    }}
+                  >
+                    이미 쓰던 계정이 있나요? 로그인
+                  </button>
+                )}
               </div>
             ) : (
               memoGroups.map((group, groupIdx) => (
