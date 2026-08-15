@@ -29,6 +29,10 @@ if (analyticsEnabled) {
   });
 }
 
+// 절대 보내지 않는 것: 메모 내용, 할 일 내용, 키워드 이름, 이메일.
+// 개인 기록 앱이라 '무엇을 썼는지'는 남기지 않고 '무엇을 했는지'만 남긴다.
+// 길이·개수·참/거짓처럼 되돌릴 수 없는 형태로만 보낸다.
+
 // 앱 어디서든 이걸로 이벤트를 보낸다.
 // 토큰이 없거나 초기화 전이어도 그냥 넘어가도록 감싸둠 — 분석 때문에 앱이 죽으면 안 된다
 export function track(event, props) {
@@ -38,6 +42,37 @@ export function track(event, props) {
   } catch {
     // 광고 차단기 등으로 전송이 막혀도 무시
   }
+}
+
+// 같은 사람이 폰과 노트북에서 써도 한 명으로 묶어준다.
+// 이게 없으면 기기마다 딴 사람으로 잡혀서 재방문·이탈을 아예 측정할 수 없다.
+export function identifyUser(user) {
+  if (!analyticsEnabled || !user?.id) return;
+  try {
+    mixpanel.identify(user.id);
+    // 이메일은 보내지 않는다. 가입일과 로그인 수단만 있으면 코호트 분석은 충분하다.
+    mixpanel.people.set({
+      가입일: user.created_at,
+      로그인수단: user.app_metadata?.provider || 'email',
+    });
+  } catch {
+    // 무시
+  }
+}
+
+// 로그아웃 시 호출. 다음 사람의 행동이 앞사람에게 붙는 걸 막는다.
+export function resetUser() {
+  if (!analyticsEnabled) return;
+  try {
+    mixpanel.reset();
+  } catch {
+    // 무시
+  }
+}
+
+// 앱이 한 번 열릴 때마다 1회. '마지막 접속일'과 재방문율은 Mixpanel이 이 이벤트로 계산한다.
+if (analyticsEnabled) {
+  track('App Opened');
 }
 
 export default mixpanel;

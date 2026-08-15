@@ -17,6 +17,7 @@ import {
 import { ko } from 'date-fns/locale';
 import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft } from 'lucide-react';
 import { supabase, setRememberMe, getRememberMe } from './supabase';
+import { track, identifyUser, resetUser } from './analytics';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
 function rowToMemo(row) {
@@ -487,17 +488,51 @@ function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setCurrentUser(session?.user ?? null);
+      if (session?.user) identifyUser(session.user);
       setAuthLoading(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       // 재설정 링크 클릭 시 임시 로그인되므로, 홈이 아니라 새 비밀번호 화면을 띄운다
       if (event === 'PASSWORD_RECOVERY') setIsRecovery(true);
+      if (session?.user) {
+        identifyUser(session.user);
+        // 구글 로그인은 첫 로그인이 곧 가입이라 가입 시점을 따로 잡을 데가 없다.
+        // 계정이 만들어진 지 1분 안이면 방금 가입한 것으로 본다.
+        // (이메일 가입은 인증 메일을 거쳐 한참 뒤에 로그인되므로 여기서 안 잡고 가입 폼에서 직접 보낸다)
+        const provider = session.user.app_metadata?.provider;
+        const justCreated = Date.now() - new Date(session.user.created_at).getTime() < 60000;
+        if (event === 'SIGNED_IN' && provider === 'google' && justCreated) {
+          track('Signed Up', { method: 'google' });
+        }
+      } else if (event === 'SIGNED_OUT') {
+        resetUser();
+      }
       setCurrentUser(session?.user ?? null);
       if (!session?.user) setMemos([]);
       setAuthLoading(false);
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // ── 화면 이동 기록 ───────────────────────────────────────────
+  // 탭 버튼마다 심지 않고 상태 변화를 한 곳에서 본다.
+  // 먼슬리 날짜를 눌러 스케줄로 들어가는 것처럼 버튼을 안 거치는 경로까지 같이 잡힌다.
+  const lastScreenRef = useRef(null);
+  useEffect(() => {
+    // 로그인 전에는 어차피 로그인 화면만 보이므로 세지 않는다.
+    // (안 막으면 앱을 열기만 해도 타임라인 조회수가 올라가 화면별 비교가 망가진다)
+    if (!currentUser) {
+      lastScreenRef.current = null;
+      return;
+    }
+    const screen =
+      activeView === 'timeline'
+        ? (showScheduleView ? 'timeline_schedule' : 'timeline_chat')
+        : activeView === 'settings' ? 'mypage' : activeView;
+    if (lastScreenRef.current === screen) return;
+    track('Screen Viewed', { screen, previous_screen: lastScreenRef.current });
+    lastScreenRef.current = screen;
+  }, [currentUser, activeView, showScheduleView]);
 
   // ── 메모 불러오기 + 실시간 동기화 ────────────────────────────
   const userId = currentUser?.id;
@@ -767,6 +802,7 @@ function App() {
           setAuthError('이미 가입된 이메일입니다.');
           return;
         }
+        track('Signed Up', { method: 'email' });
         // 인증 메일 발송됨 화면으로 (재발송 위해 authEmail은 유지)
         setAuthView('emailVerification');
         setAuthPassword('');
@@ -894,6 +930,7 @@ function App() {
     setSelectedSchedule(s => s && s.startMemoId === schedule.startMemoId
       ? { ...s, spansToNext: next }
       : s);
+    track('Memo Edited', { changed: 'block', block_option: 'spans_to_next', turned_on: next });
   };
 
   const writeMemoFields = async (memoId, dbFields, localFields) => {
@@ -919,6 +956,13 @@ function App() {
       { spansFromPrev: turningOn, backMinutes: 0 }
     );
     if (!ok) return;
+    track('Memo Edited', {
+      changed: 'block',
+      block_option: 'spans_from_prev',
+      turned_on: turningOn,
+      // 직접 고친 시작 시각을 버리고 이전 기록에 다시 맞춘 경우
+      reset: forceReset,
+    });
     // 켜면 시작 시각 칸이 이전 기록 시각을 가리켜야 한다 (블록 스냅샷은 아직 옛 값이라 직접 계산)
     const s = derivedStartMinutes({ ...schedule, spansFromPrev: turningOn, backMinutes: 0 });
     setAdjustStartHour(String(Math.floor(((s % 1440) + 1440) % 1440 / 60)));
@@ -1118,9 +1162,29 @@ function App() {
       alert('메모 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
       return;
     }
+    trackMemoCreated(newMemoData.content, {
+      source: 'direct',
+      // 짧게 탭 / 위로 끌기 / 아래로 끌기 — 제스처가 실제로 쓰이는지 보려는 값
+      gesture: mode === 'prev' ? 'from_prev' : mode === 'next' ? 'to_next' : 'single',
+    });
     // 바로 화면에 반영 (실시간 이벤트가 오면 중복은 무시됨)
     const memo = rowToMemo(data);
     setMemos(prev => prev.some(m => m.id === memo.id) ? prev : [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
+  };
+
+  // 기록 하나가 만들어질 때 보내는 공통 이벤트.
+  // 내용 자체는 절대 보내지 않고, 거기서 뽑은 성격만 보낸다.
+  const trackMemoCreated = (content, extra) => {
+    const fin = parseFinance(content);
+    track('Memo Created', {
+      ...extra,
+      hour: new Date().getHours(),
+      content_length: content.length,
+      has_expense: fin?.type === 'expense',
+      has_income: fin?.type === 'income',
+      has_habit_keyword: habitKeywords.some(k => k?.name && !k.endedAt && content.includes(k.name)),
+      color: selectedColor,
+    });
   };
 
   // ── 할 일 ───────────────────────────────────────────────────
@@ -1140,16 +1204,20 @@ function App() {
       return;
     }
     setTodos(prev => prev.some(t => t.id === data.id) ? prev : [...prev, data]);
+    track('Todo Action', { action: 'added', open_count: todos.filter(t => !t.done).length + 1 });
   };
 
-  const handleToggleTodo = async (todo) => {
+  // silent: 기록으로 옮기면서 자동 완료되는 경우. 그때는 'moved_to_memo'로 한 번만 세야 해서 여기선 안 보낸다
+  const handleToggleTodo = async (todo, { silent = false } = {}) => {
     const next = !todo.done;
     setTodos(prev => prev.map(t => (t.id === todo.id ? { ...t, done: next } : t)));
     const { error } = await supabase.from('todos').update({ done: next }).eq('id', todo.id);
     if (error) {
       console.error('Error toggling todo:', error);
       setTodos(prev => prev.map(t => (t.id === todo.id ? { ...t, done: todo.done } : t)));
+      return;
     }
+    if (!silent) track('Todo Action', { action: next ? 'completed' : 'reopened' });
   };
 
   const handleDeleteTodo = async (todo) => {
@@ -1158,7 +1226,9 @@ function App() {
     if (error) {
       console.error('Error deleting todo:', error);
       setTodos(prev => [...prev, todo]);
+      return;
     }
+    track('Todo Action', { action: 'deleted', was_done: todo.done });
   };
 
   // 할 일을 지금 시각의 기록으로 옮긴다. 옮기면 그 할 일은 완료 처리.
@@ -1184,7 +1254,10 @@ function App() {
     }
     const memo = rowToMemo(data);
     setMemos(prev => prev.some(m => m.id === memo.id) ? prev : [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
-    if (!todo.done) handleToggleTodo(todo);
+    // 드래그 대신 버튼으로 타협한 동선이라, 이게 실제로 눌리는지가 이번 2주의 확인 대상
+    track('Todo Action', { action: 'moved_to_memo' });
+    trackMemoCreated(todo.content, { source: 'todo', gesture: 'single' });
+    if (!todo.done) handleToggleTodo(todo, { silent: true });
   };
 
   // ── 전송 버튼 제스처 ─────────────────────────────────────────
@@ -1257,6 +1330,11 @@ function App() {
       } else {
         setMemos(prev => prev.map(m => m.id === editingMemoId ? { ...m, recordedAt: newDate.toISOString() } : m)
           .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
+        track('Memo Edited', {
+          changed: 'time',
+          // 날짜까지 바꿨는지 (지난 날 기록을 채워넣는 행동인지 보려는 값)
+          date_changed: !isSameDay(new Date(memoToEdit.recordedAt), newDate),
+        });
       }
     }
     setEditingMemoId(null);
@@ -1280,6 +1358,10 @@ function App() {
       console.error('Error updating content:', error);
     } else {
       setMemos(prev => prev.map(m => m.id === editingContentMemo.id ? { ...m, content: editContentStr, color: editMemoColor } : m));
+      track('Memo Edited', {
+        changed: 'content',
+        color_changed: (editingContentMemo.color || 'default') !== editMemoColor,
+      });
     }
     setEditingContentMemo(null);
   };
@@ -1335,6 +1417,15 @@ function App() {
   };
 
   const saveKeywordModal = async () => {
+    // 모달이 draft 방식(취소 가능)이라 추가·보관·삭제를 누르는 순간에는 아직 확정이 아니다.
+    // 저장 버튼을 누른 이 시점에 원본과 비교해서 실제로 무슨 일이 있었는지 한 번만 보낸다.
+    const wasActive = (list, name) => list.some(k => k.name === name && !k.endedAt);
+    track('Habit Keyword Saved', {
+      added_count: draftKeywords.filter(k => !k.endedAt && !wasActive(habitKeywords, k.name)).length,
+      archived_count: draftKeywords.filter(k => k.endedAt && wasActive(habitKeywords, k.name)).length,
+      deleted_count: habitKeywords.filter(k => !k.endedAt && !draftKeywords.some(d => d.name === k.name)).length,
+      active_count: draftKeywords.filter(k => !k.endedAt).length,
+    });
     setHabitKeywords(draftKeywords);
     await saveHabitKeywords(draftKeywords);
     setShowKeywordModal(false);
