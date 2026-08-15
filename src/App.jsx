@@ -18,6 +18,7 @@ import { ko } from 'date-fns/locale';
 import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft } from 'lucide-react';
 import { supabase, setRememberMe, getRememberMe } from './supabase';
 import { track, identifyUser, resetUser } from './analytics';
+import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
 function rowToMemo(row) {
@@ -67,6 +68,13 @@ const HABIT_BORDER = {
   pink:   '#f9a8d4',
   orange: '#fdba74',
 };
+
+// 체험 모드에서 브라우저에 담아둔 기록을 화면에 쓸 모양으로 꺼낸다
+function loadGuestMemos() {
+  return loadGuestRows()
+    .map(rowToMemo)
+    .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+}
 
 // 이메일 회원가입 개폐 스위치.
 // Supabase 기본 SMTP는 시간당 2통 + 팀 멤버 주소로만 발송이라, 모르는 사람이
@@ -340,7 +348,8 @@ function App() {
   );
 
   // Global States
-  const [memos, setMemos] = useState([]);
+  // 로그인 전이면 브라우저에 담아둔 체험 기록으로 시작한다
+  const [memos, setMemos] = useState(loadGuestMemos);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [inputText, setInputText] = useState('');
   const [selectedColor, setSelectedColor] = useState('default');
@@ -359,6 +368,12 @@ function App() {
   const [submittingAuth, setSubmittingAuth] = useState(false);
   const [rememberMe, setRememberMeState] = useState(getRememberMe());
   const [showMyPage, setShowMyPage] = useState(false);
+  // 체험 모드: 로그인 전에도 앱을 쓰게 하고, 로그인 화면은 필요할 때만 띄운다
+  const [showLogin, setShowLogin] = useState(false);
+  // 로그인 직후 체험 기록을 계정으로 옮기는 중인지
+  const [migratingGuest, setMigratingGuest] = useState(false);
+  // 체험 모드 = 로그인 안 한 상태. 기록은 브라우저에만 담긴다.
+  const isGuest = !currentUser;
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotEmailSent, setForgotEmailSent] = useState(false);
@@ -523,7 +538,8 @@ function App() {
         resetUser();
       }
       setCurrentUser(session?.user ?? null);
-      if (!session?.user) setMemos([]);
+      // 로그아웃하면 체험 모드로 돌아간다 (보통은 비어 있다)
+      if (!session?.user) setMemos(loadGuestMemos());
       setAuthLoading(false);
     });
     return () => subscription.unsubscribe();
@@ -534,24 +550,26 @@ function App() {
   // 먼슬리 날짜를 눌러 스케줄로 들어가는 것처럼 버튼을 안 거치는 경로까지 같이 잡힌다.
   const lastScreenRef = useRef(null);
   useEffect(() => {
-    // 로그인 전에는 어차피 로그인 화면만 보이므로 세지 않는다.
-    // (안 막으면 앱을 열기만 해도 타임라인 조회수가 올라가 화면별 비교가 망가진다)
-    if (!currentUser) {
-      lastScreenRef.current = null;
-      return;
-    }
+    // 로그인 화면을 보고 있는 동안은 세지 않는다 (앱 화면을 본 게 아니다)
+    if (showLogin) return;
     const screen =
       activeView === 'timeline'
         ? (showScheduleView ? 'timeline_schedule' : 'timeline_chat')
         : activeView === 'settings' ? 'mypage' : activeView;
     if (lastScreenRef.current === screen) return;
-    track('Screen Viewed', { screen, previous_screen: lastScreenRef.current });
+    // 체험 중 조회와 로그인 후 조회는 성격이 달라 구분해서 남긴다
+    track('Screen Viewed', { screen, previous_screen: lastScreenRef.current, guest: isGuest });
     lastScreenRef.current = screen;
-  }, [currentUser, activeView, showScheduleView]);
+  }, [isGuest, showLogin, activeView, showScheduleView]);
 
   // ── 메모 불러오기 + 실시간 동기화 ────────────────────────────
   const userId = currentUser?.id;
+  // 체험 기록 한 건의 값을 바꾼다 (서버 update 자리에 들어가는 대역)
+  const patchGuestRow = (id, patch) => {
+    saveGuestRows(loadGuestRows().map(r => (r.id === id ? { ...r, ...patch } : r)));
+  };
   useEffect(() => {
+    // 체험 모드에는 서버가 없다. 기록은 state 초기값과 로그아웃 시점에 채운다.
     if (!userId) return;
 
     const sortByTime = (list) => [...list].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
@@ -585,6 +603,46 @@ function App() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
+  }, [userId]);
+
+  // ── 체험 기록을 계정으로 옮기기 ──────────────────────────────
+  // 로그인하고 나서 써둔 게 사라지면 로그인 벽보다 나쁜 경험이 된다.
+  // 그래서 로그인 직후 딱 한 번, 브라우저에 담긴 걸 계정으로 올린다.
+  useEffect(() => {
+    if (!userId) return;
+    const rows = loadGuestRows();
+    if (rows.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      setMigratingGuest(true);
+      const payload = rows.map(r => ({
+        user_id: userId,
+        content: r.content,
+        color: r.color ?? 'default',
+        recorded_at: r.recorded_at,
+        spans_from_prev: r.spans_from_prev ?? false,
+        spans_to_next: r.spans_to_next ?? false,
+        back_minutes: r.back_minutes ?? 0,
+      }));
+      const { error } = await supabase.from('memos').insert(payload);
+      if (error) {
+        // 실패하면 체험 기록을 지우지 않는다. 다음 로그인 때 다시 시도할 수 있어야 한다.
+        console.error('체험 기록 이관 실패:', error);
+        if (!cancelled) setMigratingGuest(false);
+        return;
+      }
+      clearGuestRows();
+      track('Guest Memos Migrated', { count: payload.length });
+
+      // 임시 id로 들고 있던 화면 상태를 서버 기준으로 다시 맞춘다
+      const { data } = await supabase.from('memos').select('*').order('recorded_at', { ascending: true });
+      if (cancelled) return;
+      if (data) setMemos(data.map(rowToMemo));
+      setMigratingGuest(false);
+    })();
+
+    return () => { cancelled = true; };
   }, [userId]);
 
   // ── Settings 불러오기 ────────────────────────────────────────
@@ -743,8 +801,6 @@ function App() {
 
   // ── Undo 삭제 ────────────────────────────────────────────────
   const handleDeleteWithUndo = useCallback(async (memo) => {
-    if (!currentUser) return;
-
     // 스크롤 위치 저장
     scrollPositionRef.current = timelineRef.current?.scrollTop ?? null;
 
@@ -755,6 +811,12 @@ function App() {
     setMemos(prev => prev.filter(m => m.id !== memo.id));
 
     const timer = setTimeout(async () => {
+      // 체험 모드는 브라우저에서만 지우면 끝
+      if (isGuest) {
+        saveGuestRows(loadGuestRows().filter(r => r.id !== memo.id));
+        setUndoToast(null);
+        return;
+      }
       // 5초 후 실제 삭제
       const { error } = await supabase.from('memos').delete().eq('id', memo.id);
       if (error) {
@@ -765,7 +827,7 @@ function App() {
     }, 5000);
 
     setUndoToast({ memo, timer });
-  }, [currentUser, undoToast]);
+  }, [isGuest, undoToast]);
 
   const handleUndo = useCallback(async () => {
     if (!undoToast) return;
@@ -936,23 +998,22 @@ function App() {
   // 다음 기록까지 이을지 토글 (스위치는 즉시 저장)
   const handleToggleSpans = async (schedule) => {
     const next = !schedule.spansToNext;
-    const { error } = await supabase
-      .from('memos')
-      .update({ spans_to_next: next })
-      .eq('id', schedule.startMemoId);
-    if (error) {
-      console.error('Error toggling spans_to_next:', error);
-      alert('변경에 실패했습니다. 잠시 후 다시 시도해주세요.');
-      return;
-    }
-    setMemos(prev => prev.map(m => m.id === schedule.startMemoId ? { ...m, spansToNext: next } : m));
-    setSelectedSchedule(s => s && s.startMemoId === schedule.startMemoId
-      ? { ...s, spansToNext: next }
-      : s);
+    const ok = await writeMemoFields(
+      schedule.startMemoId,
+      { spans_to_next: next },
+      { spansToNext: next }
+    );
+    if (!ok) return;
     track('Memo Edited', { changed: 'block', block_option: 'spans_to_next', turned_on: next });
   };
 
   const writeMemoFields = async (memoId, dbFields, localFields) => {
+    if (isGuest) {
+      patchGuestRow(memoId, dbFields);
+      setMemos(prev => prev.map(m => m.id === memoId ? { ...m, ...localFields } : m));
+      setSelectedSchedule(s => s && s.startMemoId === memoId ? { ...s, ...localFields } : s);
+      return true;
+    }
     const { error } = await supabase.from('memos').update(dbFields).eq('id', memoId);
     if (error) {
       console.error('Error updating memo:', error);
@@ -1159,7 +1220,7 @@ function App() {
   // mode: 'single'(기본) | 'prev'(이전 기록부터) | 'next'(다음 기록까지)
   const handleAddMemo = async (e, mode = 'single') => {
     e?.preventDefault();
-    if (!inputText.trim() || !currentUser) return;
+    if (!inputText.trim()) return;
     const now = new Date();
     // 자정이 지났으면 selectedDate 업데이트
     if (!isSameDay(selectedDate, now)) {
@@ -1167,7 +1228,7 @@ function App() {
     }
     // 항상 현재 시간과 날짜로 기록
     const newMemoData = {
-      user_id: currentUser.id,
+      user_id: currentUser?.id,
       content: inputText,
       color: selectedColor,
       recorded_at: now.toISOString(),
@@ -1175,6 +1236,21 @@ function App() {
       spans_to_next: mode === 'next',
     };
     setInputText('');
+
+    // 체험 모드: 서버 대신 브라우저에 담는다
+    if (isGuest) {
+      const row = { ...newMemoData, id: newGuestId() };
+      delete row.user_id;
+      saveGuestRows([...loadGuestRows(), row]);
+      const memo = rowToMemo(row);
+      setMemos(prev => [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
+      trackMemoCreated(row.content, {
+        source: 'direct',
+        gesture: mode === 'prev' ? 'from_prev' : mode === 'next' ? 'to_next' : 'single',
+      });
+      return;
+    }
+
     const { data, error } = await supabase.from('memos').insert(newMemoData).select().single();
     if (error) {
       console.error('Error adding memo:', error);
@@ -1196,6 +1272,8 @@ function App() {
   const trackMemoCreated = (content, extra) => {
     const fin = parseFinance(content);
     track('Memo Created', {
+      // 로그인 전 체험 중에 쓴 것인지. 체험만 하고 떠나는 비율을 보려면 필요하다
+      guest: isGuest,
       ...extra,
       hour: new Date().getHours(),
       content_length: content.length,
@@ -1337,13 +1415,16 @@ function App() {
   };
 
   const saveTimeEdit = async () => {
-    if (!editTimeStr || !editDateStr || !currentUser) return;
+    if (!editTimeStr || !editDateStr) return;
     const [hours, mins] = editTimeStr.split(':');
     const memoToEdit = memos.find(m => m.id === editingMemoId);
     if (memoToEdit) {
       const [year, month, day] = editDateStr.split('-');
       const newDate = new Date(`${year}-${month}-${day}T${hours}:${mins}:00`);
-      const { error } = await supabase.from('memos').update({ recorded_at: newDate.toISOString() }).eq('id', editingMemoId);
+      if (isGuest) patchGuestRow(editingMemoId, { recorded_at: newDate.toISOString() });
+      const { error } = isGuest
+        ? { error: null }
+        : await supabase.from('memos').update({ recorded_at: newDate.toISOString() }).eq('id', editingMemoId);
       if (error) {
         console.error('Error updating time:', error);
       } else {
@@ -1369,10 +1450,13 @@ function App() {
   };
 
   const saveContentEdit = async () => {
-    if (!editContentStr.trim() || !editingContentMemo || !currentUser) return;
-    const { error } = await supabase.from('memos')
-      .update({ content: editContentStr, color: editMemoColor })
-      .eq('id', editingContentMemo.id);
+    if (!editContentStr.trim() || !editingContentMemo) return;
+    if (isGuest) patchGuestRow(editingContentMemo.id, { content: editContentStr, color: editMemoColor });
+    const { error } = isGuest
+      ? { error: null }
+      : await supabase.from('memos')
+          .update({ content: editContentStr, color: editMemoColor })
+          .eq('id', editingContentMemo.id);
     if (error) {
       console.error('Error updating content:', error);
     } else {
@@ -2281,7 +2365,9 @@ function App() {
   }
 
   // ── 로그인 화면 ───────────────────────────────────────────────
-  if (!currentUser) {
+  // 앱을 켜자마자 로그인부터 시키면 써보지도 않고 나간다.
+  // 그래서 로그인 화면은 사용자가 부를 때만 띄우고, 기본은 체험 모드로 앱을 보여준다.
+  if (!currentUser && showLogin) {
     // 비밀번호 찾기 화면
     if (authView === 'forgotPassword') {
       return (
@@ -2447,8 +2533,16 @@ function App() {
               </div>
             )}
           </form>
+          {/* 체험하던 사람이 막다른 길에 갇히지 않게 되돌아갈 문을 둔다 */}
+          <button
+            type="button"
+            onClick={() => { setShowLogin(false); setAuthError(''); }}
+            style={{ display: 'block', margin: '18px auto 0', background: 'none', border: 'none', color: '#888', fontSize: '0.875rem', cursor: 'pointer' }}
+          >
+            나중에 하기
+          </button>
           {/* 처음 들어온 사람이 가입 전에 확인할 수 있어야 해서 로그인 화면에 둔다 */}
-          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '0.8rem', color: '#999' }}>
+          <p style={{ textAlign: 'center', marginTop: '14px', fontSize: '0.8rem', color: '#999' }}>
             <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: '#999' }}>
               개인정보처리방침
             </a>
@@ -2461,6 +2555,35 @@ function App() {
   // ── 메인 화면 ────────────────────────────────────────────────
   return (
     <div className="app-container">
+      {/* 체험 중 안내.
+          이 앱의 원칙대로 압박하지 않는다 — 남은 횟수나 경고가 아니라 사실만 알린다.
+          다만 브라우저를 비우면 사라진다는 건 반드시 알려야 나중에 억울한 일이 없다. */}
+      {isGuest && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
+          padding: '8px 14px', backgroundColor: '#eef1ff', color: '#414a8a',
+          fontSize: '0.8rem', lineHeight: 1.4, flexShrink: 0,
+        }}>
+          <span>
+            {migratingGuest
+              ? '써두신 기록을 계정으로 옮기는 중이에요…'
+              : '체험 중이에요. 이 기기에만 저장되니 로그인하면 안전하게 보관돼요.'}
+          </span>
+          {!migratingGuest && (
+            <button
+              type="button"
+              onClick={() => setShowLogin(true)}
+              style={{
+                flexShrink: 0, border: 'none', borderRadius: '999px', cursor: 'pointer',
+                padding: '5px 12px', backgroundColor: 'var(--primary-color)', color: '#fff',
+                fontSize: '0.78rem', fontWeight: 600,
+              }}
+            >
+              로그인
+            </button>
+          )}
+        </div>
+      )}
       {/* Header */}
       {activeView !== 'settings' && (
         <header className="header">
@@ -2482,7 +2605,8 @@ function App() {
               <>
                 <button
                   className={`header-nav-btn ${showTodoSheet ? 'active' : ''}`}
-                  onClick={() => setShowTodoSheet(v => !v)}
+                  // 할 일은 체험 범위 밖이다. 눌리면 막지 말고 로그인으로 안내한다
+                  onClick={() => isGuest ? setShowLogin(true) : setShowTodoSheet(v => !v)}
                   title="할 일"
                   style={{
                     backgroundColor: showTodoSheet ? 'var(--primary-color)' : 'transparent',
@@ -2978,10 +3102,15 @@ function App() {
         </button>
         <button
           className={`tab-btn ${activeView === 'settings' ? 'active' : ''}`}
-          onClick={() => { setPreviousView(activeView); setActiveView('settings'); }}
+          onClick={() => {
+            // 마이페이지는 계정 화면이라 체험 중에는 보여줄 게 없다
+            if (isGuest) { setShowLogin(true); return; }
+            setPreviousView(activeView);
+            setActiveView('settings');
+          }}
         >
           <User size={20} />
-          <span>마이페이지</span>
+          <span>{isGuest ? '로그인' : '마이페이지'}</span>
         </button>
       </nav>
 
