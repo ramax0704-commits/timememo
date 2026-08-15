@@ -13,6 +13,7 @@
     "@supabase/supabase-js": "^2.110.7",
     "date-fns": "^4.1.0",
     "lucide-react": "^1.14.0",
+    "mixpanel-browser": "^2.82.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
