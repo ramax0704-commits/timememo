@@ -1734,6 +1734,42 @@ function App() {
   };
 
   // ── 할 일 ───────────────────────────────────────────────────
+  // 할 일 시트를 열면 커서를 이 입력창으로 데려온다.
+  // 안 그러면 뒤에 가려진 채팅 입력창에 포커스가 남아 있어서, 커서는 엉뚱한 데서
+  // 깜빡이고 친 글자는 보이지 않는 채팅창으로 들어간다.
+  // (할 일 버튼은 키보드를 유지하려고 일부러 포커스를 안 뺏게 해뒀다)
+  const todoInputRef = useRef(null);
+  useEffect(() => {
+    if (!showTodoSheet) return;
+    const keyboardUp = document.body.classList.contains('keyboard-open');
+    if (keyboardUp) todoInputRef.current?.focus();
+    // 키보드가 없던 상태면 굳이 띄우지 않는다. 대신 뒤쪽 입력창의 포커스는 뗀다
+    else document.activeElement?.blur?.();
+  }, [showTodoSheet]);
+
+  // 적어둔 할 일의 내용을 고친다
+  const [editingTodoId, setEditingTodoId] = useState(null);
+  const [editingTodoText, setEditingTodoText] = useState('');
+
+  const startEditTodo = (todo) => {
+    setEditingTodoId(todo.id);
+    setEditingTodoText(todo.content);
+  };
+
+  const commitEditTodo = async (todo) => {
+    const text = editingTodoText.trim();
+    setEditingTodoId(null);
+    if (!text || text === todo.content) return;
+    setTodos(prev => prev.map(t => (t.id === todo.id ? { ...t, content: text } : t)));
+    const { error } = await supabase.from('todos').update({ content: text }).eq('id', todo.id);
+    if (error) {
+      console.error('Error updating todo:', error);
+      setTodos(prev => prev.map(t => (t.id === todo.id ? { ...t, content: todo.content } : t)));
+      return;
+    }
+    track('Todo Action', { action: 'edited' });
+  };
+
   const handleAddTodo = async (e) => {
     e?.preventDefault();
     const text = todoInput.trim();
@@ -3454,6 +3490,7 @@ function App() {
 
             <form className="todo-add-row" onSubmit={handleAddTodo}>
               <input
+                ref={todoInputRef}
                 type="text"
                 className="todo-add-input"
                 placeholder="할 일을 적어두세요"
@@ -3476,7 +3513,27 @@ function App() {
                       onClick={() => handleToggleTodo(todo)}
                       title={todo.done ? '되돌리기' : '완료'}
                     />
-                    <span className="todo-text">{todo.content}</span>
+                    {editingTodoId === todo.id ? (
+                      <input
+                        className="todo-text todo-text-edit"
+                        value={editingTodoText}
+                        autoFocus
+                        onChange={e => setEditingTodoText(e.target.value)}
+                        onBlur={() => commitEditTodo(todo)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+                          if (e.key === 'Escape') { setEditingTodoId(null); }
+                        }}
+                      />
+                    ) : (
+                      /* 적어둔 걸 눌러서 바로 고친다. 완료한 건 고칠 일이 없으니 그대로 둔다 */
+                      <span
+                        className="todo-text"
+                        onClick={() => { if (!todo.done) startEditTodo(todo); }}
+                      >
+                        {todo.content}
+                      </span>
+                    )}
                     <button
                       className="todo-move-btn"
                       onClick={() => handleTodoToMemo(todo)}

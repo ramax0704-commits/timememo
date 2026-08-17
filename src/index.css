@@ -1862,7 +1862,15 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 .todo-add-btn:disabled { background-color: #e2e5ea; color: #b8bec9; cursor: not-allowed; }
 
-.todo-list { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+/* 목록만 스크롤한다. flex 세로 배치에서 min-height: 0 이 없으면 자식이 줄어들지 않아
+   스크롤이 안 걸리고, 키보드가 올라온 상태에서 3번째 할 일부터 잘려 보였다. */
+.todo-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; /* 목록 끝에서 뒤 화면까지 같이 밀리지 않게 */
+}
 
 .todo-empty {
   text-align: center;
@@ -1901,6 +1909,21 @@ body.keyboard-open .input-toolbar { display: flex; }
   font-size: 0.95rem;
   line-height: 1.4;
   word-break: break-word;
+}
+
+/* 눌러서 고칠 수 있다는 걸 커서로만 알린다 (완료한 건 제외) */
+.todo-item:not(.todo-item--done) .todo-text { cursor: text; }
+
+.todo-text-edit {
+  border: none;
+  border-bottom: 1.5px solid var(--primary-color);
+  background: transparent;
+  padding: 2px 0;
+  font-family: inherit;
+  font-size: 0.95rem;
+  outline: none;
+  min-width: 0;
+  width: 100%;
 }
 
 .todo-item--done .todo-text { color: #b8bec9; text-decoration: line-through; }
