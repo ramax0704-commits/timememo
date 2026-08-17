@@ -273,6 +273,19 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
 // 부담을 주기 때문에, 앞뒤로 늘리는 건 기록마다 켜는 선택제다.
 const MIN_BLOCK_MINUTES = 30;
 
+// ── 체험 기록이 사라지는 것에 대한 안내 ──────────────────────
+// 로그인 안 한 사람의 기록은 브라우저에만 있다. 그런데 사파리는 한동안
+// 방문이 없으면 사이트가 저장해둔 걸 지운다. 그래서 일주일 뒤에 돌아온
+// 사람은 써둔 게 없어진 화면을 만난다. 홈 화면에 추가한 웹앱은 예외다.
+const isIOSDevice = /iP(hone|ad|od)/.test(navigator.userAgent);
+const isStandaloneApp = () =>
+  window.navigator.standalone === true ||
+  window.matchMedia?.('(display-mode: standalone)').matches === true;
+// 안내를 띄우기 시작하는 기록 수. 처음부터 띄우면 써보기도 전에 로그인부터
+// 권하는 꼴이라, 몇 줄 써서 아까워질 때쯤 알려준다.
+const SAVE_NOTICE_AFTER = 3;
+const SAVE_NOTICE_KEY = 'timememo-save-notice-dismissed';
+
 // 타임블럭은 날짜를 끊지 않고 이어서 스크롤한다.
 // 한 번에 그려두는 날짜 수 — 이보다 멀리 가려면 헤더 화살표나 달력을 쓴다.
 //
@@ -411,6 +424,10 @@ function App() {
   const [showMyPage, setShowMyPage] = useState(false);
   // 체험 모드: 로그인 전에도 앱을 쓰게 하고, 로그인 화면은 필요할 때만 띄운다
   const [showLogin, setShowLogin] = useState(false);
+  // 기록이 이 기기에만 있다는 안내를 닫았는지 (닫으면 다시 안 띄운다)
+  const [saveNoticeDismissed, setSaveNoticeDismissed] = useState(
+    () => localStorage.getItem(SAVE_NOTICE_KEY) === '1'
+  );
   // 로그인 직후 체험 기록을 계정으로 옮기는 중인지
   const [migratingGuest, setMigratingGuest] = useState(false);
   // 체험 모드 = 로그인 안 한 상태. 기록은 브라우저에만 담긴다.
@@ -788,6 +805,26 @@ function App() {
   });
   // 채팅창은 고른 날짜 하루만 보여준다. 헤더 날짜와 화면 내용이 어긋나면 안 된다.
   const chatMemos = [...displayedMemos, ...lateNightMemos];
+
+  // 기록이 이 기기에만 있다는 안내를 지금 띄울 때인지.
+  // 홈 화면에 추가해서 쓰는 사람은 지워질 걱정이 없으므로 뺀다.
+  const showSaveNotice =
+    isGuest && memos.length >= SAVE_NOTICE_AFTER && !saveNoticeDismissed && !isStandaloneApp();
+
+  // 안내가 실제로 눈에 띈 순간을 한 번만 남긴다.
+  // (이 안내가 로그인으로 이어지는지 봐야 붙여둘 값어치가 있는지 알 수 있다)
+  const saveNoticeSeenRef = useRef(false);
+  useEffect(() => {
+    if (!showSaveNotice || saveNoticeSeenRef.current) return;
+    saveNoticeSeenRef.current = true;
+    track('Save Prompt', { action: 'shown', platform: isIOSDevice ? 'ios' : 'other', memo_count: memos.length });
+  }, [showSaveNotice, memos.length]);
+
+  const dismissSaveNotice = (action) => {
+    localStorage.setItem(SAVE_NOTICE_KEY, '1');
+    setSaveNoticeDismissed(true);
+    track('Save Prompt', { action, platform: isIOSDevice ? 'ios' : 'other', memo_count: memos.length });
+  };
 
   // ── 타임블럭이 이어서 훑는 날짜 창 ──────────────────────────
   // 날짜마다 판을 새로 그리면 자정에서 블록이 뚝 끊긴다.
@@ -3075,6 +3112,36 @@ function App() {
             <ListChecks size={16} />
             <span>할 일</span>
           </button>
+        </div>
+      )}
+
+      {/* 기록이 이 기기에만 있다는 안내.
+          몇 줄 써서 아까워질 때쯤(3개) 한 번만 뜨고, 닫으면 다시 안 뜬다.
+          겁주지 않는다 — 사실 한 줄과 남기는 방법만 준다. */}
+      {activeView === 'timeline' && showSaveNotice && (
+        <div className="save-notice">
+          <p className="save-notice-text">
+            지금 기록은 이 기기에만 있어요.
+            {isIOSDevice
+              ? ' 사파리는 한동안 안 들어오면 정리하니, 공유 버튼에서 ‘홈 화면에 추가’를 하면 그대로 남아요.'
+              : ' 로그인하면 어느 기기에서나 그대로 남아요.'}
+          </p>
+          <div className="save-notice-actions">
+            <button
+              type="button"
+              className="save-notice-btn save-notice-btn--primary"
+              onClick={() => { dismissSaveNotice('login'); setShowLogin(true); }}
+            >
+              로그인하고 보관
+            </button>
+            <button
+              type="button"
+              className="save-notice-btn"
+              onClick={() => dismissSaveNotice('dismissed')}
+            >
+              나중에
+            </button>
+          </div>
         </div>
       )}
 
