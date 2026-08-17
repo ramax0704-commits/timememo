@@ -1985,7 +1985,11 @@ function App() {
 
   // ── 전역 touchmove 리스너: 스크롤 중 모든 터치 상태 초기화 ──────────
   useEffect(() => {
-    const clearTouchState = () => {
+    const clearTouchState = (e) => {
+      // 할 일 시트 안에서는 목록을 훑는 중이다. 여기서 포커스를 떼면 키보드가
+      // 내려가고, 그만큼 공간이 넓어지면서 시트가 커져 목록이 통째로 펼쳐진다.
+      // 적는 중에 아래를 훑어보는 건 정상 동작이므로 건드리지 않는다.
+      if (e.target?.closest?.('.todo-sheet')) return;
       // 포커스된 요소 즉시 blur
       if (document.activeElement && document.activeElement !== document.body) {
         document.activeElement.blur();
