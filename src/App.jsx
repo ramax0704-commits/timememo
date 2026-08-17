@@ -782,11 +782,20 @@ function App() {
 
   // ── 모바일 Visual Viewport ───────────────────────────────────
   useEffect(() => {
+    // 키보드가 올라오는 '도중'에도 이벤트가 오는데, 그때 값으로 높이를 잡으면
+    // 앱이 실제 보이는 영역보다 짧아져서 아래에 회색 띠가 남는다.
+    // 그래서 애니메이션이 끝났을 즈음 한 번 더 맞춘다.
+    const applyVh = () => {
+      if (!window.visualViewport) return;
+      document.documentElement.style.setProperty('--vh', `${window.visualViewport.height}px`);
+    };
+    let settle = null;
     const handleResize = () => {
-      if (window.visualViewport) {
-        document.documentElement.style.setProperty('--vh', `${window.visualViewport.height}px`);
-        window.scrollTo(0, 0);
-      }
+      if (!window.visualViewport) return;
+      applyVh();
+      window.scrollTo(0, 0);
+      clearTimeout(settle);
+      settle = setTimeout(applyVh, 300);
     };
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleResize);
@@ -794,6 +803,7 @@ function App() {
       handleResize();
     }
     return () => {
+      clearTimeout(settle);
       if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', handleResize);
         window.visualViewport.removeEventListener('scroll', handleResize);
@@ -1739,6 +1749,7 @@ function App() {
   // 깜빡이고 친 글자는 보이지 않는 채팅창으로 들어간다.
   // (할 일 버튼은 키보드를 유지하려고 일부러 포커스를 안 뺏게 해뒀다)
   const todoInputRef = useRef(null);
+  const todoListRef = useRef(null);
   useEffect(() => {
     if (!showTodoSheet) return;
     const keyboardUp = document.body.classList.contains('keyboard-open');
@@ -1786,6 +1797,11 @@ function App() {
       return;
     }
     setTodos(prev => prev.some(t => t.id === data.id) ? prev : [...prev, data]);
+    // 방금 적은 게 목록 아래에 가려지면 '등록이 안 됐나' 싶다. 그쪽으로 보내준다
+    requestAnimationFrame(() => {
+      const list = todoListRef.current;
+      if (list) list.scrollTop = list.scrollHeight;
+    });
     track('Todo Action', { action: 'added', open_count: todos.filter(t => !t.done).length + 1 });
   };
 
@@ -3502,7 +3518,7 @@ function App() {
               </button>
             </form>
 
-            <div className="todo-list">
+            <div className="todo-list" ref={todoListRef}>
               {todos.length === 0 ? (
                 <p className="todo-empty">적어두면 여기에 남아있어요.</p>
               ) : (

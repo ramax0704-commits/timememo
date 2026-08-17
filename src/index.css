@@ -1796,7 +1796,12 @@ body.keyboard-open .input-toolbar { display: flex; }
 .todo-sheet {
   background-color: white;
   width: 100%;
-  max-height: 62%;
+  /* 키보드가 올라오면 남은 공간 자체가 400px 남짓으로 줄어든다. 그때 '62%'면
+     시트가 250px도 안 돼서 할 일이 두 개밖에 안 보였다.
+     - 공간이 넉넉하면 520px에서 멈춰 뒤 화면이 보이게 하고
+     - 공간이 좁으면(키보드) 92%까지 써서 목록이 최대한 보이게 한다
+     iOS는 키보드가 떠도 미디어쿼리의 높이가 안 줄어들어서 min()으로 처리한다. */
+  max-height: min(92%, 520px);
   display: flex;
   flex-direction: column;
   border-radius: 20px 20px 0 0;
