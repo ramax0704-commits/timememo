@@ -1523,6 +1523,10 @@ function App() {
       // 로그인 전 체험 중에 쓴 것인지. 체험만 하고 떠나는 비율을 보려면 필요하다
       guest: isGuest,
       is_first_memo: isFirstMemo,
+      // 이 기록을 쓰기 직전까지 이 사람이 갖고 있던 기록 수 = 이게 몇 번째 기록인지.
+      // 이게 없으면 "사람들이 몇 개째에서 멈추나"를 Mixpanel에서 알 수 없다.
+      // (이벤트 수만 세면 많이 쓰는 한 명이 전체를 가려버린다)
+      memo_count_before: memos.length,
       ...extra,
       hour: new Date().getHours(),
       content_length: content.length,
