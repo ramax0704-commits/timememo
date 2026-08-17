@@ -31,8 +31,10 @@ function rowToMemo(row) {
     spansToNext: row.spans_to_next ?? false, // 이 기록 시각 → 다음 기록 시각
     // 끝나고 남긴 기록: 이전 기록 시각부터 이 기록 시각까지
     spansFromPrev: row.spans_from_prev ?? false,
-    // 시작 시각을 직접 고쳤을 때의 소요 시간(분). 이전 기록부터 대신 이 값이 쓰인다
+    // 시작 시각을 직접 고쳤을 때 '기록 시각에서 몇 분 전'인지. spansFromPrev보다 우선한다
     backMinutes: row.back_minutes ?? 0,
+    // 종료 시각을 직접 고쳤을 때 '기록 시각에서 몇 분 후'인지. spansToNext보다 우선한다
+    endMinutes: row.end_minutes ?? 0,
   };
 }
 
@@ -226,18 +228,20 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
 
       {/* 메모 본체 */}
       <div className="memo-item">
+        {/* 시각이든 말풍선이든 같은 편집 시트를 연다.
+            어디를 눌렀냐에 따라 할 수 있는 일이 달라지면 왔다갔다 하게 된다 */}
         <div
           className="memo-time-container"
-          onClick={() => onEdit(memo, 'time')}
-          title="시간 수정하기"
+          onClick={() => onEdit(memo)}
+          title="기록 수정하기"
         >
           <span className="memo-time">{format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}</span>
         </div>
         <div
           className="memo-content"
           style={{ backgroundColor: colorBg, borderColor: colorBorder, cursor: 'pointer' }}
-          onClick={() => onEdit(memo, 'content')}
-          title="내용 수정 및 삭제"
+          onClick={() => onEdit(memo)}
+          title="기록 수정하기"
         >
           {memo.content.split('\n').map((line, i, arr) => (
             <React.Fragment key={i}>
@@ -264,12 +268,38 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
   );
 }
 
-// ── 하루치 블록 구간 계산 (스케줄 뷰와 위클리 뷰가 함께 쓴다) ──
+// ── 블록 구간 계산 (타임블럭 뷰와 위클리 뷰가 함께 쓴다) ──
 // 기본은 30분짜리 짧은 블록. 자동으로 이어 붙이면 실제보다 오래 한 것처럼 보여
 // 부담을 주기 때문에, 앞뒤로 늘리는 건 기록마다 켜는 선택제다.
 const MIN_BLOCK_MINUTES = 30;
 
-function buildDayBlocks(sortedMemos, { dayStartMs, nowMs, gridMinutes }) {
+// 타임블럭은 날짜를 끊지 않고 이어서 스크롤한다.
+// 한 번에 그려두는 날짜 수 — 이보다 멀리 가려면 헤더 화살표나 달력을 쓴다.
+const TIMELINE_DAYS_BEFORE = 2;
+const TIMELINE_DAYS_AFTER = 1;
+// 위 끝에 닿을 때마다 이만큼씩 예전 날짜를 더 깔아준다.
+// 하루가 1440px이라 무한정 깔면 무거워지므로 상한을 둔다 (그 너머는 화살표·달력으로).
+const TIMELINE_GROW_DAYS = 3;
+const TIMELINE_MAX_DAYS_BEFORE = 30;
+const DAY_MINUTES = 24 * 60;
+
+// 끝 시각을 직접 정하지 않고 '다음 기록까지' 자동으로 잇고 있는 상태인지.
+// 종료 시각을 직접 저장하면(endMinutes) 그쪽이 이기므로 자동이 아니게 된다.
+const isAutoEnd = (memo) => !!memo?.spansToNext && !memo?.endMinutes;
+// 시작 시각을 직접 정하지 않고 '이전 기록부터' 자동으로 잇고 있는 상태인지
+const isAutoStart = (memo) => !!memo?.spansFromPrev && !memo?.backMinutes;
+
+// 얼마나 걸렸는지가 있는 기록('구간')인지, 그냥 그때 적어둔 한 줄('한 순간')인지.
+// 앞뒤로 늘린 흔적이 하나도 없으면 순간이다.
+// 순간짜리 메모에까지 시작·종료를 물으면 적을 때마다 쓸데없는 결정을 하게 된다.
+const isRangeMemo = (m) => !!m && (
+  (m.backMinutes || 0) > 0 || (m.endMinutes || 0) > 0 || !!m.spansFromPrev || !!m.spansToNext
+);
+
+// clampDawn: 하루를 잘라서 보여주는 화면(위클리)에서만 켠다.
+// 하루짜리 칸에서는 새벽 기록이 전날 밤까지 거슬러 올라가면 칸을 넘쳐버리기 때문에
+// 새벽 2시에서 끊어야 했다. 이어서 스크롤하는 타임블럭에서는 그냥 이어지면 되므로 끈다.
+function buildDayBlocks(sortedMemos, { dayStartMs, nowMs, gridMinutes, clampDawn = false }) {
   const posOf = (iso) => (new Date(iso).getTime() - dayStartMs) / 60000;
   const blocks = [];
 
@@ -280,29 +310,32 @@ function buildDayBlocks(sortedMemos, { dayStartMs, nowMs, gridMinutes }) {
     const spansNext = !!memo.spansToNext;
     const spansPrev = !!memo.spansFromPrev;
     const backMin = Math.max(0, memo.backMinutes || 0);
+    const endMin = Math.max(0, memo.endMinutes || 0);
 
     const ownPos = posOf(memo.recordedAt);
     const prevPos = prevMemo ? posOf(prevMemo.recordedAt) : null;
     const nextPos = nextMemo ? posOf(nextMemo.recordedAt) : null;
 
-    // 시작 — 끝나고 남긴 기록은 이전 기록 시각부터.
-    // 시작 시각을 직접 고쳤으면(backMinutes) 그 값이 우선한다.
-    const startsEarlier = spansPrev || backMin > 0;
+    // 시작 — 직접 고친 값(backMinutes)이 먼저다.
+    // 없으면 '이전 기록부터' 자동 규칙(끝나고 남긴 기록)을 따른다.
     let startPos = ownPos;
     if (backMin > 0) {
       startPos = ownPos - backMin;
     } else if (spansPrev) {
       startPos = prevPos !== null ? prevPos : ownPos - MIN_BLOCK_MINUTES;
     }
-    if (startsEarlier) {
+    const startsEarlier = startPos < ownPos;
+    if (clampDawn && startsEarlier) {
       // 새벽(00:00~01:59) 기록은 밤의 마지막으로 보고 그 너머까지 거슬러 올라가지 않는다
       if (ownPos >= 120 && startPos < 120) startPos = 120;
-      if (startPos > ownPos) startPos = ownPos;
     }
 
-    // 끝 — '다음 기록까지'를 켜면 다음 기록 시각(없으면 지금)까지 늘어난다
+    // 끝 — 직접 고친 값(endMinutes)이 먼저다.
+    // 없으면 '다음 기록까지' 자동 규칙(다음 기록 시각, 없으면 지금)을 따른다.
     let endPos;
-    if (spansNext) {
+    if (endMin > 0) {
+      endPos = ownPos + endMin;
+    } else if (spansNext) {
       if (nextPos !== null) {
         endPos = nextPos;
       } else {
@@ -311,15 +344,17 @@ function buildDayBlocks(sortedMemos, { dayStartMs, nowMs, gridMinutes }) {
           ? nowPosInDay
           : ownPos + MIN_BLOCK_MINUTES;
       }
-      // 새벽 기록이 새벽 2시를 넘겨 이어지지 않게 자른다
-      const dawnCutoff = ownPos < 120 ? 120 : (ownPos >= 1440 && ownPos < gridMinutes ? gridMinutes : null);
-      if (dawnCutoff !== null && endPos > dawnCutoff) endPos = dawnCutoff;
     } else if (startsEarlier) {
       endPos = ownPos; // 끝나고 남긴 기록이므로 이 기록 시각에서 끝난다
     } else {
       // 다음 기록이 30분 안에 있으면 겹치지 않게 거기까지만
       endPos = ownPos + MIN_BLOCK_MINUTES;
       if (nextPos !== null && nextPos > ownPos) endPos = Math.min(endPos, nextPos);
+    }
+    if (clampDawn && endPos > ownPos) {
+      // 새벽 기록이 새벽 2시를 넘겨 이어지지 않게 자른다
+      const dawnCutoff = ownPos < 120 ? 120 : (ownPos >= 1440 && ownPos < gridMinutes ? gridMinutes : null);
+      if (dawnCutoff !== null && endPos > dawnCutoff) endPos = dawnCutoff;
     }
 
     if (endPos < startPos) endPos = startPos;
@@ -329,8 +364,9 @@ function buildDayBlocks(sortedMemos, { dayStartMs, nowMs, gridMinutes }) {
     blocks.push({
       memo, prevMemo, nextMemo,
       startPos, endPos, ownPos,
-      spansNext, spansPrev, backMin, startsEarlier,
-      isCarry: ownPos >= 1440, // 다음날 새벽 기록 (흐리게)
+      spansNext, spansPrev, backMin, endMin, startsEarlier,
+      // 하루짜리 칸에서 다음날 새벽으로 넘어간 기록 (흐리게). 이어서 그릴 땐 쓰지 않는다
+      isCarry: clampDawn && ownPos >= DAY_MINUTES,
     });
   }
   return blocks;
@@ -351,6 +387,11 @@ function App() {
   // 로그인 전이면 브라우저에 담아둔 체험 기록으로 시작한다
   const [memos, setMemos] = useState(loadGuestMemos);
   const [selectedDate, setSelectedDate] = useState(new Date());
+  // 타임블럭이 이어서 그려둔 날짜 창의 기준일. selectedDate가 창을 벗어날 때만 따라온다.
+  // (헤더 날짜는 스크롤을 따라 계속 바뀌는데, 그때마다 창을 다시 잡으면 화면이 튄다)
+  const [anchorDate, setAnchorDate] = useState(new Date());
+  // 기준일로부터 며칠 전까지 깔아뒀는지. 위로 끝까지 올라가면 늘어난다
+  const [daysBefore, setDaysBefore] = useState(TIMELINE_DAYS_BEFORE);
   const [inputText, setInputText] = useState('');
   const [selectedColor, setSelectedColor] = useState('default');
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -395,27 +436,27 @@ function App() {
   const [passwordChangeSuccess, setPasswordChangeSuccess] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
-  // Modal States
-  const [editingMemoId, setEditingMemoId] = useState(null);
-  const [editTimeStr, setEditTimeStr] = useState('');
-  const [editDateStr, setEditDateStr] = useState('');
-  const [editingContentMemo, setEditingContentMemo] = useState(null);
+  // 기록 편집 시트 — 채팅창과 타임블럭이 같은 것을 쓴다.
+  // 시각을 눌렀을 때와 내용을 눌렀을 때가 다르면 두 화면 사이를 왔다갔다 하게 되므로
+  // 내용·색상·날짜·시작/종료·삭제를 한 곳에 모아둔다.
+  const [editingMemo, setEditingMemo] = useState(null);
   const [editContentStr, setEditContentStr] = useState('');
   const [editMemoColor, setEditMemoColor] = useState('default');
+  const [editDateStr, setEditDateStr] = useState('');   // yyyy-MM-dd
+  const [editStartStr, setEditStartStr] = useState(''); // HH:mm
+  const [editEndStr, setEditEndStr] = useState('');     // HH:mm
+  // 'moment' = 한 순간 (시각 하나) | 'range' = 구간 (시작~종료)
+  const [editMode, setEditMode] = useState('moment');
+  // 열었을 때의 시각 값. 사용자가 시간을 건드리지 않았으면 저장할 때 시간 관련
+  // 필드를 아예 손대지 않는다 (자동으로 이어지던 설정이 조용히 고정값으로 굳는 걸 막는다)
+  const [editInitial, setEditInitial] = useState(null);
   const [showCalendar, setShowCalendar] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [showScheduleView, setShowScheduleView] = useState(false);
-  const [selectedSchedule, setSelectedSchedule] = useState(null);
   // 할 일 리스트 (날짜에 묶지 않는다 — 이월도 독촉도 없음)
   const [todos, setTodos] = useState([]);
   const [showTodoSheet, setShowTodoSheet] = useState(false);
   const [todoInput, setTodoInput] = useState('');
-  const [editStartHour, setEditStartHour] = useState('');
-  const [editStartMin, setEditStartMin] = useState('');
-  const [editEndHour, setEditEndHour] = useState('');
-  const [editEndMin, setEditEndMin] = useState('');
-  const [adjustStartHour, setAdjustStartHour] = useState('');
-  const [adjustStartMin, setAdjustStartMin] = useState('');
 
   // Undo Toast
   const [undoToast, setUndoToast] = useState(null); // { memo, timer }
@@ -451,29 +492,8 @@ function App() {
     monthlyRef.current.scrollTop = 0;
   }, [activeView]);
 
-  // ── 스케줄(타임로그) 뷰 열 때 현재 시간 위치로 자동 스크롤 ───
+  // 타임블럭 스크롤러 — 자리 잡기는 아래 자동 스크롤 effect가 맡는다
   const scheduleViewRef = useRef(null);
-  useEffect(() => {
-    if (!showScheduleView || !scheduleViewRef.current) return;
-    const container = scheduleViewRef.current;
-    const now = new Date();
-    let targetMin;
-    if (isToday(selectedDate)) {
-      targetMin = now.getHours() * 60 + now.getMinutes();
-    } else {
-      // 과거 날짜는 그 날의 첫 메모 위치로
-      const dayMemos = memos.filter(m => isSameDay(new Date(m.recordedAt), selectedDate));
-      if (dayMemos.length > 0) {
-        const first = dayMemos.reduce((a, b) => (new Date(a.recordedAt) < new Date(b.recordedAt) ? a : b));
-        const d = new Date(first.recordedAt);
-        targetMin = d.getHours() * 60 + d.getMinutes();
-      } else {
-        targetMin = 8 * 60;
-      }
-    }
-    // 그리드는 1분=1px, 위 여백 20px. 대상 시간이 화면 위에서 1/3 지점에 오도록
-    container.scrollTop = Math.max(0, 20 + targetMin - container.clientHeight / 3);
-  }, [showScheduleView, selectedDate]);
 
   // ── 모바일: 입력창에 포커스되면(키보드 올라오면) 하단 네비 숨김 ─
   useEffect(() => {
@@ -503,8 +523,10 @@ function App() {
       const now = new Date();
       setSelectedDate(prev => {
         if (isToday(prev)) {
-          // 오늘을 보고 있었는데 날짜가 바뀌면 새 날짜로
+          // 오늘을 보고 있었는데 날짜가 바뀌면 새 날짜로.
+          // 이어서 그리는 창도 새 날을 품도록 같이 옮긴다
           if (!isSameDay(prev, now)) {
+            setAnchorDate(now);
             return now;
           }
         }
@@ -707,36 +729,26 @@ function App() {
     if (currentUser && activeView === 'timeline' && !IS_TOUCH_DEVICE) {
       inputRef.current?.focus();
     }
-  }, [selectedDate, currentUser, activeView]);
+    // selectedDate는 이제 스크롤을 따라 계속 바뀌므로 여기 넣지 않는다.
+    // 넣으면 훑어볼 때마다 입력창이 포커스를 뺏어간다.
+  }, [currentUser, activeView]);
 
-  // ── 새 메모 추가 시에만 맨 아래 스크롤 ──────────────────────
-  const prevMemoCount = useRef(0);
+  // ── 새 메모를 남기면 그게 보이도록 아래로, 삭제 후에는 보던 자리로 ──
+  // 예전에는 selectedDate가 바뀔 때도 맨 아래로 보냈다. 이제 selectedDate는
+  // 스크롤을 따라 바뀌므로, 그대로 두면 위로 훑을 때마다 아래로 되돌려버린다.
+  const prevMemoCount = useRef(memos.length);
   useEffect(() => {
-    const currentCount = memos.filter(m => isSameDay(new Date(m.recordedAt), selectedDate)).length;
+    const el = timelineRef.current;
     const prevCount = prevMemoCount.current;
-
-    if (currentCount > prevCount && scrollPositionRef.current === null) {
-      // 새 메모 추가된 경우에만 스크롤 다운
-      if (timelineRef.current) {
-        timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
-      }
-    } else if (scrollPositionRef.current !== null) {
-      // 삭제 후 위치 복원
-      if (timelineRef.current) {
-        timelineRef.current.scrollTop = scrollPositionRef.current;
-      }
+    prevMemoCount.current = memos.length;
+    if (!el) return;
+    if (scrollPositionRef.current !== null) {
+      el.scrollTop = scrollPositionRef.current; // 삭제 후 위치 복원
       scrollPositionRef.current = null;
+      return;
     }
-    prevMemoCount.current = currentCount;
-  }, [memos, selectedDate]);
-
-  // ── 날짜 변경 시 맨 아래로 ──────────────────────────────────
-  useEffect(() => {
-    prevMemoCount.current = 0;
-    if (timelineRef.current) {
-      timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
-    }
-  }, [selectedDate]);
+    if (memos.length > prevCount) el.scrollTop = el.scrollHeight;
+  }, [memos]);
 
   // ── 모바일 Visual Viewport ───────────────────────────────────
   useEffect(() => {
@@ -762,14 +774,167 @@ function App() {
 
   const displayedMemos = memos.filter(m => isSameDay(new Date(m.recordedAt), selectedDate));
 
-  // 다음날 자정~새벽 2시 메모: 전날 화면에도 흐리게 함께 표시
-  const dayStartMs = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()).getTime();
-  const minutesFromDayStart = (iso) => (new Date(iso).getTime() - dayStartMs) / 60000;
+  // 다음날 자정~새벽 2시 메모: 전날 채팅창에도 흐리게 함께 표시
+  const selectedDayStartMs = new Date(
+    selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()
+  ).getTime();
   const lateNightMemos = memos.filter(m => {
-    const min = minutesFromDayStart(m.recordedAt);
-    return min >= 1440 && min < 1440 + 120; // 다음날 00:00 ~ 01:59
+    const min = (new Date(m.recordedAt).getTime() - selectedDayStartMs) / 60000;
+    return min >= DAY_MINUTES && min < DAY_MINUTES + 120; // 다음날 00:00 ~ 01:59
   });
-  const timelineMemos = [...displayedMemos, ...lateNightMemos];
+  // 채팅창은 고른 날짜 하루만 보여준다. 헤더 날짜와 화면 내용이 어긋나면 안 된다.
+  const chatMemos = [...displayedMemos, ...lateNightMemos];
+
+  // ── 타임블럭이 이어서 훑는 날짜 창 ──────────────────────────
+  // 날짜마다 판을 새로 그리면 자정에서 블록이 뚝 끊긴다.
+  // 그래서 여러 날을 한 시간 축에 이어서 그리고, 스크롤로 자정을 넘나든다.
+  // 창은 anchorDate 기준으로 잡히며, 위로 끝까지 올라가면 예전 날짜가 더 깔린다.
+  const windowStart = new Date(
+    anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate() - daysBefore
+  );
+  const windowStartMs = windowStart.getTime();
+  const windowDayCount = daysBefore + 1 + TIMELINE_DAYS_AFTER;
+  const windowMinutes = windowDayCount * DAY_MINUTES;
+  const windowDays = Array.from({ length: windowDayCount }, (_, i) => addDays(windowStart, i));
+
+  // 창 안의 모든 기록. 자정을 넘는 블록도 여기서 그대로 이어 그린다
+  const timelineMemos = memos
+    .filter(m => {
+      const min = (new Date(m.recordedAt).getTime() - windowStartMs) / 60000;
+      return min >= 0 && min < windowMinutes;
+    })
+    .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+
+  // 편집 시트가 블록 구간을 계산할 때 쓰는 기준점 (타임블럭과 같은 판 위에서 재야 한다)
+  const dayStartMs = windowStartMs;
+
+  const dayInWindow = (day) => windowDays.some(d => isSameDay(d, day));
+
+  // ── 스크롤 ↔ 헤더 날짜 ──────────────────────────────────────
+  // 스크롤이 자정을 지나면 헤더의 두 날짜가 겹치며 바뀐다.
+  // 매 픽셀마다 리렌더하면 무거우므로, 흐려지는 효과는 DOM에 직접 쓰고
+  // 날짜가 실제로 바뀐 순간에만 selectedDate를 건드린다.
+  const headerStackRef = useRef(null);
+  const scrollDayRef = useRef(0);
+  // 사용자가 날짜를 직접 고른 횟수. 이 값이 늘면 그 날짜로 옮긴다.
+  // (스크롤 때문에 날짜가 바뀐 경우와 구분해야 화면이 스스로 튀지 않는다)
+  const [navSeq, setNavSeq] = useState(0);
+  const CROSSFADE_PX = 56;
+
+  const paintHeaderDay = (index, progress) => {
+    const stack = headerStackRef.current;
+    if (!stack) return;
+    for (const el of stack.children) {
+      const i = Number(el.dataset.dayLabel);
+      el.style.opacity = i === index ? String(1 - progress)
+        : i === index + 1 ? String(progress)
+        : '0';
+    }
+  };
+
+  // 지금 화면 맨 위에 어느 날짜가 걸려 있는지 보고 헤더를 맞춘다.
+  // 스크롤할 때뿐 아니라 자리를 잡은 직후에도 불러서, 헤더와 화면이 어긋나지 않게 한다.
+  const syncHeaderToScroll = (el) => {
+    if (!el) return;
+    // 스크롤할 게 없으면(기록이 적어 한 화면에 다 들어옴) 헤더를 건드리지 않는다.
+    // 맨 위에 걸린 날짜를 따라가면 오늘 쓰러 들어왔는데 며칠 전 날짜가 떠 있게 된다.
+    if (el.scrollHeight - el.clientHeight < 4) return;
+    const marks = el.querySelectorAll('[data-day-index]');
+    if (!marks.length) return;
+    // 기준선은 화면 맨 위가 아니라 위쪽 1/3.
+    // 맨 위로 재면 화면 대부분이 오늘인데도 위에 살짝 걸친 어제가 헤더를 차지한다.
+    const base = el.getBoundingClientRect().top + el.clientHeight / 3;
+    let index = 0;
+    let progress = 0;
+    // 아직 첫 날짜 경계도 지나지 않았으면(맨 위) 겹침 없이 그 날짜만 보여준다.
+    // 이게 없으면 화면 맨 위에서 다음 날짜로 반쯤 넘어간 채 시작한다.
+    let passedAny = false;
+    for (const mark of marks) {
+      const i = Number(mark.dataset.dayIndex);
+      const offset = mark.getBoundingClientRect().top - base;
+      if (offset <= 1) { index = i; progress = 0; passedAny = true; continue; }
+      // 다음 날짜 경계가 위쪽에 가까워질수록 헤더가 그쪽으로 넘어간다
+      if (passedAny && offset < CROSSFADE_PX) progress = 1 - offset / CROSSFADE_PX;
+      break;
+    }
+    paintHeaderDay(index, progress);
+    if (scrollDayRef.current !== index) {
+      scrollDayRef.current = index;
+      const day = windowDays[index];
+      if (day) setSelectedDate(prev => (isSameDay(prev, day) ? prev : day));
+    }
+  };
+
+  // 위 끝에 닿으면 예전 날짜를 더 깔아준다.
+  // growRef에 넓히기 직전 높이를 담아두고, 늘어난 만큼 스크롤을 내려서 보던 자리를 지킨다
+  // (안 그러면 날짜가 위에 추가되는 순간 화면이 확 튄다).
+  const growRef = useRef(null);
+
+  const handleTimelineScroll = (e) => {
+    const el = e.currentTarget;
+    syncHeaderToScroll(el);
+    if (el.scrollTop < 80 && growRef.current === null && daysBefore < TIMELINE_MAX_DAYS_BEFORE) {
+      growRef.current = el.scrollHeight;
+      setDaysBefore(d => Math.min(TIMELINE_MAX_DAYS_BEFORE, d + TIMELINE_GROW_DAYS));
+    }
+  };
+
+  // 화살표·달력으로 날짜를 고르면 그 날짜가 화면 위로 오도록 옮긴다.
+  // 창 밖의 날짜면 창을 다시 잡고, 다음 렌더에서 옮겨진다.
+  const goToDay = (day) => {
+    setSelectedDate(day);
+    if (!dayInWindow(day)) {
+      setAnchorDate(day);
+      setDaysBefore(TIMELINE_DAYS_BEFORE); // 멀리 뛰었으니 깔아둔 날짜도 다시 잡는다
+    }
+    setNavSeq(n => n + 1);
+  };
+
+  const timelineScrollerEl = () => (showScheduleView ? scheduleViewRef.current : timelineRef.current);
+
+  // 창을 넓힌 직후, 늘어난 높이만큼 스크롤을 내려 보던 자리를 지킨다
+  useEffect(() => {
+    const before = growRef.current;
+    if (before === null) return;
+    const el = timelineScrollerEl();
+    if (!el) return;
+    growRef.current = null;
+    el.scrollTop += el.scrollHeight - before;
+  });
+
+  // 고른 날짜로 실제로 옮기는 곳
+  useEffect(() => {
+    if (navSeq === 0 || activeView !== 'timeline') return;
+    const idx = windowDays.findIndex(d => isSameDay(d, selectedDate));
+    if (idx < 0) return;
+    const el = timelineScrollerEl();
+    const mark = el?.querySelector(`[data-day-index="${idx}"]`);
+    if (!mark) return;
+    el.scrollTop += mark.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    scrollDayRef.current = idx;
+    paintHeaderDay(idx, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navSeq]);
+
+  // 타임라인을 열거나 화면을 바꿀 때 한 번 자리를 잡아준다.
+  // 오늘이면 지금 시각, 아니면 그 날 머리로.
+  const autoScrollKeyRef = useRef('');
+  useEffect(() => {
+    if (activeView !== 'timeline') { autoScrollKeyRef.current = ''; return; }
+    const key = `${showScheduleView}|${memos.length > 0}|${format(anchorDate, 'yyyy-MM-dd')}`;
+    if (autoScrollKeyRef.current === key) return;
+    const el = timelineScrollerEl();
+    if (!el) return;
+    const idx = windowDays.findIndex(d => isSameDay(d, selectedDate));
+    const nowLine = isToday(selectedDate) ? el.querySelector('.schedule-now-line') : null;
+    const target = nowLine || el.querySelector(`[data-day-index="${Math.max(0, idx)}"]`);
+    if (!target) return;
+    autoScrollKeyRef.current = key;
+    const delta = target.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    // 지금 시각은 화면 위 1/3 지점에 두어야 앞뒤가 같이 보인다
+    el.scrollTop = Math.max(0, el.scrollTop + delta - (nowLine ? el.clientHeight / 3 : 0));
+    if (idx >= 0) { scrollDayRef.current = idx; paintHeaderDay(idx, 0); }
+  });
 
   const monthlyData = buildMonthlyData(memos, habitKeywords);
 
@@ -963,121 +1128,218 @@ function App() {
     }
   };
 
-  // '이전 기록부터'/직접 지정 상태에 따른 블록 시작 시각 (분 단위, 자정 기준)
-  const derivedStartMinutes = (schedule) => {
-    const own = schedule.ownHour * 60 + schedule.ownMin;
-    if (schedule.backMinutes > 0) return own - schedule.backMinutes;
-    if (schedule.spansFromPrev) {
-      return schedule.prevHour !== null ? schedule.prevHour * 60 + schedule.prevMin : own - 30;
+  // ── 기록 편집 시트 ───────────────────────────────────────────
+  // 채팅창(시각/말풍선)과 타임블럭(블록) 어디서 열어도 같은 시트, 같은 기능이다.
+
+  // 이 기록이 화면에서 차지하는 구간 [시작, 끝].
+  // 두 화면이 같은 값을 보여주도록 타임블럭을 그릴 때와 똑같은 규칙으로 계산한다.
+  // patched를 주면 그 값을 적용했을 때의 구간을 미리 계산해준다.
+  const blockRangeOf = (memo, patched) => {
+    const target = patched ? { ...memo, ...patched } : memo;
+    const sorted = timelineMemos
+      .map(m => (m.id === target.id ? target : m))
+      .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+    const block = buildDayBlocks(sorted, {
+      dayStartMs, nowMs: nowTime.getTime(), gridMinutes: windowMinutes,
+    }).find(b => b.memo.id === target.id);
+    if (!block) {
+      const own = new Date(target.recordedAt).getTime();
+      return { start: new Date(own), end: new Date(own + MIN_BLOCK_MINUTES * 60000) };
     }
-    return own;
+    return {
+      start: new Date(dayStartMs + block.startPos * 60000),
+      end: new Date(dayStartMs + block.endPos * 60000),
+    };
   };
 
-  const openScheduleDetail = (schedule) => {
-    setSelectedSchedule(schedule);
-    // 입력칸은 열 때 한 번만 채운다. (매번 다시 채우면 지우는 도중 값이 되살아난다)
-    setEditStartHour(String(schedule.ownHour));
-    setEditStartMin(String(schedule.ownMin));
-    setEditEndHour(schedule.nextHour !== null ? String(schedule.nextHour) : '');
-    setEditEndMin(schedule.nextMin !== null ? String(schedule.nextMin) : '');
-    const s = derivedStartMinutes(schedule);
-    setAdjustStartHour(String(Math.floor(((s % 1440) + 1440) % 1440 / 60)));
-    setAdjustStartMin(String(((s % 60) + 60) % 60));
+  const hhmm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+  const openBlockEditor = (memo) => {
+    const range = isRangeMemo(memo);
+    const { start, end } = blockRangeOf(memo);
+    // 순간짜리는 적은 시각 하나만 보여준다 (블록으로 그릴 때 붙는 기본 30분은 시각이 아니다)
+    const startStr = range ? hhmm(start) : hhmm(new Date(memo.recordedAt));
+    const snapshot = {
+      date: format(new Date(memo.recordedAt), 'yyyy-MM-dd'),
+      start: startStr,
+      end: hhmm(end),
+      mode: range ? 'range' : 'moment',
+    };
+    setEditingMemo(memo);
+    setEditContentStr(memo.content);
+    setEditMemoColor(memo.color || 'default');
+    setEditDateStr(snapshot.date);
+    setEditStartStr(snapshot.start);
+    setEditEndStr(snapshot.end);
+    setEditMode(snapshot.mode);
+    setEditInitial(snapshot);
   };
 
-  const closeScheduleDetail = () => {
-    setSelectedSchedule(null);
-    setEditStartHour('');
-    setEditStartMin('');
-    setEditEndHour('');
-    setEditEndMin('');
-    setAdjustStartHour('');
-    setAdjustStartMin('');
+  // 한 순간 ↔ 구간 전환. 저장을 눌러야 반영된다.
+  const switchEditMode = (mode) => {
+    if (mode === editMode) return;
+    if (mode === 'range') {
+      // 구간으로 바꾸면 적은 시각부터 30분짜리로 시작한다
+      const [h, m] = editStartStr.split(':').map(Number);
+      const end = new Date(0);
+      end.setHours(h, m + MIN_BLOCK_MINUTES, 0, 0);
+      setEditEndStr(hhmm(end));
+    }
+    setEditMode(mode);
   };
 
-  // 다음 기록까지 이을지 토글 (스위치는 즉시 저장)
-  const handleToggleSpans = async (schedule) => {
-    const next = !schedule.spansToNext;
-    const ok = await writeMemoFields(
-      schedule.startMemoId,
-      { spans_to_next: next },
-      { spansToNext: next }
-    );
-    if (!ok) return;
-    track('Memo Edited', { changed: 'block', block_option: 'spans_to_next', turned_on: next });
+  const closeBlockEditor = () => {
+    setEditingMemo(null);
+    setEditInitial(null);
   };
 
+  // 기록 한 건을 고쳐 쓴다. 체험 모드는 서버 대신 브라우저에 쓴다.
   const writeMemoFields = async (memoId, dbFields, localFields) => {
     if (isGuest) {
       patchGuestRow(memoId, dbFields);
-      setMemos(prev => prev.map(m => m.id === memoId ? { ...m, ...localFields } : m));
-      setSelectedSchedule(s => s && s.startMemoId === memoId ? { ...s, ...localFields } : s);
-      return true;
+    } else {
+      const { error } = await supabase.from('memos').update(dbFields).eq('id', memoId);
+      if (error) {
+        console.error('Error updating memo:', error);
+        alert('변경에 실패했습니다. 잠시 후 다시 시도해주세요.');
+        return false;
+      }
     }
-    const { error } = await supabase.from('memos').update(dbFields).eq('id', memoId);
-    if (error) {
-      console.error('Error updating memo:', error);
-      alert('변경에 실패했습니다. 잠시 후 다시 시도해주세요.');
-      return false;
-    }
-    setMemos(prev => prev.map(m => m.id === memoId ? { ...m, ...localFields } : m));
-    setSelectedSchedule(s => s && s.startMemoId === memoId ? { ...s, ...localFields } : s);
+    setMemos(prev => prev.map(m => m.id === memoId ? { ...m, ...localFields } : m)
+      .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
+    setEditingMemo(m => (m && m.id === memoId ? { ...m, ...localFields } : m));
     return true;
   };
 
-  // '이전 기록부터 이어서 표시' 토글.
-  // forceReset이면 직접 고친 시작 시각을 버리고 다시 이전 기록에 맞춘다.
-  const handleToggleFromPrev = async (schedule, forceReset = false) => {
-    const isOn = schedule.spansFromPrev || schedule.backMinutes > 0;
-    const turningOn = forceReset ? true : !isOn;
+  // '다음 기록까지 자동으로 잇기' 토글 (마지막 기록이면 지금까지).
+  // 종료 시각을 직접 정하는 것과 배타적이라, 켜면 직접 정한 값을 비운다.
+  // '이전 기록부터 자동으로 잇기' 토글.
+  // 시작 시각을 직접 정하는 것과 배타적이라, 켜면 직접 정한 값을 비운다.
+  const toggleSpansFromPrev = async () => {
+    const memo = editingMemo;
+    if (!memo) return;
+    const turningOn = !isAutoStart(memo);
+    const patch = { spansFromPrev: turningOn, backMinutes: 0 };
     const ok = await writeMemoFields(
-      schedule.startMemoId,
+      memo.id,
       { spans_from_prev: turningOn, back_minutes: 0 },
-      { spansFromPrev: turningOn, backMinutes: 0 }
+      patch,
     );
+    if (!ok) return;
+    track('Memo Edited', { changed: 'block', block_option: 'spans_from_prev', turned_on: turningOn });
+    // 자동으로 다시 계산된 구간을 입력칸에 반영한다
+    const { start, end } = blockRangeOf(memo, patch);
+    setEditStartStr(hhmm(start));
+    setEditEndStr(hhmm(end));
+    setEditInitial(prev => ({ ...prev, start: hhmm(start), end: hhmm(end) }));
+  };
+
+  const toggleSpansToNext = async () => {
+    const memo = editingMemo;
+    if (!memo) return;
+    const turningOn = !isAutoEnd(memo);
+    const patch = { spansToNext: turningOn, endMinutes: 0 };
+    const ok = await writeMemoFields(
+      memo.id,
+      { spans_to_next: turningOn, end_minutes: 0 },
+      patch,
+    );
+    if (!ok) return;
+    track('Memo Edited', { changed: 'block', block_option: 'spans_to_next', turned_on: turningOn });
+    // 자동으로 다시 계산된 구간을 입력칸에 반영한다
+    const { start, end } = blockRangeOf(memo, patch);
+    setEditStartStr(hhmm(start));
+    setEditEndStr(hhmm(end));
+    setEditInitial(prev => ({ ...prev, start: hhmm(start), end: hhmm(end) }));
+  };
+
+  const saveBlockEdit = async () => {
+    const memo = editingMemo;
+    if (!memo || !editContentStr.trim()) return;
+    const init = editInitial || {};
+
+    const dbFields = { content: editContentStr, color: editMemoColor };
+    const localFields = { content: editContentStr, color: editMemoColor };
+
+    const dateChanged = editDateStr !== init.date;
+    const startChanged = editStartStr !== init.start;
+    const endChanged = editEndStr !== init.end;
+    const modeChanged = editMode !== init.mode;
+    const timeTouched = dateChanged || startChanged || endChanged || modeChanged;
+    const toMin = (str) => { const [h, m] = str.split(':').map(Number); return h * 60 + m; };
+    const canWriteTime = editDateStr && editStartStr && (editMode === 'moment' || editEndStr);
+
+    if (timeTouched && canWriteTime) {
+      const [y, mo, d] = editDateStr.split('-').map(Number);
+
+      if (editMode === 'moment') {
+        // 한 순간짜리는 늘린 흔적을 전부 지운다. 적은 시각 하나만 남는다.
+        const startMin = toMin(editStartStr);
+        dbFields.recorded_at = new Date(y, mo - 1, d, 0, startMin, 0, 0).toISOString();
+        dbFields.back_minutes = 0;
+        dbFields.end_minutes = 0;
+        dbFields.spans_from_prev = false;
+        dbFields.spans_to_next = false;
+        localFields.recordedAt = dbFields.recorded_at;
+        localFields.backMinutes = 0;
+        localFields.endMinutes = 0;
+        localFields.spansFromPrev = false;
+        localFields.spansToNext = false;
+      } else {
+        const startMin = toMin(editStartStr);
+        let endMin = toMin(editEndStr);
+        if (endMin < startMin) endMin += 1440; // 자정을 넘긴 구간
+
+        // '적은 순간'은 그대로 두되, 구간 밖으로 밀려나면 안쪽으로 끌어온다.
+        // 채팅창 말풍선에 찍히는 시각이 이 값이라 함부로 옮기지 않는다.
+        const own = new Date(memo.recordedAt);
+        const ownWas = own.getHours() * 60 + own.getMinutes();
+        const ownMin = Math.min(Math.max(ownWas, startMin), endMin);
+        // 기준점이 옮겨졌으면 앞뒤 길이를 둘 다 다시 재야 한다
+        const ownMoved = ownMin !== ownWas;
+
+        if (dateChanged || ownMoved || modeChanged) {
+          dbFields.recorded_at = new Date(y, mo - 1, d, 0, ownMin, 0, 0).toISOString();
+          localFields.recordedAt = dbFields.recorded_at;
+        }
+        // 손댄 쪽만 바꾼다. 시작만 고쳤는데 자동으로 따라가던 종료까지 굳어버리면
+        // 사용자가 하지도 않은 결정을 대신 내린 셈이 된다.
+        if (startChanged || ownMoved || modeChanged) {
+          // 직접 정한 시각이 자동 규칙을 이긴다.
+          // 켜둔 채로 두면 이전 기록을 옮길 때 방금 정한 값이 되돌아간다.
+          dbFields.back_minutes = ownMin - startMin;
+          dbFields.spans_from_prev = false;
+          localFields.backMinutes = dbFields.back_minutes;
+          localFields.spansFromPrev = false;
+        }
+        if (endChanged || ownMoved || modeChanged) {
+          dbFields.end_minutes = endMin - ownMin;
+          dbFields.spans_to_next = false;
+          localFields.endMinutes = dbFields.end_minutes;
+          localFields.spansToNext = false;
+        }
+      }
+    }
+
+    const ok = await writeMemoFields(memo.id, dbFields, localFields);
     if (!ok) return;
     track('Memo Edited', {
       changed: 'block',
-      block_option: 'spans_from_prev',
-      turned_on: turningOn,
-      // 직접 고친 시작 시각을 버리고 이전 기록에 다시 맞춘 경우
-      reset: forceReset,
+      content_changed: memo.content !== editContentStr,
+      color_changed: (memo.color || 'default') !== editMemoColor,
+      time_changed: timeTouched,
+      date_changed: dateChanged,
+      // 순간짜리를 구간으로 바꾸는 일이 실제로 얼마나 일어나는지
+      mode: editMode,
+      mode_changed: modeChanged,
     });
-    // 켜면 시작 시각 칸이 이전 기록 시각을 가리켜야 한다 (블록 스냅샷은 아직 옛 값이라 직접 계산)
-    const s = derivedStartMinutes({ ...schedule, spansFromPrev: turningOn, backMinutes: 0 });
-    setAdjustStartHour(String(Math.floor(((s % 1440) + 1440) % 1440 / 60)));
-    setAdjustStartMin(String(((s % 60) + 60) % 60));
+    closeBlockEditor();
   };
 
-  // 시작 시각을 직접 고치면 '이 기록 시각에서 몇 분 전'으로 환산해 저장한다.
-  // (이전 기록을 따라가지 않고 고정되도록)
-  const commitStartAdjust = async (schedule) => {
-    // 비워둔 채 벗어나면 원래 값으로 되돌린다 (지우는 중일 수 있으므로 저장하지 않음)
-    const restore = () => {
-      const s = derivedStartMinutes(schedule);
-      setAdjustStartHour(String(Math.floor(((s % 1440) + 1440) % 1440 / 60)));
-      setAdjustStartMin(String(((s % 60) + 60) % 60));
-    };
-    if (adjustStartHour === '' || adjustStartMin === '') return restore();
-    const h = Math.max(0, Math.min(23, parseInt(adjustStartHour)));
-    const m = Math.max(0, Math.min(59, parseInt(adjustStartMin)));
-    if (isNaN(h) || isNaN(m)) return restore();
-    setAdjustStartHour(String(h));
-    setAdjustStartMin(String(m));
-
-    const ownMinutes = schedule.ownHour * 60 + schedule.ownMin;
-    let startMinutes = h * 60 + m;
-    if (startMinutes > ownMinutes) startMinutes -= 1440; // 전날로 넘어간 경우
-    const back = Math.max(0, Math.min(1440, ownMinutes - startMinutes));
-    if (back === 0) {
-      await writeMemoFields(schedule.startMemoId,
-        { spans_from_prev: false, back_minutes: 0 },
-        { spansFromPrev: false, backMinutes: 0 });
-      return;
-    }
-    await writeMemoFields(schedule.startMemoId,
-      { spans_from_prev: false, back_minutes: back },
-      { spansFromPrev: false, backMinutes: back });
+  const deleteFromBlockEditor = () => {
+    const memo = editingMemo;
+    closeBlockEditor();
+    if (memo) handleDeleteWithUndo(memo);
   };
 
   const handleResetPasswordSubmit = async (e) => {
@@ -1222,10 +1484,8 @@ function App() {
     e?.preventDefault();
     if (!inputText.trim()) return;
     const now = new Date();
-    // 자정이 지났으면 selectedDate 업데이트
-    if (!isSameDay(selectedDate, now)) {
-      setSelectedDate(now);
-    }
+    // 자정이 지났으면 오늘로 옮긴다
+    if (!isSameDay(selectedDate, now)) goToDay(now);
     // 항상 현재 시간과 날짜로 기록
     const newMemoData = {
       user_id: currentUser?.id,
@@ -1332,7 +1592,7 @@ function App() {
   const handleTodoToMemo = async (todo) => {
     if (!currentUser) return;
     const now = new Date();
-    if (!isSameDay(selectedDate, now)) setSelectedDate(now);
+    if (!isSameDay(selectedDate, now)) goToDay(now);
     const { data, error } = await supabase
       .from('memos')
       .insert({
@@ -1404,69 +1664,6 @@ function App() {
       e.preventDefault();
       handleAddMemo();
     }
-  };
-
-  // ── 시간 수정 ────────────────────────────────────────────────
-  const openTimeEditor = (memo) => {
-    setEditingMemoId(memo.id);
-    const d = new Date(memo.recordedAt);
-    setEditTimeStr(`${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`);
-    setEditDateStr(format(d, 'yyyy-MM-dd'));
-  };
-
-  const saveTimeEdit = async () => {
-    if (!editTimeStr || !editDateStr) return;
-    const [hours, mins] = editTimeStr.split(':');
-    const memoToEdit = memos.find(m => m.id === editingMemoId);
-    if (memoToEdit) {
-      const [year, month, day] = editDateStr.split('-');
-      const newDate = new Date(`${year}-${month}-${day}T${hours}:${mins}:00`);
-      if (isGuest) patchGuestRow(editingMemoId, { recorded_at: newDate.toISOString() });
-      const { error } = isGuest
-        ? { error: null }
-        : await supabase.from('memos').update({ recorded_at: newDate.toISOString() }).eq('id', editingMemoId);
-      if (error) {
-        console.error('Error updating time:', error);
-      } else {
-        setMemos(prev => prev.map(m => m.id === editingMemoId ? { ...m, recordedAt: newDate.toISOString() } : m)
-          .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
-        track('Memo Edited', {
-          changed: 'time',
-          // 날짜까지 바꿨는지 (지난 날 기록을 채워넣는 행동인지 보려는 값)
-          date_changed: !isSameDay(new Date(memoToEdit.recordedAt), newDate),
-        });
-      }
-    }
-    setEditingMemoId(null);
-    setEditTimeStr('');
-    setEditDateStr('');
-  };
-
-  // ── 내용 수정 ────────────────────────────────────────────────
-  const openContentEditor = (memo) => {
-    setEditingContentMemo(memo);
-    setEditContentStr(memo.content);
-    setEditMemoColor(memo.color || 'default');
-  };
-
-  const saveContentEdit = async () => {
-    if (!editContentStr.trim() || !editingContentMemo) return;
-    if (isGuest) patchGuestRow(editingContentMemo.id, { content: editContentStr, color: editMemoColor });
-    const { error } = isGuest
-      ? { error: null }
-      : await supabase.from('memos')
-          .update({ content: editContentStr, color: editMemoColor })
-          .eq('id', editingContentMemo.id);
-    if (error) {
-      console.error('Error updating content:', error);
-    } else {
-      setMemos(prev => prev.map(m => m.id === editingContentMemo.id ? { ...m, content: editContentStr, color: editMemoColor } : m));
-      track('Memo Edited', {
-        changed: 'content',
-        color_changed: (editingContentMemo.color || 'default') !== editMemoColor,
-      });
-    }
-    setEditingContentMemo(null);
   };
 
   // ── 습관 키워드 저장 ─────────────────────────────────────────
@@ -1616,7 +1813,7 @@ function App() {
             },
             onTouchEnd: (e) => {
               if (!touchState.isScrolling) {
-                setSelectedDate(cloneDay);
+                goToDay(cloneDay);
                 setShowCalendar(false);
               }
             }
@@ -1631,7 +1828,7 @@ function App() {
             key={day.toISOString()}
             tabIndex={-1}
             onClick={() => {
-              setSelectedDate(cloneDay);
+              goToDay(cloneDay);
               setShowCalendar(false);
             }}
             onTouchStart={calHandlers.onTouchStart}
@@ -1845,8 +2042,8 @@ function App() {
                         <div
                           key={memo.id}
                           style={{ backgroundColor: bg, padding: '8px 12px', borderRadius: '8px', fontSize: '0.85rem', lineHeight: 1.4, cursor: 'pointer' }}
-                          onClick={() => openContentEditor(memo)}
-                          title="메모 수정"
+                          onClick={() => openBlockEditor(memo)}
+                          title="기록 수정"
                         >
                           <span style={{ fontSize: '0.7rem', color: '#999', marginRight: '8px' }}>
                             {format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}
@@ -1867,9 +2064,9 @@ function App() {
 
   const dateFormatted = format(selectedDate, 'M월 d일 (E)', { locale: ko });
   const headerTitle = isToday(selectedDate) ? `${dateFormatted} - 오늘` : dateFormatted;
+  const memoGroups = groupMemosByHour(chatMemos);
   const weekStart = startOfWeek(selectedDate);
   const weekTitle = `${format(weekStart, 'M월 d일', { locale: ko })} ~ ${format(endOfWeek(selectedDate), 'M월 d일', { locale: ko })}`;
-  const memoGroups = groupMemosByHour(timelineMemos);
 
   // ── 위클리 뷰 렌더 (한 주의 '모양'을 보는 곳) ────────────────
   // 글자를 읽는 곳이 아니라 리듬을 보는 곳이다. 색 띠만 그리므로 하루 칸이 좁아도 되고,
@@ -1935,6 +2132,7 @@ function App() {
               dayStartMs: dayStartTime,
               nowMs: nowTime.getTime(),
               gridMinutes: WEEKLY_GRID_MINUTES,
+              clampDawn: true, // 하루가 한 칸이라 새벽에서 끊어야 한다
             });
 
             // 겹치는 띠는 좌우로 나눈다 (글자가 없으므로 좁아도 읽힌다)
@@ -1964,7 +2162,7 @@ function App() {
               <div
                 key={day.toISOString()}
                 className={`weekly-day-col ${isDayToday ? 'weekly-day-today' : ''}`}
-                onClick={() => { setSelectedDate(day); setActiveView('timeline'); setShowScheduleView(true); }}
+                onClick={() => { goToDay(day); setActiveView('timeline'); setShowScheduleView(true); }}
                 title={`${format(day, 'M월 d일', { locale: ko })} 자세히 보기`}
               >
                 <div className="weekly-day-header">
@@ -2014,27 +2212,29 @@ function App() {
     );
   };
 
-  // ── 스케줄 뷰 렌더 ──
+  // ── 타임블럭 뷰 렌더 ──
+  // 날짜별로 판을 새로 그리지 않고, 창에 잡힌 며칠을 하나의 시간 축에 이어서 그린다.
+  // 그래서 23:50에 시작해 01:20에 끝난 기록이 자정에서 끊기지 않는다.
   const renderScheduleView = () => {
-    const sortedMemos = [...timelineMemos].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
-    if (sortedMemos.length === 0) return null;
+    const sortedMemos = timelineMemos;
 
-    const isViewingToday = isToday(selectedDate);
-    // 그리드는 항상 26시간 (다음날 새벽 02:00까지)
-    const gridHours = 26;
-    const gridMinutes = gridHours * 60;
+    const gridMinutes = windowMinutes;
+    const gridHours = gridMinutes / 60;
     const schedules = [];
 
     const dayBlocks = buildDayBlocks(sortedMemos, {
-      dayStartMs, nowMs: nowTime.getTime(), gridMinutes,
+      dayStartMs: windowStartMs, nowMs: nowTime.getTime(), gridMinutes,
     });
 
     for (const b of dayBlocks) {
-      const { memo: currentMemo, prevMemo, nextMemo, startPos, endPos, ownPos } = b;
-      const { spansNext, spansPrev, backMin, startsEarlier } = b;
-      const ownTime = new Date(currentMemo.recordedAt);
-      const startTime = new Date(dayStartMs + startPos * 60000);
-      const endTime = new Date(dayStartMs + endPos * 60000);
+      const { memo: currentMemo, startPos, endPos, ownPos, spansNext } = b;
+      const startTime = new Date(windowStartMs + startPos * 60000);
+      const endTime = new Date(windowStartMs + endPos * 60000);
+
+      // 구간으로 지정한 기록은 길이와 상관없이 '시작 → 끝'으로 보여준다.
+      // (30분짜리 구간이 한 순간짜리와 똑같이 보이면 구간으로 정한 의미가 없다)
+      const isSpanning = isRangeMemo(currentMemo)
+        || startPos < ownPos || endPos > ownPos + MIN_BLOCK_MINUTES || spansNext;
 
       schedules.push({
         startPos,
@@ -2046,24 +2246,12 @@ function App() {
         content: currentMemo.content,
         color: currentMemo.color || 'default',
         recordedAt: currentMemo.recordedAt,
-        isCarry: ownPos >= 1440, // 다음날 새벽 메모 (흐리게 표시)
-        spansToNext: spansNext,
-        spansFromPrev: spansPrev,
-        backMinutes: backMin,
         // 앞뒤 어느 쪽으로든 늘어난 블록 (시각을 범위로 표시한다)
-        isSpanning: startsEarlier || spansNext,
+        isSpanning,
         // 늘어나지 않은 블록은 시간+내용을 한 줄로 표시하므로 높이를 낮게 잡는다
-        isCompact: !(startsEarlier || spansNext),
-        // 이 기록 자체의 시간 (블록 시작과 다를 수 있어 따로 보관)
-        ownHour: ownTime.getHours(),
-        ownMin: ownTime.getMinutes(),
-        // 이전 기록 시각 — '이전 기록부터'를 켜면 여기가 블록 시작이 된다
-        prevHour: prevMemo ? new Date(prevMemo.recordedAt).getHours() : null,
-        prevMin: prevMemo ? new Date(prevMemo.recordedAt).getMinutes() : null,
-        nextHour: nextMemo ? new Date(nextMemo.recordedAt).getHours() : null,
-        nextMin: nextMemo ? new Date(nextMemo.recordedAt).getMinutes() : null,
-        startMemoId: currentMemo.id,
-        nextMemoId: nextMemo ? nextMemo.id : null
+        isCompact: !isSpanning,
+        // 편집 시트는 기록 그 자체를 다룬다 (스냅샷이 아니라 원본을 넘긴다)
+        memo: currentMemo,
       });
     }
 
@@ -2172,21 +2360,22 @@ function App() {
       }
     }
 
-    // 현재 시간 위치 (0~1440분)
-    const nowPos = nowTime.getHours() * 60 + nowTime.getMinutes();
+    // 지금 이 순간이 창 안이면 빨간 줄을 그린다 (창 기준 분)
+    const nowPos = (nowTime.getTime() - windowStartMs) / 60000;
+    const nowInWindow = nowPos >= 0 && nowPos < gridMinutes;
 
     // 시간 눈금
     const hours = Array.from({ length: gridHours }, (_, i) => i);
 
     return (
-      <div className="schedule-view" ref={scheduleViewRef}>
+      <div className="schedule-view" ref={scheduleViewRef} onScroll={handleTimelineScroll}>
         <div className="schedule-header">
           <div className="schedule-times" style={{ height: `${totalPx}px` }}>
             {[...hours, gridHours].map(hour => (
               <div
                 key={hour}
                 className="schedule-hour-label"
-                style={{ top: `${timeToPx(hour * 60)}px`, opacity: hour >= 24 ? 0.4 : undefined }}
+                style={{ top: `${timeToPx(hour * 60)}px` }}
               >
                 {(hour % 24).toString().padStart(2, '0')}:00
               </div>
@@ -2196,8 +2385,19 @@ function App() {
             {hours.map(hour => (
               <div key={hour} className="schedule-hour-slot" style={{ top: `${timeToPx(hour * 60)}px` }} />
             ))}
-            {/* 현재 시간 빨간 줄 (오늘만) */}
-            {isViewingToday && (
+            {/* 날짜 경계 — 자정마다 한 줄. 헤더 날짜도 이 위치를 보고 따라온다 */}
+            {windowDays.map((day, i) => (
+              <div
+                key={`day-${i}`}
+                className={`schedule-day-line${i === 0 ? ' schedule-day-line--first' : ''}`}
+                data-day-index={i}
+                style={{ top: `${timeToPx(i * DAY_MINUTES)}px` }}
+              >
+                <span>{format(day, 'M월 d일 (E)', { locale: ko })}</span>
+              </div>
+            ))}
+            {/* 현재 시간 빨간 줄 */}
+            {nowInWindow && (
               <div className="schedule-now-line" style={{ top: `${timeToPx(nowPos)}px` }} />
             )}
             <div className="schedule-blocks-layer">
@@ -2225,13 +2425,12 @@ function App() {
                 <div
                   key={idx}
                   className={`schedule-block${isCompact ? ' schedule-block--compact' : ''}${schedule.isInner ? ' schedule-block--inner' : ''}`}
-                  onClick={() => openScheduleDetail(schedule)}
+                  onClick={() => openBlockEditor(schedule.memo)}
                   style={{
                     top: `${schedule.top}px`,
                     height: `${schedule.height}px`,
                     backgroundColor: bgColor,
                     borderColor: borderColor,
-                    opacity: schedule.isCarry ? 0.45 : 1,
                     cursor: 'pointer',
                     justifyContent: 'flex-start',
                     paddingTop: '6px'
@@ -2555,33 +2754,15 @@ function App() {
   // ── 메인 화면 ────────────────────────────────────────────────
   return (
     <div className="app-container">
-      {/* 체험 중 안내.
-          이 앱의 원칙대로 압박하지 않는다 — 남은 횟수나 경고가 아니라 사실만 알린다.
-          다만 브라우저를 비우면 사라진다는 건 반드시 알려야 나중에 억울한 일이 없다. */}
-      {isGuest && (
+      {/* 기록을 계정으로 옮기는 동안에만 띄운다.
+          체험 중 로그인 유도 배너는 지금 단계에서 필요 없어 뺐다 —
+          하단 탭의 '로그인'과 기록이 없을 때의 안내로 충분하다. */}
+      {migratingGuest && (
         <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
           padding: '8px 14px', backgroundColor: '#eef1ff', color: '#414a8a',
           fontSize: '0.8rem', lineHeight: 1.4, flexShrink: 0,
         }}>
-          <span>
-            {migratingGuest
-              ? '써두신 기록을 계정으로 옮기는 중이에요…'
-              : '체험 중이에요. 이 기기에만 저장되니 로그인하면 안전하게 보관돼요.'}
-          </span>
-          {!migratingGuest && (
-            <button
-              type="button"
-              onClick={() => setShowLogin(true)}
-              style={{
-                flexShrink: 0, border: 'none', borderRadius: '999px', cursor: 'pointer',
-                padding: '5px 12px', backgroundColor: 'var(--primary-color)', color: '#fff',
-                fontSize: '0.78rem', fontWeight: 600,
-              }}
-            >
-              로그인
-            </button>
-          )}
+          써두신 기록을 계정으로 옮기는 중이에요…
         </div>
       )}
       {/* Header */}
@@ -2590,7 +2771,7 @@ function App() {
           {(activeView === 'timeline' || activeView === 'weekly') && (
             <button
               className="header-nav-btn"
-              onClick={() => setSelectedDate(addDays(selectedDate, activeView === 'weekly' ? -7 : -1))}
+              onClick={() => goToDay(addDays(selectedDate, activeView === 'weekly' ? -7 : -1))}
               title={activeView === 'weekly' ? '이전주' : '이전날'}
             >
               <ChevronLeft size={20} />
@@ -2598,7 +2779,29 @@ function App() {
           )}
           <div className="header-title-container" onClick={() => { setCurrentMonth(selectedDate); setShowCalendar(true); }}>
             <Calendar size={20} className="header-icon" />
-            <h1>{activeView === 'monthly' ? format(currentMonth, 'yyyy년 M월', { locale: ko }) : activeView === 'weekly' ? weekTitle : headerTitle}</h1>
+            {activeView === 'timeline' && showScheduleView ? (
+              /* 타임블럭은 스크롤로 자정을 넘나들므로 두 날짜가 겹치며 바뀐다.
+                 흐리기(opacity)는 스크롤 핸들러가 DOM에 직접 쓴다 */
+              <div className="header-date-stack" ref={headerStackRef}>
+                {windowDays.map((day, i) => (
+                  <h1
+                    key={i}
+                    data-day-label={i}
+                    style={{ opacity: isSameDay(day, selectedDate) ? 1 : 0 }}
+                  >
+                    {isToday(day)
+                      ? `${format(day, 'M월 d일 (E)', { locale: ko })} - 오늘`
+                      : format(day, 'M월 d일 (E)', { locale: ko })}
+                  </h1>
+                ))}
+              </div>
+            ) : (
+              <h1>
+                {activeView === 'monthly' ? format(currentMonth, 'yyyy년 M월', { locale: ko })
+                  : activeView === 'weekly' ? weekTitle
+                  : headerTitle}
+              </h1>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {activeView === 'timeline' && (
@@ -2628,13 +2831,13 @@ function App() {
                 >
                   <LayoutGrid size={20} />
                 </button>
-                <button className="header-nav-btn" onClick={() => setSelectedDate(addDays(selectedDate, 1))} title="다음날">
+                <button className="header-nav-btn" onClick={() => goToDay(addDays(selectedDate, 1))} title="다음날">
                   <ChevronRight size={20} />
                 </button>
               </>
             )}
             {activeView === 'weekly' && (
-              <button className="header-nav-btn" onClick={() => setSelectedDate(addDays(selectedDate, 7))} title="다음주">
+              <button className="header-nav-btn" onClick={() => goToDay(addDays(selectedDate, 7))} title="다음주">
                 <ChevronRight size={20} />
               </button>
             )}
@@ -2646,11 +2849,13 @@ function App() {
       <div className="main-content">
         {activeView === 'timeline' ? (
           /* ── 타임라인 뷰 ── */
-          showScheduleView && timelineMemos.length > 0 ? (
+          showScheduleView ? (
             renderScheduleView()
           ) : (
+          /* 채팅창은 헤더에 뜬 날짜 하루만 보여준다.
+             (자정~새벽 2시 기록만 전날 화면에도 흐리게 얹는다 — 그건 원래 그 밤의 끝이다) */
           <div className="timeline" ref={timelineRef}>
-            {timelineMemos.length === 0 ? (
+            {chatMemos.length === 0 ? (
               <div className="empty-state">
                 <Inbox size={48} strokeWidth={1} />
                 <p>
@@ -2684,7 +2889,7 @@ function App() {
                     <MemoItem
                       key={memo.id}
                       memo={memo}
-                      onEdit={(m, type) => type === 'time' ? openTimeEditor(m) : openContentEditor(m)}
+                      onEdit={openBlockEditor}
                       onDeleteWithUndo={handleDeleteWithUndo}
                       habitKeywords={habitKeywords}
                       dimmed={!isSameDay(new Date(memo.recordedAt), selectedDate)}
@@ -2855,6 +3060,25 @@ function App() {
         )}
       </div>
 
+      {/* 키보드가 올라와 있을 때만 뜨는 툴바.
+          할 일은 헤더 구석에 있어서 쓰려면 손을 위로 올려야 했다.
+          쓰는 중에 손가락이 닿는 자리인 입력창 바로 위에 둔다.
+          (iOS Safari가 그리는 ^ ∨ ✓ 바는 웹에서 손댈 수 없어, 그 아래에 우리 툴바를 붙인다) */}
+      {activeView === 'timeline' && (
+        <div className="input-toolbar">
+          <button
+            type="button"
+            className="input-toolbar-btn"
+            // 할 일은 체험 범위 밖이다. 눌리면 막지 말고 로그인으로 안내한다
+            onMouseDown={e => e.preventDefault()} // 눌러도 입력 포커스를 뺏지 않는다
+            onClick={() => isGuest ? setShowLogin(true) : setShowTodoSheet(true)}
+          >
+            <ListChecks size={16} />
+            <span>할 일</span>
+          </button>
+        </div>
+      )}
+
       {/* Input Area (타임라인 뷰에서만) */}
       {activeView === 'timeline' && (
         <div className="input-area">
@@ -2912,173 +3136,6 @@ function App() {
             >
               <Send size={18} />
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* 스케줄 상세 바텀시트 */}
-      {selectedSchedule && showScheduleView && (
-        <div className="schedule-detail-overlay" onClick={closeScheduleDetail}>
-          <div className="schedule-detail-sheet" onClick={e => e.stopPropagation()}>
-            <div className="schedule-detail-header">
-              <h3>{selectedSchedule.content}</h3>
-              <button className="schedule-detail-close" onClick={closeScheduleDetail}>×</button>
-            </div>
-            <div className="schedule-detail-time-edit">
-              <div className="time-input-group">
-                <label>기록 시간</label>
-                <div className="time-input-row">
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    max="23"
-                    value={editStartHour}
-                    onChange={e => setEditStartHour(e.target.value)}
-                    className="time-input"
-                    placeholder="시"
-                  />
-                  <span>:</span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    max="59"
-                    value={editStartMin}
-                    onChange={e => setEditStartMin(e.target.value)}
-                    className="time-input"
-                    placeholder="분"
-                  />
-                </div>
-              </div>
-              {selectedSchedule.spansToNext && selectedSchedule.nextMemoId && (
-              <div className="time-input-group">
-                <label>다음 기록 시간</label>
-                <div className="time-input-row">
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    max="23"
-                    value={editEndHour}
-                    onChange={e => setEditEndHour(e.target.value)}
-                    className="time-input"
-                    placeholder="시"
-                  />
-                  <span>:</span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    max="59"
-                    value={editEndMin}
-                    onChange={e => setEditEndMin(e.target.value)}
-                    className="time-input"
-                    placeholder="분"
-                  />
-                </div>
-              </div>
-              )}
-            </div>
-            <label className="schedule-span-toggle">
-              <input
-                type="checkbox"
-                checked={!!selectedSchedule.spansFromPrev || selectedSchedule.backMinutes > 0}
-                onChange={() => handleToggleFromPrev(selectedSchedule)}
-              />
-              <span className="schedule-span-toggle-text">
-                <strong>이전 기록부터 이어서 표시</strong>
-                <small>끝나고 적은 기록일 때. 이전 기록 시각부터 이 기록 시각까지 하나의 블록이 됩니다.</small>
-              </span>
-            </label>
-            {(selectedSchedule.spansFromPrev || selectedSchedule.backMinutes > 0) && (
-            <div className="schedule-start-adjust">
-              <span className="schedule-start-adjust-label">시작 시각</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                min="0"
-                max="23"
-                className="time-input"
-                value={adjustStartHour}
-                onChange={e => setAdjustStartHour(e.target.value)}
-                onBlur={() => commitStartAdjust(selectedSchedule)}
-                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-              />
-              <span>:</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                min="0"
-                max="59"
-                className="time-input"
-                value={adjustStartMin}
-                onChange={e => setAdjustStartMin(e.target.value)}
-                onBlur={() => commitStartAdjust(selectedSchedule)}
-                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-              />
-              {selectedSchedule.backMinutes > 0 && (
-                <button
-                  type="button"
-                  className="schedule-start-reset"
-                  onClick={() => handleToggleFromPrev(selectedSchedule, true)}
-                >
-                  이전 기록에 맞추기
-                </button>
-              )}
-            </div>
-            )}
-            <label className="schedule-span-toggle">
-              <input
-                type="checkbox"
-                checked={!!selectedSchedule.spansToNext}
-                onChange={() => handleToggleSpans(selectedSchedule)}
-              />
-              <span className="schedule-span-toggle-text">
-                <strong>다음 기록까지 이어서 표시</strong>
-                <small>
-                  {selectedSchedule.nextMemoId
-                    ? '시작할 때 남긴 기록일 때. 이 기록 시각부터 다음 기록 시각까지 하나의 블록이 됩니다.'
-                    : '켜면 지금 이 순간까지 진행 중인 것으로 그려집니다.'}
-                </small>
-              </span>
-            </label>
-            <div className="schedule-detail-time-edit">
-              <div className="schedule-detail-actions">
-                <button className="btn-cancel" onClick={closeScheduleDetail}>취소</button>
-                <button className="btn-save" onClick={async () => {
-                  // 각 칸은 해당 기록의 시각을 직접 고친다
-                  const edits = [
-                    { memoId: selectedSchedule.startMemoId, h: editStartHour, m: editStartMin,
-                      fallbackH: selectedSchedule.ownHour, fallbackM: selectedSchedule.ownMin },
-                    { memoId: (selectedSchedule.spansToNext && selectedSchedule.nextMemoId) || null,
-                      h: editEndHour, m: editEndMin,
-                      fallbackH: selectedSchedule.nextHour, fallbackM: selectedSchedule.nextMin },
-                  ];
-                  const updates = [];
-                  for (const e of edits) {
-                    if (!e.memoId) continue;
-                    const memo = memos.find(m => m.id === e.memoId);
-                    if (!memo) continue;
-                    // 비워둔 칸은 원래 값을 그대로 쓴다
-                    const h = e.h === '' || isNaN(parseInt(e.h)) ? e.fallbackH : parseInt(e.h);
-                    const m = e.m === '' || isNaN(parseInt(e.m)) ? e.fallbackM : parseInt(e.m);
-                    const t = new Date(memo.recordedAt);
-                    t.setHours(Math.max(0, Math.min(23, h)));
-                    t.setMinutes(Math.max(0, Math.min(59, m)));
-                    updates.push({ id: memo.id, time: t.toISOString() });
-                  }
-                  for (const u of updates) {
-                    const { error } = await supabase.from('memos').update({ recorded_at: u.time }).eq('id', u.id);
-                    if (!error) {
-                      setMemos(prev => prev.map(m => m.id === u.id ? { ...m, recordedAt: u.time } : m)
-                        .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
-                    }
-                  }
-                  closeScheduleDetail();
-                }}>저장</button>
-              </div>
-            </div>
           </div>
         </div>
       )}
@@ -3305,41 +3362,6 @@ function App() {
         </div>
       )}
 
-      {/* Time Editor Modal */}
-      {editingMemoId && (
-        <div className="modal-overlay" onClick={() => setEditingMemoId(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 className="modal-title">날짜 & 시간 수정</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
-              <div>
-                <label style={{ fontSize: '0.9rem', fontWeight: '600', display: 'block', marginBottom: '6px' }}>날짜</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={editDateStr}
-                  onChange={e => setEditDateStr(e.target.value)}
-                  style={{ borderRadius: '8px', padding: '8px 12px', fontSize: '0.9rem' }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: '0.9rem', fontWeight: '600', display: 'block', marginBottom: '6px' }}>시간</label>
-                <input
-                  type="time"
-                  className="input-field"
-                  value={editTimeStr}
-                  onChange={e => setEditTimeStr(e.target.value)}
-                  style={{ borderRadius: '8px', padding: '8px 12px', fontSize: '0.9rem' }}
-                />
-              </div>
-            </div>
-            <div className="modal-actions">
-              <button className="btn-cancel" onClick={() => { setEditingMemoId(null); setEditTimeStr(''); setEditDateStr(''); }}>취소</button>
-              <button className="btn-save" onClick={saveTimeEdit}>저장</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 비밀번호 변경 모달 */}
       {showPasswordChange && (
         <div className="modal-overlay" onClick={() => { setShowPasswordChange(false); setPasswordChangeError(''); setPasswordChangeSuccess(false); }}>
@@ -3413,59 +3435,130 @@ function App() {
         </div>
       )}
 
-      {/* Content Editor Modal */}
-      {editingContentMemo && (
-        <div className="modal-overlay" onClick={() => setEditingContentMemo(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 className="modal-title">메모 수정</h3>
-            <div className="time-input-container" style={{ width: '100%' }}>
-              <textarea
-                className="input-field"
-                style={{ width: '100%', minHeight: '100px', borderRadius: '12px', resize: 'none' }}
-                value={editContentStr}
-                onChange={e => setEditContentStr(e.target.value)}
-              />
-            </div>
-
-            {/* Color Picker */}
-            <div style={{ marginBottom: '20px' }}>
-              <span style={{ fontSize: '0.85rem', color: '#666', marginBottom: '6px', display: 'block' }}>색상 선택</span>
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-start', alignItems: 'center', flexWrap: 'wrap' }}>
-                {COLOR_PALETTE.map(c => (
-                  <button
-                    key={c.id}
-                    style={{
-                      width: '32px',
-                      height: '32px',
-                      borderRadius: '50%',
-                      border: `${editMemoColor === c.id ? '4px' : '2px'} solid ${COLOR_BORDER[c.id]}`,
-                      backgroundColor: c.bg,
-                      cursor: 'pointer',
-                      padding: 0,
-                      transition: 'border 0.15s, box-shadow 0.15s',
-                      boxShadow: editMemoColor === c.id ? `0 0 0 2px white, 0 0 8px ${COLOR_BORDER[c.id]}` : 'none'
-                    }}
-                    onClick={() => setEditMemoColor(c.id)}
-                    title={c.label}
-                    onMouseEnter={(e) => e.target.style.transform = 'scale(1.05)'}
-                    onMouseLeave={(e) => e.target.style.transform = 'scale(1)'}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="modal-actions" style={{ flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
-                <button className="btn-cancel" onClick={() => setEditingContentMemo(null)}>취소</button>
-                <button className="btn-save" onClick={saveContentEdit}>저장</button>
-              </div>
-              <button
-                className="btn-cancel"
-                style={{ color: '#e53e3e', backgroundColor: '#fff5f5', width: '100%' }}
-                onClick={() => { handleDeleteWithUndo(editingContentMemo); setEditingContentMemo(null); }}
-              >
-                메모 삭제
+      {/* 기록 편집 시트 — 채팅창과 타임블럭이 같은 것을 쓴다.
+          어느 화면 어느 자리를 눌러도 여기서 내용·시간·색상·삭제를 다 할 수 있다 */}
+      {editingMemo && (
+        <div className="block-sheet-overlay" onClick={closeBlockEditor}>
+          <div className="block-sheet" onClick={e => e.stopPropagation()}>
+            <div className="block-sheet-handle" />
+            <div className="block-sheet-head">
+              <h3>기록 수정</h3>
+              <button className="block-sheet-close" onClick={closeBlockEditor} title="닫기">
+                <X size={18} />
               </button>
+            </div>
+
+            <div className="block-sheet-body">
+              <div className="block-field">
+                <span className="block-field-label">내용</span>
+                <textarea
+                  className="block-textarea"
+                  value={editContentStr}
+                  onChange={e => setEditContentStr(e.target.value)}
+                  rows={3}
+                />
+              </div>
+
+              <div className="block-field">
+                <div className="block-field-head">
+                  <span className="block-field-label">시간</span>
+                  {/* 그냥 적어둔 한 줄과, 얼마나 걸렸는지가 있는 일은 다르다.
+                      전부 구간으로 물으면 메모할 때마다 쓸데없는 결정을 하게 된다 */}
+                  <div className="block-mode-toggle">
+                    <button
+                      type="button"
+                      className={editMode === 'moment' ? 'active' : ''}
+                      onClick={() => switchEditMode('moment')}
+                    >
+                      한 순간
+                    </button>
+                    <button
+                      type="button"
+                      className={editMode === 'range' ? 'active' : ''}
+                      onClick={() => switchEditMode('range')}
+                    >
+                      구간
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="date"
+                  className="block-input block-input--date"
+                  value={editDateStr}
+                  onChange={e => setEditDateStr(e.target.value)}
+                />
+                <div className="block-time-row">
+                  <input
+                    type="time"
+                    className="block-input"
+                    value={editStartStr}
+                    onChange={e => setEditStartStr(e.target.value)}
+                    /* 자동으로 잇는 중에는 시작이 이전 기록을 따라가므로 직접 못 고친다 */
+                    disabled={editMode === 'range' && isAutoStart(editingMemo)}
+                  />
+                  {editMode === 'range' && (
+                    <>
+                      <span className="block-time-sep">→</span>
+                      <input
+                        type="time"
+                        className="block-input"
+                        value={editEndStr}
+                        onChange={e => setEditEndStr(e.target.value)}
+                        /* 자동으로 잇는 중에는 끝 시각이 다음 기록을 따라가므로 직접 못 고친다 */
+                        disabled={isAutoEnd(editingMemo)}
+                      />
+                    </>
+                  )}
+                </div>
+                {editMode === 'range' && (
+                  <label className="block-auto-toggle">
+                    <input
+                      type="checkbox"
+                      checked={isAutoStart(editingMemo)}
+                      onChange={toggleSpansFromPrev}
+                    />
+                    <span className="block-auto-toggle-text">
+                      <strong>이전 기록부터 이어서 표시</strong>
+                      <small>끝나고 적은 기록일 때. 이전 기록 시각부터 이 기록까지 한 덩어리가 됩니다.</small>
+                    </span>
+                  </label>
+                )}
+                {editMode === 'range' && (
+                  <label className="block-auto-toggle">
+                    <input
+                      type="checkbox"
+                      checked={isAutoEnd(editingMemo)}
+                      onChange={toggleSpansToNext}
+                    />
+                    <span className="block-auto-toggle-text">
+                      <strong>다음 기록까지 자동으로 잇기</strong>
+                      <small>마지막 기록이면 지금 이 순간까지 진행 중으로 그려집니다.</small>
+                    </span>
+                  </label>
+                )}
+              </div>
+
+              <div className="block-field">
+                <span className="block-field-label">색상</span>
+                <div className="block-color-row">
+                  {COLOR_PALETTE.map(c => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={`block-color-swatch ${editMemoColor === c.id ? 'selected' : ''}`}
+                      style={{ backgroundColor: c.bg, borderColor: COLOR_BORDER[c.id] }}
+                      onClick={() => setEditMemoColor(c.id)}
+                      title={c.label}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="block-sheet-actions">
+              <button className="block-delete-btn" onClick={deleteFromBlockEditor}>삭제</button>
+              <button className="btn-cancel" onClick={closeBlockEditor}>취소</button>
+              <button className="btn-save" onClick={saveBlockEdit}>저장</button>
             </div>
           </div>
         </div>
