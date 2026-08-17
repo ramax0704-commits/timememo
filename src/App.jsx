@@ -971,6 +971,10 @@ function App() {
   // 고른 날짜로 실제로 옮기는 곳
   useEffect(() => {
     if (navSeq === 0 || activeView !== 'timeline') return;
+    // 스크롤 때문에 예약해둔 날짜 변경이 남아 있으면 지운다. 안 지우면
+    // 화살표·달력·'오늘로'로 옮긴 직후에 그게 뒤늦게 터져서 방금 고른
+    // 날짜를 아까 훑던 날짜로 되돌려버린다.
+    clearTimeout(dateCommitTimerRef.current);
     const idx = windowDays.findIndex(d => isSameDay(d, selectedDate));
     if (idx < 0) return;
     const el = timelineScrollerEl();
@@ -980,6 +984,10 @@ function App() {
     if (!target) return;
     const delta = target.getBoundingClientRect().top - el.getBoundingClientRect().top;
     el.scrollTop = Math.max(0, el.scrollTop + delta - (nowLine ? el.clientHeight / 3 : 0));
+    // 여기서 옮긴 자리도 '자동으로 맞춰둔 자리'로 쳐서, 뒤이어 도는 자동
+    // 자리잡기가 이걸 사용자 스크롤로 오해하고 덮어쓰지 않게 한다
+    autoScrollRef.current = { el, top: el.scrollTop };
+    lastScrollTopRef.current = el.scrollTop;
     scrollDayRef.current = idx;
     paintHeaderDay(idx, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -988,21 +996,50 @@ function App() {
   // 타임라인을 열거나 화면을 바꿀 때 한 번 자리를 잡아준다.
   // 오늘이면 지금 시각, 아니면 그 날 머리로.
   const autoScrollKeyRef = useRef('');
+  // 자동으로 맞춰둔 스크롤 위치. 여기서 벗어나 있으면 사용자가 훑고 있다는 뜻이다
+  // 자동으로 맞춰둔 스크롤 위치와, 그 위치를 잰 스크롤 상자.
+  // (채팅창과 타임블럭은 서로 다른 상자라 같이 들고 있어야 비교가 된다)
+  const autoScrollRef = useRef(null);
   useEffect(() => {
     if (activeView !== 'timeline') { autoScrollKeyRef.current = ''; return; }
     const key = `${showScheduleView}|${memos.length > 0}|${format(effectiveAnchor, 'yyyy-MM-dd')}`;
     if (autoScrollKeyRef.current === key) return;
     const el = timelineScrollerEl();
     if (!el) return;
-    const idx = windowDays.findIndex(d => isSameDay(d, selectedDate));
-    const nowLine = isToday(selectedDate) ? el.querySelector('.schedule-now-line') : null;
-    const target = nowLine || el.querySelector(`[data-day-index="${Math.max(0, idx)}"]`);
-    if (!target) return;
+    // 채팅창 ↔ 타임블럭은 스크롤 상자가 다르다. 상자가 바뀌면 이전 상자의
+    // 위치와 비교하면 안 되므로 기준을 지운다
+    // 이전에 자동으로 맞춰둔 자리. 다른 스크롤 상자였다면 비교할 값이 아니다.
+    const placed = autoScrollRef.current;
+    const placedAt = placed && placed.el === el ? placed.top : -1;
+    // 사용자가 이미 훑고 있으면 건드리지 않는다.
+    // 자동 자리잡기는 화면을 처음 열었을 때 도와주는 것이지, 보고 있는 사람을
+    // 다른 데로 끌고 가는 기능이 아니다. (기록이 늦게 불러와지는 등으로 이 효과가
+    // 다시 돌 때, 스크롤 중이던 사람을 엉뚱한 자리로 던져버렸다)
+    if (placedAt >= 0 && Math.abs(el.scrollTop - placedAt) > 8) {
+      autoScrollKeyRef.current = key;
+      return;
+    }
+    // 이 화면에 대해선 한 번만 시도한다. 실패해도 매 렌더마다 다시 덤비지 않는다.
     autoScrollKeyRef.current = key;
+    const idx = windowDays.findIndex(d => isSameDay(d, selectedDate));
+    // 어디로 갈지 모르면 아예 움직이지 않는다.
+    // 예전엔 Math.max(0, idx)로 창의 첫 날(오늘-7일)로 보냈는데, 그게 바로
+    // 8월 17일을 보다가 갑자기 8월 10일로 튀던 원인이다.
+    if (idx < 0) return;
+    const nowLine = isToday(selectedDate) ? el.querySelector('.schedule-now-line') : null;
+    const target = nowLine || el.querySelector(`[data-day-index="${idx}"]`);
+    if (!target) return;
     const delta = target.getBoundingClientRect().top - el.getBoundingClientRect().top;
     // 지금 시각은 화면 위 1/3 지점에 두어야 앞뒤가 같이 보인다
     el.scrollTop = Math.max(0, el.scrollTop + delta - (nowLine ? el.clientHeight / 3 : 0));
-    if (idx >= 0) { scrollDayRef.current = idx; paintHeaderDay(idx, 0); }
+    // 이 effect 안에서 autoScrollRef를 읽고 다시 쓰는 모양이라 린트가 잡는다.
+    // 여기서 쓰는 값은 '방금 내가 옮겨놓은 자리'라 다음 실행 때 읽어야 의미가 있고,
+    // 렌더 중이 아니라 effect 안이므로 안전하다.
+    // eslint-disable-next-line react-hooks/immutability
+    autoScrollRef.current = { el, top: el.scrollTop };
+    scrollDayRef.current = idx;
+    lastScrollTopRef.current = el.scrollTop;
+    paintHeaderDay(idx, 0);
   });
 
   const monthlyData = buildMonthlyData(memos, habitKeywords);
