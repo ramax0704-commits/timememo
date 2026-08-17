@@ -11,6 +11,7 @@ import {
   addMonths,
   isSameMonth,
   isToday,
+  differenceInCalendarDays,
   parseISO,
   parse
 } from 'date-fns';
@@ -297,6 +298,9 @@ const SAVE_NOTICE_KEY = 'timememo-save-notice-dismissed';
 const TIMELINE_DAYS_BEFORE = 7;
 const TIMELINE_DAYS_AFTER = 1;
 const DAY_MINUTES = 24 * 60;
+// 스크롤이 멎고 이만큼 지나야 날짜를 확정한다. 관성으로 스쳐 지나간 날짜마다
+// 앱 전체를 다시 그리면 스크롤이 걸리고 날짜가 훅훅 지나가는 느낌을 준다.
+const DATE_COMMIT_DELAY = 160;
 
 // 끝 시각을 직접 정하지 않고 '다음 기록까지' 자동으로 잇고 있는 상태인지.
 // 종료 시각을 직접 저장하면(endMinutes) 그쪽이 이기므로 자동이 아니게 된다.
@@ -822,7 +826,7 @@ function App() {
     if (!showSaveNotice || saveNoticeSeenRef.current) return;
     saveNoticeSeenRef.current = true;
     track('Save Prompt', { action: 'shown', platform: isIOSDevice ? 'ios' : 'other', standalone: inStandaloneApp, memo_count: memos.length });
-  }, [showSaveNotice, memos.length]);
+  }, [showSaveNotice, memos.length, inStandaloneApp]);
 
   const dismissSaveNotice = (action) => {
     localStorage.setItem(SAVE_NOTICE_KEY, '1');
@@ -834,8 +838,16 @@ function App() {
   // 날짜마다 판을 새로 그리면 자정에서 블록이 뚝 끊긴다.
   // 그래서 여러 날을 한 시간 축에 이어서 그리고, 스크롤로 자정을 넘나든다.
   // 창은 anchorDate 기준으로 처음부터 한 번에 다 깔린다 (스크롤 도중에 늘리지 않는다).
+  //
+  // 다만 보고 있는 날짜가 창 밖으로 나가면 그 날짜를 기준으로 다시 잡는다.
+  // (예: 먼슬리에서 지난달 날짜를 고르고 타임라인으로 넘어온 경우)
+  // 이걸 상태로 두고 effect에서 고치면 헤더가 한 프레임 비었다가 채워지고,
+  // 그 사이에 스크롤이 일어나면 창 안의 엉뚱한 날짜로 튕긴다. 그래서 렌더 시점에 계산한다.
+  const anchorGap = differenceInCalendarDays(selectedDate, anchorDate);
+  const effectiveAnchor =
+    anchorGap > TIMELINE_DAYS_AFTER || anchorGap < -TIMELINE_DAYS_BEFORE ? selectedDate : anchorDate;
   const windowStart = new Date(
-    anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate() - TIMELINE_DAYS_BEFORE
+    effectiveAnchor.getFullYear(), effectiveAnchor.getMonth(), effectiveAnchor.getDate() - TIMELINE_DAYS_BEFORE
   );
   const windowStartMs = windowStart.getTime();
   const windowDayCount = TIMELINE_DAYS_BEFORE + 1 + TIMELINE_DAYS_AFTER;
@@ -861,6 +873,8 @@ function App() {
   // 날짜가 실제로 바뀐 순간에만 selectedDate를 건드린다.
   const headerStackRef = useRef(null);
   const scrollDayRef = useRef(0);
+  // 스크롤이 멎고 이만큼 지나야 selectedDate를 바꾼다 (관성으로 스쳐 지나간 날짜는 무시)
+  const dateCommitTimerRef = useRef(null);
   // 사용자가 날짜를 직접 고른 횟수. 이 값이 늘면 그 날짜로 옮긴다.
   // (스크롤 때문에 날짜가 바뀐 경우와 구분해야 화면이 스스로 튀지 않는다)
   const [navSeq, setNavSeq] = useState(0);
@@ -906,7 +920,15 @@ function App() {
     if (scrollDayRef.current !== index) {
       scrollDayRef.current = index;
       const day = windowDays[index];
-      if (day) setSelectedDate(prev => (isSameDay(prev, day) ? prev : day));
+      // 헤더 글자는 위에서 DOM으로 이미 바꿨다. selectedDate는 손을 떼고
+      // 미끄러짐이 멎은 뒤에 한 번만 바꾼다. 경계를 지날 때마다 바꾸면
+      // 관성으로 지나가는 며칠이 전부 리렌더를 일으켜 스크롤이 걸린다.
+      if (day) {
+        clearTimeout(dateCommitTimerRef.current);
+        dateCommitTimerRef.current = setTimeout(() => {
+          setSelectedDate(prev => (isSameDay(prev, day) ? prev : day));
+        }, DATE_COMMIT_DELAY);
+      }
     }
   };
 
@@ -914,6 +936,8 @@ function App() {
   const handleTimelineScroll = (e) => {
     syncHeaderToScroll(e.currentTarget);
   };
+
+  useEffect(() => () => clearTimeout(dateCommitTimerRef.current), []);
 
   // 화살표·달력으로 날짜를 고르면 그 날짜가 화면 위로 오도록 옮긴다.
   // 창 밖의 날짜면 창을 다시 잡고, 다음 렌더에서 옮겨진다.
@@ -931,9 +955,12 @@ function App() {
     const idx = windowDays.findIndex(d => isSameDay(d, selectedDate));
     if (idx < 0) return;
     const el = timelineScrollerEl();
-    const mark = el?.querySelector(`[data-day-index="${idx}"]`);
-    if (!mark) return;
-    el.scrollTop += mark.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    // 오늘로 갈 때는 그 날 00시가 아니라 지금 시각이 보여야 한다
+    const nowLine = isToday(selectedDate) ? el?.querySelector('.schedule-now-line') : null;
+    const target = nowLine || el?.querySelector(`[data-day-index="${idx}"]`);
+    if (!target) return;
+    const delta = target.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    el.scrollTop = Math.max(0, el.scrollTop + delta - (nowLine ? el.clientHeight / 3 : 0));
     scrollDayRef.current = idx;
     paintHeaderDay(idx, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -944,7 +971,7 @@ function App() {
   const autoScrollKeyRef = useRef('');
   useEffect(() => {
     if (activeView !== 'timeline') { autoScrollKeyRef.current = ''; return; }
-    const key = `${showScheduleView}|${memos.length > 0}|${format(anchorDate, 'yyyy-MM-dd')}`;
+    const key = `${showScheduleView}|${memos.length > 0}|${format(effectiveAnchor, 'yyyy-MM-dd')}`;
     if (autoScrollKeyRef.current === key) return;
     const el = timelineScrollerEl();
     if (!el) return;
@@ -1945,8 +1972,11 @@ function App() {
               }
             },
             onTouchEnd: (e) => {
+              // goToDay를 써야 타임블럭이 깔아둔 창까지 그 날짜로 옮겨간다.
+              // setSelectedDate만 하면 화면이 보는 날짜와 창이 어긋나서,
+              // 타임라인으로 넘어가 살짝만 스크롤해도 창 안의 날짜로 튕긴다.
               if (!touchState.isScrolling && isCurrentMonth) {
-                setSelectedDate(cloneDay);
+                goToDay(cloneDay);
               }
             }
           };
@@ -1961,7 +1991,7 @@ function App() {
             tabIndex={-1}
             onClick={(e) => {
               if (isCurrentMonth) {
-                setSelectedDate(cloneDay);
+                goToDay(cloneDay);
               }
             }}
             onTouchStart={handlers.onTouchStart}
@@ -2887,6 +2917,17 @@ function App() {
 
       {/* Main Content */}
       <div className="main-content">
+        {/* 스크롤하다 오늘에서 멀어지면 돌아갈 길을 띄운다.
+            헤더 화살표로 하루씩 되짚어 올라가게 두면 안 된다. */}
+        {activeView === 'timeline' && !isToday(selectedDate) && (
+          <button
+            type="button"
+            className="today-fab"
+            onClick={() => goToDay(new Date())}
+          >
+            오늘로
+          </button>
+        )}
         {activeView === 'timeline' ? (
           /* ── 타임라인 뷰 ── */
           showScheduleView ? (
