@@ -807,9 +807,13 @@ function App() {
   const chatMemos = [...displayedMemos, ...lateNightMemos];
 
   // 기록이 이 기기에만 있다는 안내를 지금 띄울 때인지.
-  // 홈 화면에 추가해서 쓰는 사람은 지워질 걱정이 없으므로 뺀다.
+  //
+  // 홈 화면 앱에서도 띄운다. 사파리의 7일 삭제만 비켜갈 뿐, 기록이 이 기기
+  // 하나에만 있다는 건 똑같다 — 앱을 지우거나 폰을 바꾸면 사라지고 다른
+  // 기기에서는 못 본다. 홈 화면 앱에는 '홈 화면에 추가' 안내만 뺀다(이미 했으니).
+  const inStandaloneApp = isStandaloneApp();
   const showSaveNotice =
-    isGuest && memos.length >= SAVE_NOTICE_AFTER && !saveNoticeDismissed && !isStandaloneApp();
+    isGuest && memos.length >= SAVE_NOTICE_AFTER && !saveNoticeDismissed;
 
   // 안내가 실제로 눈에 띈 순간을 한 번만 남긴다.
   // (이 안내가 로그인으로 이어지는지 봐야 붙여둘 값어치가 있는지 알 수 있다)
@@ -817,13 +821,13 @@ function App() {
   useEffect(() => {
     if (!showSaveNotice || saveNoticeSeenRef.current) return;
     saveNoticeSeenRef.current = true;
-    track('Save Prompt', { action: 'shown', platform: isIOSDevice ? 'ios' : 'other', memo_count: memos.length });
+    track('Save Prompt', { action: 'shown', platform: isIOSDevice ? 'ios' : 'other', standalone: inStandaloneApp, memo_count: memos.length });
   }, [showSaveNotice, memos.length]);
 
   const dismissSaveNotice = (action) => {
     localStorage.setItem(SAVE_NOTICE_KEY, '1');
     setSaveNoticeDismissed(true);
-    track('Save Prompt', { action, platform: isIOSDevice ? 'ios' : 'other', memo_count: memos.length });
+    track('Save Prompt', { action, platform: isIOSDevice ? 'ios' : 'other', standalone: inStandaloneApp, memo_count: memos.length });
   };
 
   // ── 타임블럭이 이어서 훑는 날짜 창 ──────────────────────────
@@ -3122,7 +3126,7 @@ function App() {
         <div className="save-notice">
           <p className="save-notice-text">
             지금 기록은 이 기기에만 있어요.
-            {isIOSDevice
+            {isIOSDevice && !inStandaloneApp
               ? ' 사파리는 한동안 안 들어오면 정리하니, 공유 버튼에서 ‘홈 화면에 추가’를 하면 그대로 남아요.'
               : ' 로그인하면 어느 기기에서나 그대로 남아요.'}
           </p>
