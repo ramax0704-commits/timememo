@@ -900,7 +900,8 @@ function App() {
 
   // 지금 화면 맨 위에 어느 날짜가 걸려 있는지 보고 헤더를 맞춘다.
   // 스크롤할 때뿐 아니라 자리를 잡은 직후에도 불러서, 헤더와 화면이 어긋나지 않게 한다.
-  const syncHeaderToScroll = (el) => {
+  // force: 방금 우리가 스크롤을 옮겨놓은 직후. 그땐 '민 거리' 검산이 의미가 없다
+  const syncHeaderToScroll = (el, force = false) => {
     if (!el) return;
     // 스크롤할 게 없으면(기록이 적어 한 화면에 다 들어옴) 헤더를 건드리지 않는다.
     // 맨 위에 걸린 날짜를 따라가면 오늘 쓰러 들어왔는데 며칠 전 날짜가 떠 있게 된다.
@@ -938,7 +939,7 @@ function App() {
     const movedPx = Math.abs(el.scrollTop - lastScrollTopRef.current);
     lastScrollTopRef.current = el.scrollTop;
     const dayGap = Math.abs(index - prevIndex);
-    if (dayGap > 1 && movedPx < (dayGap - 1) * DAY_MINUTES) return;
+    if (!force && dayGap > 1 && movedPx < (dayGap - 1) * DAY_MINUTES) return;
 
     paintHeaderDay(index, progress);
     if (scrollDayRef.current !== index) {
@@ -1085,7 +1086,9 @@ function App() {
         el.scrollTop = Math.max(0, el.scrollTop + d - el.clientHeight / 3);
         autoScrollRef.current = { view: showScheduleView, top: el.scrollTop };
         lastScrollTopRef.current = el.scrollTop;
-        syncHeaderToScroll(el);
+        // 방금 우리가 옮겨놓았으니 검산 없이 헤더를 맞춘다.
+        // (안 그러면 scrollDayRef가 옛값에 머물러 이후 스크롤이 전부 막힌다)
+        syncHeaderToScroll(el, true);
         return;
       }
     }
