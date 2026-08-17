@@ -212,6 +212,8 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
     <div
       className={`memo-swipe-wrapper ${swiped ? 'swiped' : ''}`}
       style={dimmed ? { opacity: 0.45 } : undefined}
+      // 채팅창 ↔ 타임블럭을 오갈 때 '보고 있던 시각'을 이 값으로 읽는다
+      data-at={memo.recordedAt}
       {...swipe}
     >
       {/* 삭제 버튼 (스와이프 시 노출) */}
@@ -971,6 +973,40 @@ function App() {
 
   const timelineScrollerEl = () => (showScheduleView ? scheduleViewRef.current : timelineRef.current);
 
+  // ── 채팅창 ↔ 타임블럭: 보고 있던 시각을 그대로 이어준다 ────────
+  // 두 화면은 같은 하루를 다른 방식으로 보여주는 것이라, 오갈 때마다
+  // 지금 시각으로 되돌려버리면 보던 자리를 매번 다시 찾아야 한다.
+  const viewAnchorRef = useRef(null); // 넘어갈 때 담아두는 '보고 있던 시각'(ms)
+
+  // 지금 화면에서 기준선(위 1/3)에 걸린 시각을 읽는다
+  const readFocusTime = () => {
+    const el = timelineScrollerEl();
+    if (!el) return null;
+    const refY = el.getBoundingClientRect().top + el.clientHeight / 3;
+    if (showScheduleView) {
+      // 타임블럭: 왼쪽 시간 눈금이 창 시작부터 한 시간씩 순서대로 놓여 있다
+      const labels = el.querySelectorAll('.schedule-hour-label');
+      let hour = -1;
+      for (let i = 0; i < labels.length; i++) {
+        if (labels[i].getBoundingClientRect().top <= refY) hour = i;
+        else break;
+      }
+      return hour < 0 ? null : windowStartMs + hour * 3600000;
+    }
+    // 채팅창: 기준선에 걸린(또는 그 아래 첫) 기록의 시각
+    const items = el.querySelectorAll('[data-at]');
+    for (const it of items) {
+      if (it.getBoundingClientRect().bottom >= refY) return new Date(it.dataset.at).getTime();
+    }
+    const last = items[items.length - 1];
+    return last ? new Date(last.dataset.at).getTime() : null;
+  };
+
+  const toggleScheduleView = () => {
+    viewAnchorRef.current = readFocusTime();
+    setShowScheduleView(v => !v);
+  };
+
   // 고른 날짜로 실제로 옮기는 곳
   useEffect(() => {
     if (navSeq === 0 || activeView !== 'timeline') return;
@@ -1034,6 +1070,25 @@ function App() {
     // (같은 effect 안에서 읽고 다시 쓰는 모양이라 린트가 잡지만, 렌더 중이 아니라 안전하다)
     // eslint-disable-next-line react-hooks/immutability
     autoScrollRef.current = { view: showScheduleView, top: -1 };
+    // 화면을 갈아탄 것이라면, 저쪽에서 보고 있던 시각을 그대로 이어준다.
+    // (오갈 때마다 지금 시각으로 되돌리면 보던 자리를 매번 다시 찾아야 한다)
+    const carried = viewAnchorRef.current;
+    viewAnchorRef.current = null;
+    if (carried != null) {
+      const carriedTarget = showScheduleView
+        // 타임블럭: 창 시작부터 몇 시간째인지로 눈금을 찾는다
+        ? el.querySelectorAll('.schedule-hour-label')[Math.round((carried - windowStartMs) / 3600000)]
+        // 채팅창: 그 시각 이후 첫 기록
+        : [...el.querySelectorAll('[data-at]')].find(it => new Date(it.dataset.at).getTime() >= carried);
+      if (carriedTarget) {
+        const d = carriedTarget.getBoundingClientRect().top - el.getBoundingClientRect().top;
+        el.scrollTop = Math.max(0, el.scrollTop + d - el.clientHeight / 3);
+        autoScrollRef.current = { view: showScheduleView, top: el.scrollTop };
+        lastScrollTopRef.current = el.scrollTop;
+        syncHeaderToScroll(el);
+        return;
+      }
+    }
     const idx = windowDays.findIndex(d => isSameDay(d, selectedDate));
     // 어디로 갈지 모르면 아예 움직이지 않는다.
     // 예전엔 Math.max(0, idx)로 창의 첫 날(오늘-7일)로 보냈는데, 그게 바로
@@ -2961,7 +3016,7 @@ function App() {
                 </button>
                 <button
                   className={`header-nav-btn ${showScheduleView ? 'active' : ''}`}
-                  onClick={() => setShowScheduleView(!showScheduleView)}
+                  onClick={toggleScheduleView}
                   title="일정 보기"
                   style={{
                     backgroundColor: showScheduleView ? 'var(--primary-color)' : 'transparent',
@@ -3334,7 +3389,7 @@ function App() {
           onClick={() => {
             // 이미 타임라인이면 한 번 더 누를 때 채팅형 ↔ 시간대별 전환
             // (다른 탭에서 오면 첫 탭은 이동, 두 번째 탭부터 전환된다)
-            if (activeView === 'timeline') setShowScheduleView(v => !v);
+            if (activeView === 'timeline') toggleScheduleView();
             else setActiveView('timeline');
           }}
         >
