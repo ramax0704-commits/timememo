@@ -185,6 +185,36 @@ function useSwipe(onSwipeLeft, onSwipeRight, threshold = 60) {
   return { onTouchStart, onTouchEnd };
 }
 
+// ── 할 일 정렬·묶기 ──────────────────────────────────────────
+// 적어둔 날로 묶는다. **마감일이 아니라 '언제 적었나'** 다.
+// 날짜를 마감으로 쓰면 '어제 못 한 것'이 생겨 목록 자체가 압박이 되므로,
+// todos 테이블에는 여전히 날짜 컬럼을 두지 않고 created_at만 쓴다.
+function sortTodos(list) {
+  return [...list].sort((a, b) => {
+    const da = new Date(a.created_at), db = new Date(b.created_at);
+    if (!isSameDay(da, db)) return da - db;          // 적은 날짜 순
+    if (a.done !== b.done) return a.done ? 1 : -1;   // 같은 날 안에서 완료한 건 아래로
+    return da - db;
+  });
+}
+
+function groupTodosByDay(list) {
+  const groups = [];
+  for (const t of list) {
+    const at = new Date(t.created_at);
+    const last = groups[groups.length - 1];
+    if (last && isSameDay(last.date, at)) last.items.push(t);
+    else groups.push({ date: at, items: [t] });
+  }
+  return groups;
+}
+
+function todoDayLabel(date) {
+  if (isToday(date)) return '오늘';
+  if (isSameDay(date, addDays(new Date(), -1))) return '어제';
+  return format(date, 'M월 d일 (E)', { locale: ko });
+}
+
 // ── 메모 아이템 컴포넌트 ──────────────────────────────────────
 function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords, dimmed }) {
   const [swiped, setSwiped] = useState(false);
@@ -720,13 +750,6 @@ function App() {
   // ── 할 일 불러오기 ──────────────────────────────────────────
   useEffect(() => {
     if (!userId) return;
-
-    const sortTodos = (list) =>
-      [...list].sort((a, b) => {
-        // 완료한 건 아래로, 그 안에서는 만든 순서대로
-        if (a.done !== b.done) return a.done ? 1 : -1;
-        return new Date(a.created_at) - new Date(b.created_at);
-      });
 
     const fetchTodos = async () => {
       const { data, error } = await supabase.from('todos').select('*');
@@ -1796,7 +1819,7 @@ function App() {
       setTodoInput(text); // 입력한 내용은 돌려준다
       return;
     }
-    setTodos(prev => prev.some(t => t.id === data.id) ? prev : [...prev, data]);
+    setTodos(prev => prev.some(t => t.id === data.id) ? prev : sortTodos([...prev, data]));
     // 방금 적은 게 목록 아래에 가려지면 '등록이 안 됐나' 싶다. 그쪽으로 보내준다
     requestAnimationFrame(() => {
       const list = todoListRef.current;
@@ -1808,7 +1831,7 @@ function App() {
   // silent: 기록으로 옮기면서 자동 완료되는 경우. 그때는 'moved_to_memo'로 한 번만 세야 해서 여기선 안 보낸다
   const handleToggleTodo = async (todo, { silent = false } = {}) => {
     const next = !todo.done;
-    setTodos(prev => prev.map(t => (t.id === todo.id ? { ...t, done: next } : t)));
+    setTodos(prev => sortTodos(prev.map(t => (t.id === todo.id ? { ...t, done: next } : t))));
     const { error } = await supabase.from('todos').update({ done: next }).eq('id', todo.id);
     if (error) {
       console.error('Error toggling todo:', error);
@@ -3526,7 +3549,10 @@ function App() {
               {todos.length === 0 ? (
                 <p className="todo-empty">적어두면 여기에 남아있어요.</p>
               ) : (
-                todos.map(todo => (
+                groupTodosByDay(todos).map(group => (
+                <div key={group.date.toDateString()} className="todo-day">
+                  <div className="todo-day-label"><span>{todoDayLabel(group.date)}</span></div>
+                  {group.items.map(todo => (
                   <div key={todo.id} className={`todo-item${todo.done ? ' todo-item--done' : ''}`}>
                     <button
                       className={`todo-check${todo.done ? ' checked' : ''}`}
@@ -3565,6 +3591,8 @@ function App() {
                       <X size={15} />
                     </button>
                   </div>
+                  ))}
+                </div>
                 ))
               )}
             </div>

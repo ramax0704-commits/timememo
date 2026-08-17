@@ -2113,3 +2113,26 @@ body.keyboard-open .input-toolbar { display: flex; }
   color: var(--text-muted);
   opacity: .7;
 }
+
+/* 할 일을 '적어둔 날'로 묶는다. 마감일이 아니라 언제 적었는지만 알려주는 표시라
+   눈에 세게 띄면 안 된다 (날짜가 마감처럼 읽히면 목록이 압박이 된다). */
+.todo-day + .todo-day { margin-top: 6px; }
+
+.todo-day-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 2px 4px;
+}
+.todo-day-label span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.todo-day-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background-color: #f1f3f5;
+}
