@@ -875,6 +875,8 @@ function App() {
   const scrollDayRef = useRef(0);
   // 스크롤이 멎고 이만큼 지나야 selectedDate를 바꾼다 (관성으로 스쳐 지나간 날짜는 무시)
   const dateCommitTimerRef = useRef(null);
+  // 직전 스크롤 위치. 날짜가 스크롤한 거리만큼만 움직였는지 검산하는 데 쓴다
+  const lastScrollTopRef = useRef(0);
   // 사용자가 날짜를 직접 고른 횟수. 이 값이 늘면 그 날짜로 옮긴다.
   // (스크롤 때문에 날짜가 바뀐 경우와 구분해야 화면이 스스로 튀지 않는다)
   const [navSeq, setNavSeq] = useState(0);
@@ -916,6 +918,23 @@ function App() {
       if (passedAny && offset < CROSSFADE_PX) progress = 1 - offset / CROSSFADE_PX;
       break;
     }
+    // ── 잘못 잰 값 걸러내기 ──────────────────────────────────
+    // 여기서 나오는 index는 화면 위치를 '잰' 값이라, 재는 순간이 나쁘면
+    // (관성·고무줄 중이거나 판을 다시 그리는 도중) 엉뚱한 값이 나온다.
+    // 그대로 쓰면 헤더가 창 맨 앞 날짜로 슉 넘어간다.
+
+    // 맨 위도 아닌데 기준선 위로 지나온 날짜 경계가 하나도 없으면 잘못 잰 것이다.
+    // (이 경우 index가 0으로 떨어져 창의 첫 날짜가 뜬다)
+    if (!passedAny && el.scrollTop > 4) return;
+
+    // 날짜는 스크롤한 거리만큼만 움직일 수 있다. 하루가 최소 1440px인데
+    // 그만큼 밀지도 않고 며칠씩 건너뛴 값이 나왔다면 잰 게 잘못된 것이다.
+    const prevIndex = scrollDayRef.current;
+    const movedPx = Math.abs(el.scrollTop - lastScrollTopRef.current);
+    lastScrollTopRef.current = el.scrollTop;
+    const dayGap = Math.abs(index - prevIndex);
+    if (dayGap > 1 && movedPx < (dayGap - 1) * DAY_MINUTES) return;
+
     paintHeaderDay(index, progress);
     if (scrollDayRef.current !== index) {
       scrollDayRef.current = index;
@@ -2816,6 +2835,10 @@ function App() {
               개인정보처리방침
             </a>
           </p>
+          {/* 체험 중에는 마이페이지를 못 보므로 여기에도 둔다 (지금 어느 코드인지 확인용) */}
+          <p className="build-stamp">
+            {format(new Date(__BUILD_TIME__), 'yyyy.MM.dd HH:mm')} 배포 · {__BUILD_COMMIT__}
+          </p>
         </div>
       </div>
     );
@@ -3135,6 +3158,12 @@ function App() {
                     {deletingAccount ? '회원탈퇴 진행 중...' : '회원탈퇴'}
                   </button>
                 </div>
+                {/* 이 화면이 언제 배포된 코드로 돌고 있는지.
+                    폰(특히 홈 화면에 추가한 웹앱)은 한 번 띄운 화면을 계속 붙잡고 있어서,
+                    "고쳤다는데 왜 그대로냐"가 옛 코드 때문인지 진짜 버그인지 구분이 안 됐다. */}
+                <p className="build-stamp">
+                  {format(new Date(__BUILD_TIME__), 'yyyy.MM.dd HH:mm')} 배포 · {__BUILD_COMMIT__}
+                </p>
               </div>
             </div>
           </div>

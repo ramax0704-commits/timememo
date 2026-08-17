@@ -2076,3 +2076,12 @@ body.keyboard-open .input-toolbar { display: flex; }
   background-color: transparent !important;
   -webkit-tap-highlight-color: transparent !important;
 }
+
+/* 이 화면이 언제 배포된 코드인지. 캐시 때문에 옛 화면을 보고 있는 건지 5초 만에 갈린다 */
+.build-stamp {
+  margin: 18px 0 0;
+  text-align: center;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  opacity: .7;
+}

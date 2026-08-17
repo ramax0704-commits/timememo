@@ -14,7 +14,12 @@ export default defineConfig([
       reactRefresh.configs.vite,
     ],
     languageOptions: {
-      globals: globals.browser,
+      globals: {
+        ...globals.browser,
+        // vite.config.js의 define이 빌드할 때 박아 넣는 값 (배포 시각·커밋)
+        __BUILD_TIME__: 'readonly',
+        __BUILD_COMMIT__: 'readonly',
+      },
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
