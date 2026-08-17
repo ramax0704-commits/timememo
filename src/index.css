@@ -97,6 +97,19 @@ body {
 }
 .header-title-container:hover { background-color: #f0f0f0; }
 
+/* 타임라인 헤더의 날짜 — 스크롤이 자정을 지날 때 두 날짜가 겹치며 바뀐다.
+   같은 자리에 포개두고 opacity만 바꾸므로 글자가 움직이지 않는다. */
+.header-date-stack {
+  position: relative;
+  display: grid;
+  min-width: 0;
+}
+.header-date-stack h1 {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+  transition: opacity 0.12s linear;
+}
+
 /* ── Main Content ─────────────────────────────────────────────── */
 .main-content {
   flex: 1;
@@ -117,6 +130,42 @@ body {
 }
 .timeline::-webkit-scrollbar { width: 6px; }
 .timeline::-webkit-scrollbar-thumb { background-color: #ddd; border-radius: 4px; }
+
+/* ── 날짜 구분 ───────────────────────────────────────────────── */
+/* 채팅창도 날짜를 끊지 않고 이어서 스크롤한다.
+   날짜가 바뀌는 자리에만 선을 두고, 헤더 날짜가 이 선을 따라온다. */
+.timeline-day {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.timeline-day-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 2px;
+}
+.timeline-day:first-child .timeline-day-divider { margin-top: 0; }
+.timeline-day-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background-color: var(--border-color);
+}
+.timeline-day-divider span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.timeline-day-empty {
+  font-size: 0.78rem;
+  color: #c4c6d0;
+  padding: 2px 0 6px;
+}
 
 /* ── 시간 그룹 ───────────────────────────────────────────────── */
 .memo-group {
@@ -232,8 +281,12 @@ body {
   border-radius: 6px;
   transition: background-color 0.2s;
   flex-shrink: 0;
-  width: 54px;
-  min-width: 54px;
+  /* '오전 10:35' 한 줄이 들어갈 만큼은 확보해야 한다.
+     좁으면 가운데 정렬된 글자가 양옆으로 삐져나오고,
+     .memo-swipe-wrapper의 overflow:hidden에 왼쪽이 잘린다. */
+  width: 66px;
+  min-width: 66px;
+  padding: 4px 2px;
 }
 .memo-time-container:hover { background-color: #f0f0f0; }
 
@@ -242,6 +295,8 @@ body {
   font-weight: 600;
   color: var(--primary-color);
   white-space: nowrap;
+  /* 숫자 폭을 고정해 시각끼리 세로로 맞춰 보이게 */
+  font-variant-numeric: tabular-nums;
 }
 
 .memo-content {
@@ -278,6 +333,36 @@ body {
   text-align: center;
   line-height: 1.6;
 }
+
+/* ── 입력 툴바 ───────────────────────────────────────────────── */
+/* 키보드가 올라왔을 때만 입력창 바로 위에 뜬다.
+   평소에는 자리를 차지하지 않는다 — 기록을 읽는 화면이 좁아지면 안 된다. */
+.input-toolbar {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background-color: var(--bg-app);
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+body.keyboard-open .input-toolbar { display: flex; }
+
+.input-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 5px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.input-toolbar-btn:active { background-color: #f0f0f4; }
 
 /* ── Input Area ──────────────────────────────────────────────── */
 .input-area {
@@ -523,6 +608,30 @@ body {
   transform: translateY(-6px); /* 텍스트 중심을 그리드 선 위에 맞춤 */
 }
 
+/* 자정 — 날짜가 바뀌는 자리. 블록은 이 선을 그대로 가로질러 이어진다 */
+.schedule-day-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px solid #ccd2e8;
+  z-index: 6;
+  pointer-events: none;
+}
+.schedule-day-line span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+  background-color: #97a2ce;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
 /* 현재 시간 빨간 줄 */
 .schedule-now-line {
   position: absolute;
@@ -544,6 +653,9 @@ body {
   border-radius: 50%;
   background-color: #f87171;
 }
+
+/* 맨 위 날짜 배지는 선 위로 절반 올리면 스크롤 끝에서 잘린다. 아래로 붙인다 */
+.schedule-day-line--first span { transform: translateY(2px); }
 
 /* ── 위클리 뷰 (한 주의 모양) ────────────────────────────────── */
 /* 글자 없이 색 띠만 그리므로 7일 × 하루 전체가 스크롤 없이 한 화면에 들어간다 */
@@ -774,13 +886,13 @@ body {
 }
 
 /* ── 스케줄 상세 바텀시트 ───────────────────────────────────── */
-.schedule-detail-overlay {
+/* ── 기록 편집 시트 ──────────────────────────────────────────
+   채팅창과 타임블럭이 함께 쓰는 하나의 시트.
+   화면마다 모달/바텀시트가 따로면 같은 일을 하는데도 다르게 느껴진다. */
+.block-sheet-overlay {
   /* app-container 기준으로 배치 → 키보드가 올라오면 시트도 키보드 위로 올라옴 */
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   background-color: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: flex-end;
@@ -788,164 +900,231 @@ body {
   animation: fadeIn 0.2s;
 }
 
-.schedule-detail-sheet {
+.block-sheet {
   background: white;
   border-radius: 16px 16px 0 0;
-  padding: 24px;
+  padding: 8px 20px calc(16px + env(safe-area-inset-bottom));
   width: 100%;
   max-width: 600px;
   margin: 0 auto;
+  max-height: 88%;
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
   animation: slideUp 0.3s;
 }
 
-.schedule-detail-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 16px;
+.block-sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: #dcdce4;
+  margin: 4px auto 10px;
+  flex: none;
 }
 
-/* 시작 시각 직접 조절 (이전 기록이 실제 시작보다 훨씬 이를 때) */
-.schedule-start-adjust {
+.block-sheet-head {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 12px 14px;
-  margin: -8px 0 16px;
-  background: #f2f2f7;
-  border-radius: 12px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  flex: none;
 }
+.block-sheet-head h3 { margin: 0; font-size: 1rem; font-weight: 700; }
 
-.schedule-start-adjust-label {
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--text-main);
-}
-
-.schedule-start-adjust .time-input {
-  width: 60px;
-}
-
-.schedule-start-reset {
-  margin-left: auto;
-  padding: 6px 10px;
-  font-size: 0.78rem;
-  color: var(--primary, #4a6cf7);
-  background: white;
-  border: 1px solid #e2e2ea;
-  border-radius: 8px;
+.block-sheet-close {
+  background: none;
+  border: none;
+  color: #999;
   cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
 }
 
-/* 이어서 표시 스위치 */
-.schedule-span-toggle {
+/* 시트가 길어지면 본문만 스크롤되고 버튼은 아래에 붙어 있게 */
+.block-sheet-body {
+  flex: 1;
+  overflow-y: auto;
+  /* 가로로는 절대 스크롤되지 않게 못박는다.
+     안쪽 요소 하나가 조금만 넘쳐도 시트 전체가 옆으로 밀려 왼쪽이 잘린다. */
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  /* 마지막 줄(색상)의 선택 링이 경계에 닿아 잘리지 않도록 */
+  padding-bottom: 4px;
+}
+
+.block-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.block-field-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #8a8a99;
+}
+
+.block-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* 한 순간 / 구간 전환 */
+.block-mode-toggle {
+  display: flex;
+  padding: 2px;
+  background: #f0f0f5;
+  border-radius: 8px;
+}
+.block-mode-toggle button {
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #8a8a99;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+.block-mode-toggle button.active {
+  background: #ffffff;
+  color: var(--primary-color);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.block-textarea {
+  width: 100%;
+  min-height: 76px;
+  padding: 12px 14px;
+  border: 1px solid #e2e2ea;
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--text-main);
+  resize: none;
+  outline: none;
+}
+.block-textarea:focus { border-color: var(--primary-color); }
+
+.block-time-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.block-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #e2e2ea;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  color: var(--text-main);
+  background: white;
+  outline: none;
+  /* iOS는 date/time 입력을 기본 높이로 그려서 다른 칸과 안 맞는다 */
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 42px;
+}
+.block-input:focus { border-color: var(--primary-color); }
+.block-input:disabled { background: #f4f4f7; color: #a0a0ac; }
+
+.block-time-sep {
+  color: #a0a0ac;
+  font-size: 0.9rem;
+  flex: none;
+}
+
+.block-auto-toggle {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 14px;
-  margin: 4px 0 16px;
+  padding: 12px 14px;
   background: #f7f7fa;
   border-radius: 12px;
   cursor: pointer;
 }
 
-.schedule-span-toggle input {
+.block-auto-toggle input {
   width: 20px;
   height: 20px;
   margin: 1px 0 0;
   flex: none;
-  accent-color: var(--primary, #4a6cf7);
+  accent-color: var(--primary-color);
   cursor: pointer;
 }
 
-.schedule-span-toggle-text {
+.block-auto-toggle-text {
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
-
-.schedule-span-toggle-text strong {
-  font-size: 0.9rem;
+.block-auto-toggle-text strong {
+  font-size: 0.88rem;
   font-weight: 600;
   color: var(--text-main);
 }
-
-.schedule-span-toggle-text small {
-  font-size: 0.78rem;
+.block-auto-toggle-text small {
+  font-size: 0.76rem;
   color: #8a8a99;
   line-height: 1.4;
 }
 
-.schedule-detail-header h3 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--text-main);
-  margin: 0;
-  flex: 1;
+.block-color-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  /* 고른 색의 테두리 링은 원 바깥에 그려진다. 안쪽 여백으로 자리를 만들어준다.
+     (음수 마진으로 넓히면 줄이 시트보다 커져서 가로 스크롤이 생긴다 — 그러면 왼쪽이 통째로 잘린다) */
+  padding: 4px 4px 6px;
 }
 
-.schedule-detail-close {
-  background: none;
-  border: none;
-  font-size: 2rem;
-  cursor: pointer;
-  color: #999;
+.block-color-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border-width: 2px;
+  border-style: solid;
   padding: 0;
-  line-height: 1;
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-width 0.15s;
+}
+.block-color-swatch.selected {
+  border-width: 4px;
+  box-shadow: 0 0 0 2px white, 0 0 0 3px var(--primary-color);
 }
 
-.schedule-detail-time {
-  font-size: 0.95rem;
-  color: #666;
-  font-weight: 500;
-}
-
-.schedule-detail-time-edit {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.time-input-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.time-input-group label {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #333;
-}
-
-.time-input-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.time-input {
-  width: 60px;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 0.95rem;
-  text-align: center;
-}
-
-.time-input:focus {
-  outline: none;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px rgba(112, 144, 255, 0.1);
-}
-
-.schedule-detail-actions {
+.block-sheet-actions {
   display: flex;
   gap: 8px;
   margin-top: 16px;
+  flex: none;
 }
+
+.block-delete-btn {
+  flex: none;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: #e53e3e;
+  background-color: #fff5f5;
+}
+.block-delete-btn:hover { background-color: #ffe9e9; }
 
 /* ── 먼슬리 뷰 ───────────────────────────────────────────────── */
 .monthly-container {
@@ -1264,23 +1443,6 @@ body {
   margin-bottom: 16px;
   text-align: center;
 }
-
-.time-input-container {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 24px;
-}
-
-.time-input {
-  font-size: 1.5rem;
-  padding: 8px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  text-align: center;
-  font-family: inherit;
-  outline: none;
-}
-.time-input:focus { border-color: var(--primary-color); }
 
 .modal-actions {
   display: flex;
