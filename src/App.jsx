@@ -289,13 +289,16 @@ const SAVE_NOTICE_KEY = 'timememo-save-notice-dismissed';
 
 // 타임블럭은 날짜를 끊지 않고 이어서 스크롤한다.
 // 한 번에 그려두는 날짜 수 — 이보다 멀리 가려면 헤더 화살표나 달력을 쓴다.
+// 7일이었는데 스크롤로 훑기엔 너무 짧다는 피드백으로 14일로 늘렸다.
+// 늘린 만큼 화면 전환이 느려진다(180개 기록 기준 7일 73~125ms, 14일 111~196ms,
+// 21일 151~263ms, 30일 217~383ms). 더 늘리려면 이 숫자만 바꾸면 된다.
 //
 // 예전에는 2일치만 깔아두고 위 끝에 닿을 때마다 3일씩 더 깔았다. 그런데 앞에
 // 날짜를 붙이면 보던 자리가 그만큼 밀려서 스크롤을 되돌려줘야 하는데,
 // iOS는 관성으로 미끄러지는 중에 스크롤 위치를 바꿔도 무시하고 원래 가려던
 // 자리로 계속 간다. 그래서 되돌리기가 먹히지 않고 헤더 날짜가 며칠씩 튀었다.
 // 처음부터 다 깔아두면 도중에 앞에 붙일 일이 없어 되돌릴 것도 없다.
-const TIMELINE_DAYS_BEFORE = 7;
+const TIMELINE_DAYS_BEFORE = 14;
 const TIMELINE_DAYS_AFTER = 1;
 const DAY_MINUTES = 24 * 60;
 // 스크롤이 멎고 이만큼 지나야 날짜를 확정한다. 관성으로 스쳐 지나간 날짜마다
@@ -986,7 +989,7 @@ function App() {
     el.scrollTop = Math.max(0, el.scrollTop + delta - (nowLine ? el.clientHeight / 3 : 0));
     // 여기서 옮긴 자리도 '자동으로 맞춰둔 자리'로 쳐서, 뒤이어 도는 자동
     // 자리잡기가 이걸 사용자 스크롤로 오해하고 덮어쓰지 않게 한다
-    autoScrollRef.current = { el, top: el.scrollTop };
+    autoScrollRef.current = { view: showScheduleView, top: el.scrollTop };
     lastScrollTopRef.current = el.scrollTop;
     scrollDayRef.current = idx;
     paintHeaderDay(idx, 0);
@@ -999,28 +1002,38 @@ function App() {
   // 자동으로 맞춰둔 스크롤 위치. 여기서 벗어나 있으면 사용자가 훑고 있다는 뜻이다
   // 자동으로 맞춰둔 스크롤 위치와, 그 위치를 잰 스크롤 상자.
   // (채팅창과 타임블럭은 서로 다른 상자라 같이 들고 있어야 비교가 된다)
-  const autoScrollRef = useRef(null);
+  const autoScrollRef = useRef(null); // { view, top } — 어느 화면에서 어디에 맞춰뒀는지
   useEffect(() => {
     if (activeView !== 'timeline') { autoScrollKeyRef.current = ''; return; }
     const key = `${showScheduleView}|${memos.length > 0}|${format(effectiveAnchor, 'yyyy-MM-dd')}`;
     if (autoScrollKeyRef.current === key) return;
     const el = timelineScrollerEl();
     if (!el) return;
-    // 채팅창 ↔ 타임블럭은 스크롤 상자가 다르다. 상자가 바뀌면 이전 상자의
-    // 위치와 비교하면 안 되므로 기준을 지운다
-    // 이전에 자동으로 맞춰둔 자리. 다른 스크롤 상자였다면 비교할 값이 아니다.
-    const placed = autoScrollRef.current;
-    const placedAt = placed && placed.el === el ? placed.top : -1;
     // 사용자가 이미 훑고 있으면 건드리지 않는다.
     // 자동 자리잡기는 화면을 처음 열었을 때 도와주는 것이지, 보고 있는 사람을
     // 다른 데로 끌고 가는 기능이 아니다. (기록이 늦게 불러와지는 등으로 이 효과가
     // 다시 돌 때, 스크롤 중이던 사람을 엉뚱한 자리로 던져버렸다)
+    //
+    // 단, 채팅창 ↔ 타임블럭은 **같은 DOM 상자를 재사용**하면서 안에 든 내용만
+    // 갈아끼운다. 그때 scrollTop은 0으로 돌아가는데, 이걸 '사용자가 맨 위로
+    // 옮겼다'고 오해하면 자리를 안 잡아주고, 화면은 창의 첫 날(오늘-7일)에
+    // 머문 채로 남는다. 그래서 기준은 상자가 아니라 **어느 화면이었는지**로 잡는다.
+    const placed = autoScrollRef.current;
+    const placedAt = placed && placed.view === showScheduleView ? placed.top : -1;
     if (placedAt >= 0 && Math.abs(el.scrollTop - placedAt) > 8) {
+      // 같은 화면에서 사용자가 옮긴 것 — 기준은 그대로 두고 손대지 않는다
       autoScrollKeyRef.current = key;
       return;
     }
     // 이 화면에 대해선 한 번만 시도한다. 실패해도 매 렌더마다 다시 덤비지 않는다.
     autoScrollKeyRef.current = key;
+    // 지금 어느 화면인지를 먼저 새겨둔다. 자리를 못 잡고 빠져나가더라도(예: 채팅창엔
+    // 날짜 표식이 없어서 대상이 없다) 이 기록은 남아야 한다. 안 남기면 다음에 타임블럭으로
+    // 돌아왔을 때 '이전 타임블럭에서 맞춰둔 자리'가 아직 유효한 줄 알고, 새로 그려져
+    // 0으로 돌아온 스크롤을 '사용자가 맨 위로 올린 것'으로 오해해 자리를 안 잡아준다.
+    // (같은 effect 안에서 읽고 다시 쓰는 모양이라 린트가 잡지만, 렌더 중이 아니라 안전하다)
+    // eslint-disable-next-line react-hooks/immutability
+    autoScrollRef.current = { view: showScheduleView, top: -1 };
     const idx = windowDays.findIndex(d => isSameDay(d, selectedDate));
     // 어디로 갈지 모르면 아예 움직이지 않는다.
     // 예전엔 Math.max(0, idx)로 창의 첫 날(오늘-7일)로 보냈는데, 그게 바로
@@ -1032,11 +1045,8 @@ function App() {
     const delta = target.getBoundingClientRect().top - el.getBoundingClientRect().top;
     // 지금 시각은 화면 위 1/3 지점에 두어야 앞뒤가 같이 보인다
     el.scrollTop = Math.max(0, el.scrollTop + delta - (nowLine ? el.clientHeight / 3 : 0));
-    // 이 effect 안에서 autoScrollRef를 읽고 다시 쓰는 모양이라 린트가 잡는다.
-    // 여기서 쓰는 값은 '방금 내가 옮겨놓은 자리'라 다음 실행 때 읽어야 의미가 있고,
-    // 렌더 중이 아니라 effect 안이므로 안전하다.
-    // eslint-disable-next-line react-hooks/immutability
-    autoScrollRef.current = { el, top: el.scrollTop };
+    // 방금 맞춰둔 자리를 기록해 둔다 (다음에 이 화면으로 돌아왔을 때 기준이 된다)
+    autoScrollRef.current = { view: showScheduleView, top: el.scrollTop };
     scrollDayRef.current = idx;
     lastScrollTopRef.current = el.scrollTop;
     paintHeaderDay(idx, 0);
