@@ -1513,9 +1513,16 @@ function App() {
   // 내용 자체는 절대 보내지 않고, 거기서 뽑은 성격만 보낸다.
   const trackMemoCreated = (content, extra) => {
     const fin = parseFinance(content);
+    // 이 사람의 '첫 기록'인지. 이 이벤트가 찍힌 시각이 곧 첫 기록 시각이다.
+    // 프로필(people)이 아니라 이벤트에 다는 이유: 쓰는 사람 대부분이 비로그인이고,
+    // 비로그인은 프로필을 만들 수 없다(기기마다 새로 생기는 익명 id라 사람이 안 묶인다).
+    // 이벤트에 달면 로그인 여부와 상관없이 다 잡히고, guest 속성으로 나눠 볼 수 있다.
+    // memos는 그 사람의 전체 기록이고 이 시점엔 아직 새 기록이 안 들어가 있다.
+    const isFirstMemo = memos.length === 0;
     track('Memo Created', {
       // 로그인 전 체험 중에 쓴 것인지. 체험만 하고 떠나는 비율을 보려면 필요하다
       guest: isGuest,
+      is_first_memo: isFirstMemo,
       ...extra,
       hour: new Date().getHours(),
       content_length: content.length,
@@ -1524,8 +1531,10 @@ function App() {
       has_habit_keyword: habitKeywords.some(k => k?.name && !k.endedAt && content.includes(k.name)),
       color: selectedColor,
     });
-    // 첫 기록 시각은 사람 단위로 한 번만 (체험 중에는 익명이라 남기지 않는다)
-    if (!isGuest) markFirstMemo();
+    // 로그인한 사람은 프로필에도 박아둔다. 가입일과 나란히 놓고
+    // "가입하고 얼마 만에 첫 기록을 썼나"를 사람 단위로 자를 때 쓴다.
+    // (비로그인은 위의 is_first_memo 이벤트 쪽으로 본다)
+    if (!isGuest && isFirstMemo) markFirstMemo();
   };
 
   // ── 할 일 ───────────────────────────────────────────────────
