@@ -77,6 +77,9 @@ body {
   font-size: 1.25rem;
   font-weight: 600;
   color: var(--text-main);
+  /* 날짜가 두 줄로 접히면 헤더가 24px 두꺼워져서, 화면을 오갈 때 제목과
+     달력 아이콘 위치가 어긋난다 (타임블럭 쪽은 원래 한 줄로 고정돼 있었음) */
+  white-space: nowrap;
 }
 
 .header-icon {

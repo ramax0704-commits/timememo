@@ -275,12 +275,14 @@ const MIN_BLOCK_MINUTES = 30;
 
 // 타임블럭은 날짜를 끊지 않고 이어서 스크롤한다.
 // 한 번에 그려두는 날짜 수 — 이보다 멀리 가려면 헤더 화살표나 달력을 쓴다.
-const TIMELINE_DAYS_BEFORE = 2;
+//
+// 예전에는 2일치만 깔아두고 위 끝에 닿을 때마다 3일씩 더 깔았다. 그런데 앞에
+// 날짜를 붙이면 보던 자리가 그만큼 밀려서 스크롤을 되돌려줘야 하는데,
+// iOS는 관성으로 미끄러지는 중에 스크롤 위치를 바꿔도 무시하고 원래 가려던
+// 자리로 계속 간다. 그래서 되돌리기가 먹히지 않고 헤더 날짜가 며칠씩 튀었다.
+// 처음부터 다 깔아두면 도중에 앞에 붙일 일이 없어 되돌릴 것도 없다.
+const TIMELINE_DAYS_BEFORE = 7;
 const TIMELINE_DAYS_AFTER = 1;
-// 위 끝에 닿을 때마다 이만큼씩 예전 날짜를 더 깔아준다.
-// 하루가 1440px이라 무한정 깔면 무거워지므로 상한을 둔다 (그 너머는 화살표·달력으로).
-const TIMELINE_GROW_DAYS = 3;
-const TIMELINE_MAX_DAYS_BEFORE = 30;
 const DAY_MINUTES = 24 * 60;
 
 // 끝 시각을 직접 정하지 않고 '다음 기록까지' 자동으로 잇고 있는 상태인지.
@@ -390,8 +392,6 @@ function App() {
   // 타임블럭이 이어서 그려둔 날짜 창의 기준일. selectedDate가 창을 벗어날 때만 따라온다.
   // (헤더 날짜는 스크롤을 따라 계속 바뀌는데, 그때마다 창을 다시 잡으면 화면이 튄다)
   const [anchorDate, setAnchorDate] = useState(new Date());
-  // 기준일로부터 며칠 전까지 깔아뒀는지. 위로 끝까지 올라가면 늘어난다
-  const [daysBefore, setDaysBefore] = useState(TIMELINE_DAYS_BEFORE);
   const [inputText, setInputText] = useState('');
   const [selectedColor, setSelectedColor] = useState('default');
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -788,12 +788,12 @@ function App() {
   // ── 타임블럭이 이어서 훑는 날짜 창 ──────────────────────────
   // 날짜마다 판을 새로 그리면 자정에서 블록이 뚝 끊긴다.
   // 그래서 여러 날을 한 시간 축에 이어서 그리고, 스크롤로 자정을 넘나든다.
-  // 창은 anchorDate 기준으로 잡히며, 위로 끝까지 올라가면 예전 날짜가 더 깔린다.
+  // 창은 anchorDate 기준으로 처음부터 한 번에 다 깔린다 (스크롤 도중에 늘리지 않는다).
   const windowStart = new Date(
-    anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate() - daysBefore
+    anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate() - TIMELINE_DAYS_BEFORE
   );
   const windowStartMs = windowStart.getTime();
-  const windowDayCount = daysBefore + 1 + TIMELINE_DAYS_AFTER;
+  const windowDayCount = TIMELINE_DAYS_BEFORE + 1 + TIMELINE_DAYS_AFTER;
   const windowMinutes = windowDayCount * DAY_MINUTES;
   const windowDays = Array.from({ length: windowDayCount }, (_, i) => addDays(windowStart, i));
 
@@ -865,42 +865,20 @@ function App() {
     }
   };
 
-  // 위 끝에 닿으면 예전 날짜를 더 깔아준다.
-  // growRef에 넓히기 직전 높이를 담아두고, 늘어난 만큼 스크롤을 내려서 보던 자리를 지킨다
-  // (안 그러면 날짜가 위에 추가되는 순간 화면이 확 튄다).
-  const growRef = useRef(null);
-
+  // 창은 처음부터 다 깔려 있으므로 스크롤 중에 할 일은 헤더를 맞추는 것뿐이다.
   const handleTimelineScroll = (e) => {
-    const el = e.currentTarget;
-    syncHeaderToScroll(el);
-    if (el.scrollTop < 80 && growRef.current === null && daysBefore < TIMELINE_MAX_DAYS_BEFORE) {
-      growRef.current = el.scrollHeight;
-      setDaysBefore(d => Math.min(TIMELINE_MAX_DAYS_BEFORE, d + TIMELINE_GROW_DAYS));
-    }
+    syncHeaderToScroll(e.currentTarget);
   };
 
   // 화살표·달력으로 날짜를 고르면 그 날짜가 화면 위로 오도록 옮긴다.
   // 창 밖의 날짜면 창을 다시 잡고, 다음 렌더에서 옮겨진다.
   const goToDay = (day) => {
     setSelectedDate(day);
-    if (!dayInWindow(day)) {
-      setAnchorDate(day);
-      setDaysBefore(TIMELINE_DAYS_BEFORE); // 멀리 뛰었으니 깔아둔 날짜도 다시 잡는다
-    }
+    if (!dayInWindow(day)) setAnchorDate(day);
     setNavSeq(n => n + 1);
   };
 
   const timelineScrollerEl = () => (showScheduleView ? scheduleViewRef.current : timelineRef.current);
-
-  // 창을 넓힌 직후, 늘어난 높이만큼 스크롤을 내려 보던 자리를 지킨다
-  useEffect(() => {
-    const before = growRef.current;
-    if (before === null) return;
-    const el = timelineScrollerEl();
-    if (!el) return;
-    growRef.current = null;
-    el.scrollTop += el.scrollHeight - before;
-  });
 
   // 고른 날짜로 실제로 옮기는 곳
   useEffect(() => {
