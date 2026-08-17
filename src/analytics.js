@@ -60,6 +60,21 @@ export function identifyUser(user) {
   }
 }
 
+// 이 사람이 '처음으로' 기록을 남긴 시각. set_once라 두 번째부터는 무시된다.
+// 가입일(identifyUser에서 넣음)과 짝지으면 "가입하고 얼마 만에 첫 기록을 썼나"가
+// 사람별로 나오고, Mixpanel에서 그 값으로 코호트를 자를 수 있다.
+//
+// 로그인한 사람에게만 남긴다. 체험 중에는 distinct_id가 기기마다 새로 생기는
+// 익명값이라, 여기 프로필을 만들면 같은 사람이 여러 명으로 쌓이고 지워지지도 않는다.
+export function markFirstMemo() {
+  if (!analyticsEnabled) return;
+  try {
+    mixpanel.people.set_once({ '첫 기록 시각': new Date().toISOString() });
+  } catch {
+    // 무시
+  }
+}
+
 // 로그아웃 시 호출. 다음 사람의 행동이 앞사람에게 붙는 걸 막는다.
 export function resetUser() {
   if (!analyticsEnabled) return;

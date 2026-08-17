@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "backup": "node scripts/backup.js"
+    "backup": "node scripts/backup.js",
+    "words": "node scripts/word-freq.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.7",

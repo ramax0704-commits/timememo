@@ -17,7 +17,7 @@ import {
 import { ko } from 'date-fns/locale';
 import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft } from 'lucide-react';
 import { supabase, setRememberMe, getRememberMe } from './supabase';
-import { track, identifyUser, resetUser } from './analytics';
+import { track, identifyUser, resetUser, markFirstMemo } from './analytics';
 import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
@@ -574,6 +574,10 @@ function App() {
   useEffect(() => {
     // 로그인 화면을 보고 있는 동안은 세지 않는다 (앱 화면을 본 게 아니다)
     if (showLogin) return;
+    // 위클리·먼슬리는 트래킹하지 않는다. 지금 보려는 건 타임라인이 어떻게 쓰이는지다.
+    // previous_screen에도 안 남기려고 lastScreenRef까지 건드리지 않고 그냥 나간다
+    // (그래서 타임라인 → 위클리 → 타임라인은 같은 화면에 머문 것으로 취급된다)
+    if (activeView === 'weekly' || activeView === 'monthly') return;
     const screen =
       activeView === 'timeline'
         ? (showScheduleView ? 'timeline_schedule' : 'timeline_chat')
@@ -1520,6 +1524,8 @@ function App() {
       has_habit_keyword: habitKeywords.some(k => k?.name && !k.endedAt && content.includes(k.name)),
       color: selectedColor,
     });
+    // 첫 기록 시각은 사람 단위로 한 번만 (체험 중에는 익명이라 남기지 않는다)
+    if (!isGuest) markFirstMemo();
   };
 
   // ── 할 일 ───────────────────────────────────────────────────
@@ -1947,8 +1953,9 @@ function App() {
       }
     });
 
+    // mp-no-track = Mixpanel autocapture가 이 안의 클릭을 줍지 않는다 (먼슬리는 트래킹 안 함)
     return (
-      <div className="monthly-view">
+      <div className="monthly-view mp-no-track">
         {/* 먼슬리 헤더 */}
         <div className="monthly-nav">
           <button className="cal-btn" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}><ChevronLeft size={20} /></button>
@@ -2075,8 +2082,9 @@ function App() {
     const labelHours = [];
     for (let h = Math.ceil(rangeStart / 120) * 2; h * 60 <= rangeEnd; h += 2) labelHours.push(h);
 
+    // mp-no-track = Mixpanel autocapture가 이 안의 클릭을 줍지 않는다 (위클리는 트래킹 안 함)
     return (
-      <div className="weekly-container">
+      <div className="weekly-container mp-no-track">
         <div className="weekly-board">
           {/* 좌측 시간 눈금 */}
           <div className="weekly-hours-col">
@@ -3132,15 +3140,16 @@ function App() {
           <Clock size={20} />
           <span>타임라인</span>
         </button>
+        {/* 위클리·먼슬리 탭은 autocapture에서도 빼둔다 (mp-no-track) */}
         <button
-          className={`tab-btn ${activeView === 'weekly' ? 'active' : ''}`}
+          className={`tab-btn mp-no-track ${activeView === 'weekly' ? 'active' : ''}`}
           onClick={() => setActiveView('weekly')}
         >
           <Calendar size={20} />
           <span>위클리</span>
         </button>
         <button
-          className={`tab-btn ${activeView === 'monthly' ? 'active' : ''}`}
+          className={`tab-btn mp-no-track ${activeView === 'monthly' ? 'active' : ''}`}
           onClick={() => {
             setActiveView('monthly');
             setCurrentMonth(new Date());
