@@ -1007,6 +1007,41 @@ function App() {
 
   const timelineScrollerEl = () => (showScheduleView ? scheduleViewRef.current : timelineRef.current);
 
+  // ── 채팅창 빈 곳 좌우 스와이프 → 날짜 이동 ────────────────────
+  // 바닥에 늘 남겨두는 여백(.timeline-bottom-space)만이 아니라, 기록이 적어
+  // 아래가 넓게 빌 때 그 한가운데서 밀어도 통해야 한다. 그래서 위치(띠)가
+  // 아니라 '무엇을 짚었는가'로 빈 곳을 판정한다.
+  // 기록 위에서는 기록 자신의 좌우 스와이프(삭제)가 우선이라 건드리지 않는다.
+  const chatSwipeRef = useRef(null);
+  const chatSwipeScrollPendingRef = useRef(false);
+  const handleChatBlankTouchStart = (e) => {
+    if (e.touches.length !== 1 || e.target.closest('.memo-group, button, input, textarea, a')) {
+      chatSwipeRef.current = null;
+      return;
+    }
+    chatSwipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, done: false };
+  };
+  const handleChatBlankTouchMove = (e) => {
+    const s = chatSwipeRef.current;
+    if (!s || s.done) return;
+    const dx = e.touches[0].clientX - s.x;
+    const dy = e.touches[0].clientY - s.y;
+    // 가로로 확실히 민 것만 (세로 스크롤과 헷갈리지 않게)
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    s.done = true;
+    chatSwipeScrollPendingRef.current = true;
+    goToDay(addDays(selectedDate, dx < 0 ? 1 : -1)); // 왼쪽으로 밀면 다음 날
+  };
+  const handleChatBlankTouchEnd = () => { chatSwipeRef.current = null; };
+
+  // 스와이프로 날짜를 옮긴 직후엔 그 날의 최신 기록이 보이게 맨 아래로
+  useEffect(() => {
+    if (!chatSwipeScrollPendingRef.current) return;
+    chatSwipeScrollPendingRef.current = false;
+    const el = timelineRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [selectedDate]);
+
   // ── 채팅창 ↔ 타임블럭: 보고 있던 시각을 그대로 이어준다 ────────
   // 두 화면은 같은 하루를 다른 방식으로 보여주는 것이라, 오갈 때마다
   // 지금 시각으로 되돌려버리면 보던 자리를 매번 다시 찾아야 한다.
@@ -1037,7 +1072,14 @@ function App() {
   };
 
   const toggleScheduleView = () => {
-    viewAnchorRef.current = readFocusTime();
+    // 채팅창 맨 아래(기본 자리)에서 넘어갈 때는 시각을 잇지 않는다.
+    // 맨 아래 = 최신 기록을 보고 있던 것이라, 타임블럭의 기본 자리
+    // (가장 최근 기록을 가운데로)가 곧 이어보기다. 위로 스크롤해서
+    // 옛 기록을 보던 중일 때만 그 시각을 그대로 이어준다.
+    const el = timelineScrollerEl();
+    const chatAtBottom = !showScheduleView && el &&
+      el.scrollHeight - el.clientHeight - el.scrollTop < 8;
+    viewAnchorRef.current = chatAtBottom ? null : readFocusTime();
     setShowScheduleView(v => !v);
   };
 
@@ -1130,6 +1172,30 @@ function App() {
     // 예전엔 Math.max(0, idx)로 창의 첫 날(오늘-7일)로 보냈는데, 그게 바로
     // 8월 17일을 보다가 갑자기 8월 10일로 튀던 원인이다.
     if (idx < 0) return;
+    if (showScheduleView) {
+      // 타임블럭 기본 자리: 그 날의 가장 최근 기록을 화면 가운데로.
+      // 채팅창은 최신 기록이 맨 아래에 보이는 화면이라, 여기로 넘어왔을 때
+      // 같은 기록이 가운데 있어야 보던 콘텐츠가 이어진다.
+      // 기록이 하나도 없으면 지금 시각(빨간 선)을 가운데로.
+      let latest = null;
+      for (const b of el.querySelectorAll('.schedule-block[data-at]')) {
+        const at = new Date(b.dataset.at);
+        if (!isSameDay(at, selectedDate)) continue;
+        if (!latest || at >= new Date(latest.dataset.at)) latest = b;
+      }
+      const nowLine = isToday(selectedDate) ? el.querySelector('.schedule-now-line') : null;
+      const centerTarget = latest || nowLine;
+      if (centerTarget) {
+        const r = centerTarget.getBoundingClientRect();
+        const delta = r.top + r.height / 2 - el.getBoundingClientRect().top;
+        el.scrollTop = Math.max(0, el.scrollTop + delta - el.clientHeight / 2);
+        autoScrollRef.current = { view: showScheduleView, top: el.scrollTop };
+        scrollDayRef.current = idx;
+        lastScrollTopRef.current = el.scrollTop;
+        paintHeaderDay(idx, 0);
+        return;
+      }
+    }
     const nowLine = isToday(selectedDate) ? el.querySelector('.schedule-now-line') : null;
     const target = nowLine || el.querySelector(`[data-day-index="${idx}"]`);
     if (!target) return;
@@ -2698,6 +2764,7 @@ function App() {
                 <div
                   key={idx}
                   className={`schedule-block${isCompact ? ' schedule-block--compact' : ''}${schedule.isInner ? ' schedule-block--inner' : ''}`}
+                  data-at={schedule.memo.recordedAt}
                   onClick={() => openBlockEditor(schedule.memo)}
                   style={{
                     top: `${schedule.top}px`,
@@ -3142,7 +3209,13 @@ function App() {
           ) : (
           /* 채팅창은 헤더에 뜬 날짜 하루만 보여준다.
              (자정~새벽 2시 기록만 전날 화면에도 흐리게 얹는다 — 그건 원래 그 밤의 끝이다) */
-          <div className="timeline" ref={timelineRef}>
+          <div
+            className="timeline"
+            ref={timelineRef}
+            onTouchStart={handleChatBlankTouchStart}
+            onTouchMove={handleChatBlankTouchMove}
+            onTouchEnd={handleChatBlankTouchEnd}
+          >
             {chatMemos.length === 0 ? (
               <div className="empty-state">
                 <Inbox size={48} strokeWidth={1} />
@@ -3186,6 +3259,8 @@ function App() {
                 </div>
               ))
             )}
+            {/* 바닥 여백 — 이 빈 곳에서 좌우로 밀면 날짜가 넘어간다 */}
+            {chatMemos.length > 0 && <div className="timeline-bottom-space" aria-hidden="true" />}
           </div>
           )
         ) : activeView === 'weekly' ? (

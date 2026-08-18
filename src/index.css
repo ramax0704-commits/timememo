@@ -163,6 +163,13 @@ body {
 .timeline::-webkit-scrollbar { width: 6px; }
 .timeline::-webkit-scrollbar-thumb { background-color: #ddd; border-radius: 4px; }
 
+/* 채팅창 바닥 여백 — 한 줄 메모 두 개 반 높이.
+   이 빈 곳(그리고 기록이 적을 때 넓게 비는 아래쪽 전체)에서 좌우로 밀면 날짜가 넘어간다 */
+.timeline-bottom-space {
+  flex-shrink: 0;
+  height: 140px;
+}
+
 /* ── 날짜 구분 ───────────────────────────────────────────────── */
 /* 채팅창도 날짜를 끊지 않고 이어서 스크롤한다.
    날짜가 바뀌는 자리에만 선을 두고, 헤더 날짜가 이 선을 따라온다. */
