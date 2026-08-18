@@ -1772,14 +1772,25 @@ function App() {
     e?.preventDefault();
     if (!inputText.trim()) return;
     const now = new Date();
-    // 자정이 지났으면 오늘로 옮긴다
-    if (!isSameDay(selectedDate, now)) goToDay(now);
-    // 항상 현재 시간과 날짜로 기록
+    // 보고 있는 날짜에 기록한다: 다른 날짜 페이지에서 쓰면 '그 날짜 + 지금 시각'.
+    // (과거 날짜로 일부러 옮겨 와서 쓰는 데는 이유가 있다 — 오늘로 끌고 가지 않는다)
+    // 예외: 자정~새벽 2시에 어제 페이지에서 쓰는 건 아직 '그 밤'을 쓰는 것이라
+    // 실제 시각(오늘 새벽)으로 남긴다. 어제 화면에도 새벽 기록으로 이어 보인다.
+    let recordAt = now;
+    if (!isSameDay(selectedDate, now)) {
+      const sameNightDawn = now.getHours() < 2 && isSameDay(selectedDate, addDays(now, -1));
+      if (!sameNightDawn) {
+        recordAt = new Date(
+          selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(),
+          now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds()
+        );
+      }
+    }
     const newMemoData = {
       user_id: currentUser?.id,
       content: inputText,
       color: selectedColor,
-      recorded_at: now.toISOString(),
+      recorded_at: recordAt.toISOString(),
       spans_from_prev: mode === 'prev',
       spans_to_next: mode === 'next',
     };
