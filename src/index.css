@@ -159,6 +159,9 @@ body {
   flex-direction: column;
   gap: 0;
   background-color: var(--bg-app);
+  /* 세로 스크롤만 브라우저에 맡긴다. 이게 없으면 빈 곳에서 좌우로 밀 때
+     브라우저가 스크롤 제스처로 가져가버려서(pointercancel) 날짜 이동이 안 된다 */
+  touch-action: pan-y;
 }
 .timeline::-webkit-scrollbar { width: 6px; }
 .timeline::-webkit-scrollbar-thumb { background-color: #ddd; border-radius: 4px; }

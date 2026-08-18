@@ -1012,27 +1012,31 @@ function App() {
   // 아래가 넓게 빌 때 그 한가운데서 밀어도 통해야 한다. 그래서 위치(띠)가
   // 아니라 '무엇을 짚었는가'로 빈 곳을 판정한다.
   // 기록 위에서는 기록 자신의 좌우 스와이프(삭제)가 우선이라 건드리지 않는다.
+  // 터치 대신 포인터 이벤트를 쓴다: PC 마우스 드래그도 같이 통하고,
+  // .timeline의 touch-action: pan-y 덕에 가로 제스처를 브라우저가
+  // 스크롤로 가로채(touchcancel) 버리지 않는다.
   const chatSwipeRef = useRef(null);
   const chatSwipeScrollPendingRef = useRef(false);
-  const handleChatBlankTouchStart = (e) => {
-    if (e.touches.length !== 1 || e.target.closest('.memo-group, button, input, textarea, a')) {
+  const handleChatBlankPointerDown = (e) => {
+    if (!e.isPrimary || e.target.closest('.memo-group, button, input, textarea, a')) {
       chatSwipeRef.current = null;
       return;
     }
-    chatSwipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, done: false };
+    chatSwipeRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, done: false };
   };
-  const handleChatBlankTouchMove = (e) => {
+  const handleChatBlankPointerMove = (e) => {
     const s = chatSwipeRef.current;
-    if (!s || s.done) return;
-    const dx = e.touches[0].clientX - s.x;
-    const dy = e.touches[0].clientY - s.y;
+    if (!s || s.done || e.pointerId !== s.id) return;
+    if (e.pointerType === 'mouse' && !(e.buttons & 1)) return; // 마우스는 누른 채 끌 때만
+    const dx = e.clientX - s.x;
+    const dy = e.clientY - s.y;
     // 가로로 확실히 민 것만 (세로 스크롤과 헷갈리지 않게)
     if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
     s.done = true;
     chatSwipeScrollPendingRef.current = true;
     goToDay(addDays(selectedDate, dx < 0 ? 1 : -1)); // 왼쪽으로 밀면 다음 날
   };
-  const handleChatBlankTouchEnd = () => { chatSwipeRef.current = null; };
+  const handleChatBlankPointerEnd = () => { chatSwipeRef.current = null; };
 
   // 스와이프로 날짜를 옮긴 직후엔 그 날의 최신 기록이 보이게 맨 아래로
   useEffect(() => {
@@ -1079,7 +1083,18 @@ function App() {
     const el = timelineScrollerEl();
     const chatAtBottom = !showScheduleView && el &&
       el.scrollHeight - el.clientHeight - el.scrollTop < 8;
-    viewAnchorRef.current = chatAtBottom ? null : readFocusTime();
+    let carried = chatAtBottom ? null : readFocusTime();
+    // 채팅창에는 다음날 새벽(~02시) 기록도 이어 보여주지만, 타임블럭으로
+    // 넘어갈 때의 기준은 그 날 23:59까지다. 새벽 기록의 시각이 잡히면
+    // 그걸 잇지 않고 기본 규칙(그 날의 가장 최근 기록)에 맡긴다.
+    // 안 그러면 8월 17일 채팅창에서 넘어갔는데 8월 18일 새벽에 떨어진다.
+    if (carried != null && !showScheduleView) {
+      const dayEnd = new Date(
+        selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() + 1
+      ).getTime();
+      if (carried >= dayEnd) carried = null;
+    }
+    viewAnchorRef.current = carried;
     setShowScheduleView(v => !v);
   };
 
@@ -3212,9 +3227,10 @@ function App() {
           <div
             className="timeline"
             ref={timelineRef}
-            onTouchStart={handleChatBlankTouchStart}
-            onTouchMove={handleChatBlankTouchMove}
-            onTouchEnd={handleChatBlankTouchEnd}
+            onPointerDown={handleChatBlankPointerDown}
+            onPointerMove={handleChatBlankPointerMove}
+            onPointerUp={handleChatBlankPointerEnd}
+            onPointerCancel={handleChatBlankPointerEnd}
           >
             {chatMemos.length === 0 ? (
               <div className="empty-state">
