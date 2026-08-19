@@ -170,14 +170,16 @@ function buildMonthlyData(memos, habitKeywords) {
 }
 
 // ── 걸린 시간 표기 ───────────────────────────────────────────
+// '1시간 30분'은 말풍선 안에 넣기엔 길고, '1:30'은 기록 시각과 헷갈린다.
+// 짧으면서 시각과 안 헷갈리는 '1h 30m' 꼴을 쓴다.
 function formatDuration(min) {
   const m = Math.round(min);
   if (m < 1) return null;
   const h = Math.floor(m / 60);
   const r = m % 60;
-  if (h === 0) return `${r}분`;
-  if (r === 0) return `${h}시간`;
-  return `${h}시간 ${r}분`;
+  if (h === 0) return `${r}m`;
+  if (r === 0) return `${h}h`;
+  return `${h}h ${r}m`;
 }
 
 // ── 본문 속 링크 ─────────────────────────────────────────────
@@ -388,12 +390,11 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
               {i !== arr.length - 1 && <br />}
             </React.Fragment>
           ))}
+          {/* 구간 기록은 말풍선 안, 글 끝에 걸린 시간을 회색으로 */}
+          {duration != null && formatDuration(duration) && (
+            <span className="memo-duration">{formatDuration(duration)}</span>
+          )}
         </div>
-
-        {/* 구간 기록은 말풍선 뒤에 걸린 시간을 회색으로 살짝 */}
-        {duration != null && formatDuration(duration) && (
-          <span className="memo-duration">{formatDuration(duration)}</span>
-        )}
 
         {/* 웹 호버 삭제 버튼 */}
         <button
@@ -790,6 +791,12 @@ function App() {
   const reorderRef = useRef(null);
   // 옮긴 직후 뜨는 토스트 — 자동으로 잡힌 시각을 바로 고치거나 되돌릴 수 있다
   const [reorderToast, setReorderToast] = useState(null); // { memo, prevIso, timer }
+  // 타임블럭 블록 꾹 눌러 이동 — 드래그 중에는 리렌더 없이 DOM에 직접 그린다
+  // (14일치 판을 손가락 따라 매번 다시 그리면 뚝뚝 끊긴다)
+  const scheduleDragRef = useRef(null);
+  const schedulePxMapRef = useRef(null); // 최신 렌더의 시간 ↔ 픽셀 변환
+  const scheduleBadgeRef = useRef(null); // 드래그 중 놓일 시각을 보여주는 배지
+  const scheduleSuppressClickRef = useRef(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [showScheduleView, setShowScheduleView] = useState(false);
@@ -1241,6 +1248,107 @@ function App() {
   };
 
   const memoReorder = { onStart: beginMemoReorder, onMove: moveMemoReorder, onEnd: endMemoReorder };
+
+  // ── 타임블럭 블록 꾹 눌러 이동 ──────────────────────────────
+  // 채팅과 달리 시간선이 있으므로, 놓은 위치의 시각(5분 단위)이 그대로 새 시각이 된다.
+  // 시간 → 픽셀 변환(timeToPx)은 몰린 구간을 늘리느라 비선형이라, 역변환은 이분탐색으로 푼다.
+  const schedulePxToTime = (px) => {
+    const map = schedulePxMapRef.current;
+    if (!map) return 0;
+    let lo = 0;
+    let hi = map.gridMinutes;
+    for (let i = 0; i < 24; i++) {
+      const mid = (lo + hi) / 2;
+      if (map.timeToPx(mid) < px) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+  };
+
+  const updateScheduleDragBadge = (g) => {
+    const map = schedulePxMapRef.current;
+    const badge = scheduleBadgeRef.current;
+    if (!map || !badge) return;
+    let t = schedulePxToTime(g.schedule.top + g.dy);
+    t = Math.max(0, Math.min(map.gridMinutes, Math.round(t / 5) * 5)); // 5분 단위
+    g.newStartPos = t;
+    badge.style.display = 'block';
+    badge.style.top = `${map.timeToPx(t)}px`;
+    badge.textContent = format(new Date(windowStartMs + t * 60000), 'aa h:mm', { locale: ko });
+  };
+
+  const endScheduleDrag = (g, commit) => {
+    clearTimeout(g.timer);
+    if (g.prevent) window.removeEventListener('touchmove', g.prevent);
+    g.el.classList.remove('schedule-block--moving');
+    g.el.style.transform = '';
+    if (scheduleBadgeRef.current) scheduleBadgeRef.current.style.display = 'none';
+    scheduleDragRef.current = null;
+    if (!commit || g.mode !== 'drag' || g.newStartPos == null) return;
+    const shift = g.newStartPos - g.schedule.startPos;
+    if (!shift) return;
+    // 블록의 시작을 옮긴 만큼 기록 시각도 같이 민다 (구간 길이는 그대로)
+    const oldIso = g.schedule.memo.recordedAt;
+    const iso = new Date(new Date(oldIso).getTime() + shift * 60000).toISOString();
+    writeMemoFields(g.schedule.memo.id, { recorded_at: iso }, { recordedAt: iso }).then((ok) => {
+      if (!ok) return;
+      track('Memo Reordered', { guest: isGuest, view: 'schedule' });
+      const timer = setTimeout(() => setReorderToast(null), 8000);
+      setReorderToast(prev => {
+        if (prev?.timer) clearTimeout(prev.timer);
+        return { memo: { ...g.schedule.memo, recordedAt: iso }, prevIso: oldIso, timer };
+      });
+    });
+  };
+
+  const onScheduleBlockPointerDown = (e, schedule) => {
+    scheduleSuppressClickRef.current = false;
+    if (!e.isPrimary) return;
+    const el = e.currentTarget;
+    const g = {
+      id: e.pointerId, x: e.clientX, y: e.clientY, el, schedule,
+      mode: 'pending', dy: 0, timer: null, prevent: null, newStartPos: null,
+    };
+    g.timer = setTimeout(() => {
+      if (scheduleDragRef.current !== g || g.mode !== 'pending') return;
+      g.mode = 'drag';
+      scheduleSuppressClickRef.current = true;
+      navigator.vibrate?.(15);
+      // '이동 가능 상태'가 눈에 보이게 — 들리고, 파란 테두리가 생기고, 시각 배지가 뜬다
+      el.classList.add('schedule-block--moving');
+      g.prevent = (ev) => ev.preventDefault();
+      window.addEventListener('touchmove', g.prevent, { passive: false });
+      updateScheduleDragBadge(g);
+    }, 450);
+    scheduleDragRef.current = g;
+  };
+
+  const onScheduleBlockPointerMove = (e) => {
+    const g = scheduleDragRef.current;
+    if (!g || e.pointerId !== g.id) return;
+    if (e.pointerType === 'mouse' && !(e.buttons & 1)) return;
+    const dy = e.clientY - g.y;
+    if (g.mode === 'pending') {
+      // 꾹 누르기 전에 움직이면 스크롤이다 — 이동 모드로 들어가지 않는다
+      if (Math.hypot(e.clientX - g.x, dy) > 8) { clearTimeout(g.timer); g.mode = 'scroll'; }
+      return;
+    }
+    if (g.mode !== 'drag') return;
+    g.dy = dy;
+    g.el.style.transform = `translateY(${dy}px)`;
+    updateScheduleDragBadge(g);
+  };
+
+  const onScheduleBlockPointerUp = (e) => {
+    const g = scheduleDragRef.current;
+    if (!g || e.pointerId !== g.id) return;
+    endScheduleDrag(g, true);
+  };
+
+  const onScheduleBlockPointerCancel = (e) => {
+    const g = scheduleDragRef.current;
+    if (!g || e.pointerId !== g.id) return;
+    endScheduleDrag(g, false);
+  };
 
   // 기록이 이 기기에만 있다는 안내를 지금 띄울 때인지.
   //
@@ -3108,6 +3216,8 @@ function App() {
       return px;
     };
     const totalPx = timeToPx(gridMinutes);
+    // 블록을 꾹 눌러 옮길 때 놓인 픽셀을 시각으로 되읽는 데 쓴다
+    schedulePxMapRef.current = { timeToPx, gridMinutes };
 
     // 4) 각 묶음 안에서 블록을 위에서부터 차례로 쌓는다
     for (const c of clusters) {
@@ -3175,6 +3285,8 @@ function App() {
             {nowInWindow && (
               <div className="schedule-now-line" style={{ top: `${timeToPx(nowPos)}px` }} />
             )}
+            {/* 블록을 끌고 있는 동안 놓일 시각을 보여주는 배지 (드래그 핸들러가 직접 채운다) */}
+            <div className="schedule-drag-badge" ref={scheduleBadgeRef} style={{ display: 'none' }} />
             <div className="schedule-blocks-layer">
             {schedules.map((schedule, idx) => {
               // 습관 키워드 포함 시 키워드 색으로 (직접 고른 색이 있으면 그대로)
@@ -3202,6 +3314,18 @@ function App() {
                   className={`schedule-block${isCompact ? ' schedule-block--compact' : ''}${schedule.isInner ? ' schedule-block--inner' : ''}`}
                   data-at={schedule.memo.recordedAt}
                   onClick={() => openBlockEditor(schedule.memo)}
+                  // 꾹 누르면(0.45초) 이동 모드 — 파란 테두리가 생기고 끌어서 시각을 옮긴다
+                  onPointerDown={(e) => onScheduleBlockPointerDown(e, schedule)}
+                  onPointerMove={onScheduleBlockPointerMove}
+                  onPointerUp={onScheduleBlockPointerUp}
+                  onPointerCancel={onScheduleBlockPointerCancel}
+                  onClickCapture={(e) => {
+                    if (scheduleSuppressClickRef.current) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      scheduleSuppressClickRef.current = false;
+                    }
+                  }}
                   style={{
                     top: `${schedule.top}px`,
                     height: `${schedule.height}px`,
