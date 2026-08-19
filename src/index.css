@@ -2454,7 +2454,7 @@ body.keyboard-open .input-toolbar { display: flex; }
   position: absolute;
   left: 0;
   right: 0;
-  background-color: rgba(105, 110, 135, 0.045);
+  background-color: #fafafa;
   pointer-events: none;
 }
 
