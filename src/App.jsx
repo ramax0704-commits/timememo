@@ -481,18 +481,28 @@ function TimeWheelPicker({ value, onChange }) {
   const ampm = h24 < 12 ? 'AM' : 'PM';
   const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
 
-  const emit = (nextAmpm, nextH12, nextM) => {
-    let h = nextH12 % 12;
-    if (nextAmpm === 'PM') h += 12;
-    onChange(`${String(h).padStart(2, '0')}:${String(nextM).padStart(2, '0')}`);
+  // 두 휠을 연달아 빨리 돌리면, 나중 휠이 보고하는 순간 아직 이전 휠의 값이
+  // 화면에 반영되기 전이라 옛값과 조합돼버린다 (오후로 돌렸는데 오전으로 저장되던 원인).
+  // 그래서 마지막으로 합쳐진 값을 ref에 들고, 보고가 올 때마다 거기에 덧쓴다.
+  const draftRef = useRef({ ampm, h12, m });
+  useEffect(() => {
+    draftRef.current = { ampm, h12, m };
+  }, [ampm, h12, m]);
+
+  const emit = (patch) => {
+    draftRef.current = { ...draftRef.current, ...patch };
+    const d = draftRef.current;
+    let h = d.h12 % 12;
+    if (d.ampm === 'PM') h += 12;
+    onChange(`${String(h).padStart(2, '0')}:${String(d.m).padStart(2, '0')}`);
   };
 
   return (
     <div className="time-wheel">
       <div className="time-wheel-band" aria-hidden="true" />
-      <WheelColumn options={WHEEL_AMPM_OPTS} value={ampm} onChange={v => emit(v, h12, m)} ariaLabel="오전/오후" />
-      <WheelColumn options={WHEEL_HOUR_OPTS} value={h12} onChange={v => emit(ampm, v, m)} ariaLabel="시" />
-      <WheelColumn options={WHEEL_MIN_OPTS} value={m} onChange={v => emit(ampm, h12, v)} ariaLabel="분" />
+      <WheelColumn options={WHEEL_AMPM_OPTS} value={ampm} onChange={v => emit({ ampm: v })} ariaLabel="오전/오후" />
+      <WheelColumn options={WHEEL_HOUR_OPTS} value={h12} onChange={v => emit({ h12: v })} ariaLabel="시" />
+      <WheelColumn options={WHEEL_MIN_OPTS} value={m} onChange={v => emit({ m: v })} ariaLabel="분" />
     </div>
   );
 }
@@ -2161,8 +2171,13 @@ function App() {
     const { start, end } = blockRangeOf(memo);
     // 순간짜리는 적은 시각 하나만 보여준다 (블록으로 그릴 때 붙는 기본 30분은 시각이 아니다)
     const startStr = range ? hhmm(start) : hhmm(new Date(memo.recordedAt));
+    // 새벽(0~2시) 기록은 '전날 밤'의 기록이다 — 채팅·위클리와 같은 규칙.
+    // 저장된 날짜(다음날)를 그대로 보여주면, 어제 페이지에서 쓴 기록의 시간을
+    // 고쳤을 뿐인데 오늘로 옮겨져버린다.
+    const own = new Date(memo.recordedAt);
+    const nightBase = own.getHours() < 2 ? addDays(own, -1) : own;
     const snapshot = {
-      date: format(new Date(memo.recordedAt), 'yyyy-MM-dd'),
+      date: format(nightBase, 'yyyy-MM-dd'),
       start: startStr,
       end: hhmm(end),
       mode: range ? 'range' : 'moment',
@@ -2261,6 +2276,9 @@ function App() {
     const autoEndChanged = editMode === 'range' && editSpansToNext !== !!init.autoEnd;
     const timeTouched = dateChanged || startChanged || endChanged || modeChanged || autoStartChanged || autoEndChanged;
     const toMin = (str) => { const [h, m] = str.split(':').map(Number); return h * 60 + m; };
+    // 시트의 날짜는 '그 밤의 날짜'다. 0~2시 시각은 그 날짜의 밤 = 다음날 새벽으로 저장한다.
+    // (열 때 새벽 기록의 날짜를 전날로 보여주는 것과 짝이 맞아야 시간만 고쳐도 날짜가 안 튄다)
+    const nightMin = (min) => (min < 120 ? min + 1440 : min);
     const canWriteTime = editDateStr && editStartStr && (editMode === 'moment' || editEndStr);
 
     if (timeTouched && canWriteTime) {
@@ -2268,7 +2286,7 @@ function App() {
 
       if (editMode === 'moment') {
         // 한 순간짜리는 늘린 흔적을 전부 지운다. 적은 시각 하나만 남는다.
-        const startMin = toMin(editStartStr);
+        const startMin = nightMin(toMin(editStartStr));
         dbFields.recorded_at = new Date(y, mo - 1, d, 0, startMin, 0, 0).toISOString();
         dbFields.back_minutes = 0;
         dbFields.end_minutes = 0;
@@ -2280,14 +2298,15 @@ function App() {
         localFields.spansFromPrev = false;
         localFields.spansToNext = false;
       } else {
-        const startMin = toMin(editStartStr);
-        let endMin = toMin(editEndStr);
+        const startMin = nightMin(toMin(editStartStr));
+        let endMin = nightMin(toMin(editEndStr));
         if (endMin < startMin) endMin += 1440; // 자정을 넘긴 구간
 
         // '적은 순간'은 그대로 두되, 구간 밖으로 밀려나면 안쪽으로 끌어온다.
         // 채팅창 말풍선에 찍히는 시각이 이 값이라 함부로 옮기지 않는다.
+        // 새벽에 적은 순간도 같은 밤 기준(전날 0시부터 몇 분)으로 재야 하루씩 안 밀린다.
         const own = new Date(memo.recordedAt);
-        const ownWas = own.getHours() * 60 + own.getMinutes();
+        const ownWas = nightMin(own.getHours() * 60 + own.getMinutes());
         const ownMin = Math.min(Math.max(ownWas, startMin), endMin);
         // 기준점이 옮겨졌으면 앞뒤 길이를 둘 다 다시 재야 한다
         const ownMoved = ownMin !== ownWas;
@@ -4860,6 +4879,12 @@ function App() {
                 )}
                 {openTimeWheel === 'end' && editMode === 'range' && !editSpansToNext && (
                   <TimeWheelPicker value={editEndStr} onChange={setEditEndStr} />
+                )}
+                {/* 하루의 밤은 새벽 2시까지 — 새벽 시각은 이 날짜의 밤으로 저장된다 */}
+                {(editStartStr < '02:00' || (editMode === 'range' && editEndStr < '02:00')) && (
+                  <small className="block-dawn-hint">
+                    새벽 0~2시 시각은 이 날짜의 밤(다음날 새벽)으로 저장돼요.
+                  </small>
                 )}
                 {editMode === 'range' && (
                   <label className="block-auto-toggle">

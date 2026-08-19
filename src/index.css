@@ -2457,3 +2457,10 @@ body.keyboard-open .input-toolbar { display: flex; }
   background-color: rgba(105, 110, 135, 0.045);
   pointer-events: none;
 }
+
+/* 새벽 시각 안내 — 하루의 밤은 새벽 2시까지 */
+.block-dawn-hint {
+  font-size: 0.75rem;
+  color: #9a9ca8;
+  line-height: 1.4;
+}
