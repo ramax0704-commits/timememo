@@ -225,6 +225,10 @@ body {
   background-color: transparent;
   /* 세로 스크롤만 브라우저에 맡긴다. 가로로 미는 건 스와이프 삭제가 받는다 */
   touch-action: pan-y;
+  /* 꾹 누르면 순서 이동인데, 브라우저의 글자 선택까지 같이 떠서 막는다 */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /* 꾹 눌러 순서 옮기는 중 — 들려서 손가락을 따라온다 */
@@ -2385,6 +2389,13 @@ body.keyboard-open .input-toolbar { display: flex; }
 .onboarding-next:active { background: var(--primary-hover); }
 
 /* ── 타임블럭 블록 꾹 눌러 이동 ──────────────────────────────── */
+/* 꾹 누르면 이동인데 글자 선택이 같이 뜨면 안 된다 */
+.schedule-block {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 /* 이동 모드: 들리고, 파란 테두리 — '지금 옮길 수 있다'가 눈에 보이게 */
 .schedule-block--moving {
   z-index: 30;
@@ -2414,3 +2425,20 @@ body.keyboard-open .input-toolbar { display: flex; }
 
 /* 옮긴 시각 확정 시트 — 휠과 버튼만 있는 작은 시트 */
 .move-confirm-sheet .time-wheel { margin-top: 4px; }
+
+/* 옮기기 전 시각 */
+.move-confirm-prev {
+  margin: -6px 0 10px;
+  font-size: 0.8rem;
+  color: #9a9ca8;
+}
+
+/* 구간 기록: 옮겨질 시작 → 종료 미리보기 */
+.move-confirm-range {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--primary-color);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}

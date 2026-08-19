@@ -502,6 +502,9 @@ function TimeWheelPicker({ value, onChange }) {
   );
 }
 
+// Date(또는 iso)를 '오후 2:15' 꼴로
+const timeLabelOf = (d) => format(new Date(d), 'aa h:mm', { locale: ko });
+
 // 'HH:mm'을 '오후 2:15' 꼴로
 const timeLabel12 = (str) => {
   if (!str) return '--:--';
@@ -1219,24 +1222,37 @@ function App() {
     const ok = await writeMemoFields(st.memo.id, { recorded_at: iso }, { recordedAt: iso });
     if (!ok) return;
     track('Memo Reordered', { guest: isGuest });
-    // 옮기기는 아직 안 끝났다 — 휠로 시각을 확인/수정해야 완료다
+    // 옮기기는 아직 안 끝났다 — 휠로 시각을 확인/수정해야 완료다.
+    // 구간 기록은 휠이 '시작 시간'을 다루므로, 구간 길이와
+    // 시작↔기록시각의 간격을 같이 담아둔다.
+    const isRange = isRangeMemo(st.memo);
+    const before = blockRangeOf(st.memo);
+    const after = blockRangeOf(st.memo, { recordedAt: iso });
     setMoveConfirm({
       memoId: st.memo.id,
       prevIso: st.memo.recordedAt,
       appliedIso: iso,
-      draftStr: hhmm(new Date(iso)),
+      isRange,
+      durationMin: Math.round((after.end.getTime() - after.start.getTime()) / 60000),
+      startOffsetMin: isRange ? Math.round((newMs - after.start.getTime()) / 60000) : 0,
+      appliedStartIso: isRange ? after.start.toISOString() : iso,
+      draftStr: hhmm(isRange ? after.start : new Date(iso)),
+      prevLabel: isRange
+        ? `${timeLabelOf(before.start)} → ${timeLabelOf(before.end)}`
+        : timeLabelOf(st.memo.recordedAt),
     });
   };
 
-  // 확정: 휠에서 고른 시각으로 옮기기를 마친다
+  // 확정: 휠에서 고른 시각으로 옮기기를 마친다.
+  // 구간 기록의 휠은 '시작 시간'이다 — 기록 시각은 시작에서 원래 간격만큼 뒤에 둔다.
   const confirmMove = async () => {
     const m = moveConfirm;
     if (!m) return;
     setMoveConfirm(null);
     const [h, mi] = m.draftStr.split(':').map(Number);
-    const target = new Date(m.appliedIso);
-    target.setHours(h, mi, 0, 0);
-    const iso = target.toISOString();
+    const start = new Date(m.appliedStartIso);
+    start.setHours(h, mi, 0, 0);
+    const iso = new Date(start.getTime() + (m.startOffsetMin || 0) * 60000).toISOString();
     if (iso !== m.appliedIso) {
       await writeMemoFields(m.memoId, { recorded_at: iso }, { recordedAt: iso });
     }
@@ -1303,12 +1319,26 @@ function App() {
     writeMemoFields(g.schedule.memo.id, { recorded_at: iso }, { recordedAt: iso }).then((ok) => {
       if (!ok) return;
       track('Memo Reordered', { guest: isGuest, view: 'schedule' });
-      // 옮기기는 아직 안 끝났다 — 휠로 시각을 확인/수정해야 완료다
+      // 옮기기는 아직 안 끝났다 — 휠로 시각을 확인/수정해야 완료다.
+      // 구간 기록은 휠이 '시작 시간'을 다룬다 (블록의 시작·끝은 이미 계산돼 있다).
+      const isRange = isRangeMemo(g.schedule.memo);
+      const startBefore = new Date(windowStartMs + g.schedule.startPos * 60000);
+      const endBefore = new Date(windowStartMs + g.schedule.endPos * 60000);
+      const startAfter = new Date(windowStartMs + g.newStartPos * 60000);
       setMoveConfirm({
         memoId: g.schedule.memo.id,
         prevIso: oldIso,
         appliedIso: iso,
-        draftStr: hhmm(new Date(iso)),
+        isRange,
+        durationMin: Math.round(g.schedule.endPos - g.schedule.startPos),
+        startOffsetMin: isRange
+          ? Math.round((new Date(oldIso).getTime() - startBefore.getTime()) / 60000)
+          : 0,
+        appliedStartIso: isRange ? startAfter.toISOString() : iso,
+        draftStr: hhmm(isRange ? startAfter : new Date(iso)),
+        prevLabel: isRange
+          ? `${timeLabelOf(startBefore)} → ${timeLabelOf(endBefore)}`
+          : timeLabelOf(oldIso),
       });
     });
   };
@@ -4208,12 +4238,27 @@ function App() {
           <div className="block-sheet move-confirm-sheet" onClick={e => e.stopPropagation()}>
             <div className="block-sheet-handle" />
             <div className="block-sheet-head">
-              <h3>몇 시 기록으로 옮길까요?</h3>
+              <h3>{moveConfirm.isRange ? '시작 시간을 몇 시로 옮길까요?' : '몇 시 기록으로 옮길까요?'}</h3>
             </div>
+            {/* 옮기기 전 시각 — 되돌리기를 누르면 여기로 돌아간다 */}
+            <p className="move-confirm-prev">기존 · {moveConfirm.prevLabel}</p>
             <TimeWheelPicker
               value={moveConfirm.draftStr}
               onChange={v => setMoveConfirm(m => (m ? { ...m, draftStr: v } : m))}
             />
+            {/* 구간 기록: 휠이 시작 시간이므로, 옮겨질 구간 전체를 미리 보여준다 */}
+            {moveConfirm.isRange && (() => {
+              const [h, mi] = moveConfirm.draftStr.split(':').map(Number);
+              const s = new Date(moveConfirm.appliedStartIso);
+              s.setHours(h, mi, 0, 0);
+              const e = new Date(s.getTime() + moveConfirm.durationMin * 60000);
+              const dur = formatDuration(moveConfirm.durationMin);
+              return (
+                <p className="move-confirm-range">
+                  {timeLabelOf(s)} → {timeLabelOf(e)}{dur ? ` · ${dur}` : ''}
+                </p>
+              );
+            })()}
             <div className="block-sheet-actions">
               <button className="btn-cancel" onClick={undoMove}>되돌리기</button>
               <button className="btn-save" onClick={confirmMove}>이 시각으로 옮기기</button>
