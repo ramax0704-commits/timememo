@@ -789,7 +789,9 @@ function App() {
   const reorderRef = useRef(null);
   // 옮긴 직후 뜨는 시각 확정 시트 — 휠로 시각을 다듬고 확정해야 옮기기가 끝난다.
   // (자동으로 잡힌 시각을 그냥 믿게 두면 몇 시가 됐는지 모른 채 지나간다)
-  const [moveConfirm, setMoveConfirm] = useState(null); // { memoId, prevIso, appliedIso, draftStr }
+  const [moveConfirm, setMoveConfirm] = useState(null);
+  // 확정한 뒤에도 마음을 바꿀 수 있게 잠깐 띄우는 되돌리기 토스트
+  const [moveUndoToast, setMoveUndoToast] = useState(null); // { memoId, prev, timer }
   // 타임블럭 블록 꾹 눌러 이동 — 드래그 중에는 리렌더 없이 DOM에 직접 그린다
   // (14일치 판을 손가락 따라 매번 다시 그리면 뚝뚝 끊긴다)
   const scheduleDragRef = useRef(null);
@@ -1168,6 +1170,24 @@ function App() {
   const REORDER_EDGE = 70;      // 이 안쪽에 손가락이 오면 자동 스크롤
   const REORDER_PIN = 40;       // 기록이 화면 끝에서 이만큼 안쪽에 고정
 
+  // 옮기기 전 상태 스냅샷 — 되돌리기가 시각뿐 아니라 구간 설정까지 원래대로 복구한다
+  const snapshotMoveFields = (memo) => ({
+    db: {
+      recorded_at: memo.recordedAt,
+      back_minutes: memo.backMinutes || 0,
+      end_minutes: memo.endMinutes || 0,
+      spans_from_prev: !!memo.spansFromPrev,
+      spans_to_next: !!memo.spansToNext,
+    },
+    local: {
+      recordedAt: memo.recordedAt,
+      backMinutes: memo.backMinutes || 0,
+      endMinutes: memo.endMinutes || 0,
+      spansFromPrev: !!memo.spansFromPrev,
+      spansToNext: !!memo.spansToNext,
+    },
+  });
+
   const applyChatDrag = () => {
     const st = reorderRef.current;
     const cont = timelineRef.current;
@@ -1187,6 +1207,8 @@ function App() {
   };
 
   const beginMemoReorder = (memo, startY) => {
+    // 이전 이동의 되돌리기 토스트는 정리한다 (되돌릴 대상이 섞이면 안 된다)
+    setMoveUndoToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return null; });
     const cont = timelineRef.current;
     const els = [...(cont?.querySelectorAll('.memo-swipe-wrapper[data-id]') || [])]
       .filter(el => el.dataset.id !== String(memo.id));
@@ -1273,7 +1295,7 @@ function App() {
     const endStr = hhmm(after.end);
     setMoveConfirm({
       memoId: st.memo.id,
-      prevIso: st.memo.recordedAt,
+      prev: snapshotMoveFields(st.memo),
       appliedIso: iso,
       isRange,
       baseIso: isRange ? after.start.toISOString() : iso, // 날짜의 기준
@@ -1296,55 +1318,71 @@ function App() {
     setMoveConfirm(null);
     const startChanged = m.draftStart !== m.initStart;
     const endChanged = m.isRange && m.draftEnd !== m.initEnd;
-    if (!startChanged && !endChanged) return;
 
-    const toMin = (s) => { const [h, mi] = s.split(':').map(Number); return h * 60 + mi; };
-    const base = new Date(m.baseIso);
+    if (startChanged || endChanged) {
+      const toMin = (s) => { const [h, mi] = s.split(':').map(Number); return h * 60 + mi; };
+      const base = new Date(m.baseIso);
 
-    if (!m.isRange) {
-      const [h, mi] = m.draftStart.split(':').map(Number);
-      base.setHours(h, mi, 0, 0);
-      const iso = base.toISOString();
-      await writeMemoFields(m.memoId, { recorded_at: iso }, { recordedAt: iso });
-      return;
+      if (!m.isRange) {
+        const [h, mi] = m.draftStart.split(':').map(Number);
+        base.setHours(h, mi, 0, 0);
+        const iso = base.toISOString();
+        await writeMemoFields(m.memoId, { recorded_at: iso }, { recordedAt: iso });
+      } else {
+        // 구간: 수정 시트의 저장과 같은 규칙 —
+        // 시작·종료를 직접 정했으니 자동 잇기 대신 명시적인 구간으로 굳힌다.
+        const startMin = toMin(m.draftStart);
+        let endMin = toMin(m.draftEnd);
+        if (endMin < startMin) endMin += 1440; // 자정을 넘긴 구간
+        base.setHours(0, startMin, 0, 0);
+        const startMs = base.getTime();
+        const endMs = startMs + (endMin - startMin) * 60000;
+        // 기록 시각(말풍선에 찍히는 시각)은 구간 안으로 끌어온다
+        const ownMs = Math.min(Math.max(new Date(m.appliedIso).getTime(), startMs), endMs);
+        const iso = new Date(ownMs).toISOString();
+        await writeMemoFields(
+          m.memoId,
+          {
+            recorded_at: iso,
+            back_minutes: Math.round((ownMs - startMs) / 60000),
+            end_minutes: Math.round((endMs - ownMs) / 60000),
+            spans_from_prev: false,
+            spans_to_next: false,
+          },
+          {
+            recordedAt: iso,
+            backMinutes: Math.round((ownMs - startMs) / 60000),
+            endMinutes: Math.round((endMs - ownMs) / 60000),
+            spansFromPrev: false,
+            spansToNext: false,
+          },
+        );
+      }
     }
 
-    // 구간: 수정 시트의 저장과 같은 규칙 —
-    // 시작·종료를 직접 정했으니 자동 잇기 대신 명시적인 구간으로 굳힌다.
-    const startMin = toMin(m.draftStart);
-    let endMin = toMin(m.draftEnd);
-    if (endMin < startMin) endMin += 1440; // 자정을 넘긴 구간
-    base.setHours(0, startMin, 0, 0);
-    const startMs = base.getTime();
-    const endMs = startMs + (endMin - startMin) * 60000;
-    // 기록 시각(말풍선에 찍히는 시각)은 구간 안으로 끌어온다
-    const ownMs = Math.min(Math.max(new Date(m.appliedIso).getTime(), startMs), endMs);
-    const iso = new Date(ownMs).toISOString();
-    await writeMemoFields(
-      m.memoId,
-      {
-        recorded_at: iso,
-        back_minutes: Math.round((ownMs - startMs) / 60000),
-        end_minutes: Math.round((endMs - ownMs) / 60000),
-        spans_from_prev: false,
-        spans_to_next: false,
-      },
-      {
-        recordedAt: iso,
-        backMinutes: Math.round((ownMs - startMs) / 60000),
-        endMinutes: Math.round((endMs - ownMs) / 60000),
-        spansFromPrev: false,
-        spansToNext: false,
-      },
-    );
+    // 확정한 뒤에도 잠깐은 마음을 바꿀 수 있게 되돌리기 토스트를 띄운다
+    const timer = setTimeout(() => setMoveUndoToast(null), 6000);
+    setMoveUndoToast(prevT => {
+      if (prevT?.timer) clearTimeout(prevT.timer);
+      return { memoId: m.memoId, prev: m.prev, timer };
+    });
   };
 
-  // 되돌리기 — 옮기기 전 시각·자리로 복구
+  // 시트의 되돌리기·바깥 터치 — 시간을 정하지 않았다는 뜻이므로 옮기기 전으로 복구
   const undoMove = async () => {
     const m = moveConfirm;
     if (!m) return;
     setMoveConfirm(null);
-    await writeMemoFields(m.memoId, { recorded_at: m.prevIso }, { recordedAt: m.prevIso });
+    await writeMemoFields(m.memoId, m.prev.db, m.prev.local);
+  };
+
+  // 확정 후 토스트의 되돌리기 — 구간 설정까지 통째로 옮기기 전으로
+  const undoMoveAfterConfirm = async () => {
+    const t = moveUndoToast;
+    if (!t) return;
+    clearTimeout(t.timer);
+    setMoveUndoToast(null);
+    await writeMemoFields(t.memoId, t.prev.db, t.prev.local);
   };
 
   const memoReorder = { onStart: beginMemoReorder, onMove: moveMemoReorder, onEnd: endMemoReorder };
@@ -1424,7 +1462,7 @@ function App() {
       const endStr = hhmm(endAfter);
       setMoveConfirm({
         memoId: g.schedule.memo.id,
-        prevIso: oldIso,
+        prev: snapshotMoveFields(g.schedule.memo),
         appliedIso: iso,
         isRange,
         baseIso: isRange ? startAfter.toISOString() : iso,
@@ -1453,6 +1491,8 @@ function App() {
       if (scheduleDragRef.current !== g || g.mode !== 'pending') return;
       g.mode = 'drag';
       scheduleSuppressClickRef.current = true;
+      // 이전 이동의 되돌리기 토스트는 정리한다 (되돌릴 대상이 섞이면 안 된다)
+      setMoveUndoToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return null; });
       navigator.vibrate?.(15);
       // '이동 가능 상태'가 눈에 보이게 — 살짝 줄어들며 들리고, 시각 배지가 뜬다
       el.classList.add('schedule-block--moving');
@@ -4344,10 +4384,18 @@ function App() {
         </div>
       )}
 
+      {/* 옮기기 확정 직후 — 잠깐 마음 바꿀 수 있는 되돌리기 */}
+      {moveUndoToast && (
+        <div className="undo-toast">
+          <span>기록을 옮겼어요</span>
+          <button className="undo-btn" onClick={undoMoveAfterConfirm}>되돌리기</button>
+        </div>
+      )}
+
       {/* 꾹 눌러 옮긴 직후: 휠로 시각을 확인/수정해야 옮기기가 끝난다.
-          바깥을 눌러도 지금 보이는 시각으로 확정된다 (갇히지 않게) */}
+          바깥을 누르면 시간을 정하지 않겠다는 뜻 — 되돌리기와 같다 */}
       {moveConfirm && (
-        <div className="block-sheet-overlay" onClick={confirmMove}>
+        <div className="block-sheet-overlay" onClick={undoMove}>
           <div className="block-sheet move-confirm-sheet" onClick={e => e.stopPropagation()}>
             <div className="block-sheet-handle" />
             <div className="block-sheet-head">

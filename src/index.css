@@ -383,15 +383,22 @@ body.mouse-device .memo-delete-reveal-btn { display: none; }
 /* 웹 호버 시 우측 버튼 공간 확보 */
 body.mouse-device .memo-content { max-width: calc(100% - 28px); }
 
-/* 구간 기록의 걸린 시간 — 말풍선 안, 글 끝에 회색으로 */
+/* 구간 기록의 걸린 시간 — 말풍선 안 오른쪽에 붙인다.
+   글 끝에 인라인으로 두면 줄바꿈될 때 왼쪽 여백이 따라가 붕 뜬 공백처럼 보인다 */
 .memo-duration {
-  display: inline-block;
-  margin-left: 8px;
+  float: right;
+  margin: 3px 0 0 10px;
   font-size: 0.72rem;
   font-weight: 600;
   color: #adafbb;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+/* float가 말풍선 높이 밖으로 삐져나가지 않게 */
+.memo-content::after {
+  content: '';
+  display: block;
+  clear: both;
 }
 
 /* 본문 속 링크 — 탭하면 새 탭으로 열린다 (수정 시트는 안 열림) */
