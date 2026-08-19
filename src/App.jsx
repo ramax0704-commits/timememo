@@ -281,13 +281,16 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
     if (!e.isPrimary) return;
     if (e.target.closest('button, a, input, textarea')) return;
     clearGesture();
-    const g = { x: e.clientX, y: e.clientY, id: e.pointerId, mode: 'pending', timer: null };
+    const g = { x: e.clientX, y: e.clientY, id: e.pointerId, el: e.currentTarget, mode: 'pending', timer: null };
     g.timer = setTimeout(() => {
       if (gestureRef.current !== g || g.mode !== 'pending') return;
       g.mode = 'drag';
       suppressClickRef.current = true;
       setSwiped(false);
       setDragging(true);
+      // 마우스는 커서가 요소 밖으로 나가면 이벤트가 끊긴다 — 캡처로 붙잡아둔다
+      // (터치는 원래 처음 누른 요소가 끝까지 받는다)
+      try { g.el.setPointerCapture(g.id); } catch { /* 이미 떼었으면 무시 */ }
       navigator.vibrate?.(15);
       reorder?.onStart(memo, g.y);
     }, 450);
@@ -1507,6 +1510,8 @@ function App() {
       scheduleSuppressClickRef.current = true;
       // 이전 이동의 되돌리기 토스트는 정리한다 (되돌릴 대상이 섞이면 안 된다)
       setMoveUndoToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return null; });
+      // 마우스는 커서가 블록 밖으로 나가면 이벤트가 끊긴다 — 캡처로 붙잡아둔다
+      try { el.setPointerCapture(g.id); } catch { /* 이미 떼었으면 무시 */ }
       navigator.vibrate?.(15);
       // '이동 가능 상태'가 눈에 보이게 — 살짝 줄어들며 들리고, 시각 배지가 뜬다
       el.classList.add('schedule-block--moving');

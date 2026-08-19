@@ -1600,7 +1600,8 @@ body.keyboard-open .input-toolbar { display: flex; }
   display: flex;
   align-items: center;
   gap: 6px;
-  background-color: #fafafa;
+  /* 기록 컴포넌트(#f9f9fb)와 같은 계열 — 그보다 밝고 흰색보다 살짝 어둡게 */
+  background-color: #fcfcfd;
   color: #888888;
   border-radius: 20px;
   padding: 4px 10px 4px 12px;
@@ -2454,7 +2455,8 @@ body.keyboard-open .input-toolbar { display: flex; }
   position: absolute;
   left: 0;
   right: 0;
-  background-color: #fafafa;
+  /* 기록 컴포넌트(#f9f9fb)와 같은 계열 — 그보다 밝고 흰색보다 살짝 어둡게 */
+  background-color: #fcfcfd;
   pointer-events: none;
 }
 
