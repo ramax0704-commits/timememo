@@ -3378,6 +3378,13 @@ function App() {
         clusters.push({ start: s.startPos, end: s.endPos, items: [s] });
       }
     }
+    // 구간(스패닝) 블록이 낀 겹침은 위아래로 쌓으면 안 된다 — 밀린 블록이
+    // 제 시각과 다른 자리에 그려진다(4:52 시작이 6시 위치에 있던 문제).
+    // 이런 묶음은 옆으로 나란히 두고 각자 제 시각 자리에 놓는다.
+    // 순간 기록만 몰린 묶음은 기존대로 세로로 쌓는다(칸을 나누면 글이 안 읽힌다).
+    for (const c of clusters) {
+      c.useColumns = c.items.length >= 2 && c.items.some(s => !s.isCompact);
+    }
 
     // 3) 쌓는 데 필요한 높이가 실제 시간 길이보다 크면 그만큼 구간을 늘린다.
     //    감싸는 블록은 안쪽 기록들이 다 들어갈 만큼도 확보해야 한다.
@@ -3397,6 +3404,8 @@ function App() {
 
     const expansions = [];
     for (const c of clusters) {
+      // 옆으로 나누는 묶음은 시간 축을 늘릴 필요가 없다 (제 시각 자리에 그대로 두므로)
+      if (c.useColumns) continue;
       c.needPx = c.items.reduce((sum, s) => sum + slotPxFor(s), 0);
       const naturalPx = (c.end - c.start) * PX_PER_MIN;
       if (c.needPx > naturalPx) expansions.push({ from: c.start, to: c.end, extra: c.needPx - naturalPx });
@@ -3415,8 +3424,27 @@ function App() {
     // 블록을 꾹 눌러 옮길 때 놓인 픽셀을 시각으로 되읽는 데 쓴다
     schedulePxMapRef.current = { timeToPx, gridMinutes };
 
-    // 4) 각 묶음 안에서 블록을 위에서부터 차례로 쌓는다
+    // 4) 묶음 안 배치 — 옆으로 나누거나(구간 겹침), 위에서부터 쌓는다(순간 몰림)
     for (const c of clusters) {
+      if (c.useColumns) {
+        // 위클리 뷰와 같은 열 배정: 앞 블록이 끝난 열이 있으면 재사용한다.
+        // 열이 겹치는지 판정할 때는 최소 높이만큼 차지하는 시간도 포함한다
+        // (짧은 구간이 최소 높이 때문에 시간보다 길게 그려지며 다음 블록을 덮는 것 방지)
+        const paddedEnd = (s) => s.startPos + Math.max(slotPxFor(s) / PX_PER_MIN, s.endPos - s.startPos);
+        const colEnds = [];
+        for (const s of c.items) {
+          let ci = colEnds.findIndex(end => end <= s.startPos);
+          if (ci === -1) { ci = colEnds.length; colEnds.push(paddedEnd(s)); }
+          else colEnds[ci] = paddedEnd(s);
+          s.col = ci;
+        }
+        for (const s of c.items) {
+          s.colCount = colEnds.length;
+          s.top = timeToPx(s.startPos); // 제 시각 자리 그대로
+          s.height = Math.max(slotPxFor(s), (s.endPos - s.startPos) * PX_PER_MIN) - BLOCK_GAP_PX;
+        }
+        continue;
+      }
       let y = timeToPx(c.start);
       for (const s of c.items) {
         const slot = slotPxFor(s);
@@ -3437,6 +3465,9 @@ function App() {
         s.top = Math.max(host.top + (s.startPos - host.startPos) * PX_PER_MIN, y);
         s.height = slot - BLOCK_GAP_PX;
         s.isInner = true;
+        // 감싸는 블록이 열로 나뉘어 있으면 같은 열 안에 얹는다
+        s.col = host.col;
+        s.colCount = host.colCount;
         y = s.top + slot;
       }
     }
@@ -3529,7 +3560,13 @@ function App() {
                     borderColor: borderColor,
                     cursor: 'pointer',
                     justifyContent: 'flex-start',
-                    paddingTop: '6px'
+                    paddingTop: '6px',
+                    // 구간이 부분적으로 겹치면 옆으로 나눠 각자 제 시각 자리에 둔다
+                    ...(schedule.colCount > 1 ? {
+                      left: `calc(${(schedule.col / schedule.colCount) * 100}% + ${schedule.isInner ? 12 : 0}px)`,
+                      right: 'auto',
+                      width: `calc(${100 / schedule.colCount}% - ${schedule.isInner ? 14 : 3}px)`,
+                    } : null),
                   }}
                 >
                   <div className="schedule-block-time">{timeLabel}</div>
