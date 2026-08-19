@@ -789,8 +789,9 @@ function App() {
   const [draggingMemoId, setDraggingMemoId] = useState(null);
   const [reorderDrop, setReorderDrop] = useState(null); // 이 기록 앞에 놓는다 (id) | 'end' | null
   const reorderRef = useRef(null);
-  // 옮긴 직후 뜨는 토스트 — 자동으로 잡힌 시각을 바로 고치거나 되돌릴 수 있다
-  const [reorderToast, setReorderToast] = useState(null); // { memo, prevIso, timer }
+  // 옮긴 직후 뜨는 시각 확정 시트 — 휠로 시각을 다듬고 확정해야 옮기기가 끝난다.
+  // (자동으로 잡힌 시각을 그냥 믿게 두면 몇 시가 됐는지 모른 채 지나간다)
+  const [moveConfirm, setMoveConfirm] = useState(null); // { memoId, prevIso, appliedIso, draftStr }
   // 타임블럭 블록 꾹 눌러 이동 — 드래그 중에는 리렌더 없이 DOM에 직접 그린다
   // (14일치 판을 손가락 따라 매번 다시 그리면 뚝뚝 끊긴다)
   const scheduleDragRef = useRef(null);
@@ -1165,8 +1166,6 @@ function App() {
   // 채팅은 시간순 정렬이라, 순서를 바꾼다 = 시각을 바꾼다.
   // 떨어뜨린 자리의 앞뒤 기록 시각 사이 한가운데로 옮긴다.
   const beginMemoReorder = (memo) => {
-    // 이전 이동의 토스트가 남아 있으면 정리한다 (되돌릴 대상이 섞이면 안 된다)
-    setReorderToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return null; });
     const els = [...(timelineRef.current?.querySelectorAll('.memo-swipe-wrapper[data-id]') || [])]
       .filter(el => el.dataset.id !== String(memo.id));
     reorderRef.current = { memo, els };
@@ -1220,31 +1219,35 @@ function App() {
     const ok = await writeMemoFields(st.memo.id, { recorded_at: iso }, { recordedAt: iso });
     if (!ok) return;
     track('Memo Reordered', { guest: isGuest });
-    // 자동으로 잡힌 시각이 마음에 안 들 수 있다 — 바로 고치거나 되돌릴 길을 띄운다
-    const timer = setTimeout(() => setReorderToast(null), 8000);
-    setReorderToast(prev => {
-      if (prev?.timer) clearTimeout(prev.timer);
-      return { memo: { ...st.memo, recordedAt: iso }, prevIso: st.memo.recordedAt, timer };
+    // 옮기기는 아직 안 끝났다 — 휠로 시각을 확인/수정해야 완료다
+    setMoveConfirm({
+      memoId: st.memo.id,
+      prevIso: st.memo.recordedAt,
+      appliedIso: iso,
+      draftStr: hhmm(new Date(iso)),
     });
   };
 
-  // 옮기기 되돌리기 — 원래 시각으로 복구
-  const undoReorder = async () => {
-    const t = reorderToast;
-    if (!t) return;
-    clearTimeout(t.timer);
-    setReorderToast(null);
-    await writeMemoFields(t.memo.id, { recorded_at: t.prevIso }, { recordedAt: t.prevIso });
+  // 확정: 휠에서 고른 시각으로 옮기기를 마친다
+  const confirmMove = async () => {
+    const m = moveConfirm;
+    if (!m) return;
+    setMoveConfirm(null);
+    const [h, mi] = m.draftStr.split(':').map(Number);
+    const target = new Date(m.appliedIso);
+    target.setHours(h, mi, 0, 0);
+    const iso = target.toISOString();
+    if (iso !== m.appliedIso) {
+      await writeMemoFields(m.memoId, { recorded_at: iso }, { recordedAt: iso });
+    }
   };
 
-  // 옮긴 기록의 시각을 바로 다듬는다 — 수정 시트를 열고 시간 휠까지 펼쳐준다
-  const editReorderTime = () => {
-    const t = reorderToast;
-    if (!t) return;
-    clearTimeout(t.timer);
-    setReorderToast(null);
-    openBlockEditor(t.memo);
-    setOpenTimeWheel('start');
+  // 되돌리기 — 옮기기 전 시각·자리로 복구
+  const undoMove = async () => {
+    const m = moveConfirm;
+    if (!m) return;
+    setMoveConfirm(null);
+    await writeMemoFields(m.memoId, { recorded_at: m.prevIso }, { recordedAt: m.prevIso });
   };
 
   const memoReorder = { onStart: beginMemoReorder, onMove: moveMemoReorder, onEnd: endMemoReorder };
@@ -1268,8 +1271,16 @@ function App() {
     const map = schedulePxMapRef.current;
     const badge = scheduleBadgeRef.current;
     if (!map || !badge) return;
-    let t = schedulePxToTime(g.schedule.top + g.dy);
-    t = Math.max(0, Math.min(map.gridMinutes, Math.round(t / 5) * 5)); // 5분 단위
+    // 얼마나 끌었는지(상대값)만 시각에 더한다. 놓인 픽셀을 절대 시각으로 읽으면
+    // 몰린 구간에서 쌓아 올린 블록의 top이 제 시각과 어긋나 있어서,
+    // 꾹 눌렀다 그대로 떼기만 해도 시각이 바뀌어버린다.
+    const draggedMin = schedulePxToTime(g.schedule.top + g.dy) - schedulePxToTime(g.schedule.top);
+    const delta = Math.round(draggedMin / 5) * 5; // 5분 단위
+    // 움직였을 때만 결과 시각도 5분 단위로 스냅한다 (12:39에서 끌면 1:29가 아니라 1:30에 떨어지게).
+    // 안 움직였으면(delta 0) 원래 시각을 조금도 건드리지 않는다.
+    let t = g.schedule.startPos + delta;
+    if (delta !== 0) t = Math.round(t / 5) * 5;
+    t = Math.max(0, Math.min(map.gridMinutes, t));
     g.newStartPos = t;
     badge.style.display = 'block';
     badge.style.top = `${map.timeToPx(t)}px`;
@@ -1292,10 +1303,12 @@ function App() {
     writeMemoFields(g.schedule.memo.id, { recorded_at: iso }, { recordedAt: iso }).then((ok) => {
       if (!ok) return;
       track('Memo Reordered', { guest: isGuest, view: 'schedule' });
-      const timer = setTimeout(() => setReorderToast(null), 8000);
-      setReorderToast(prev => {
-        if (prev?.timer) clearTimeout(prev.timer);
-        return { memo: { ...g.schedule.memo, recordedAt: iso }, prevIso: oldIso, timer };
+      // 옮기기는 아직 안 끝났다 — 휠로 시각을 확인/수정해야 완료다
+      setMoveConfirm({
+        memoId: g.schedule.memo.id,
+        prevIso: oldIso,
+        appliedIso: iso,
+        draftStr: hhmm(new Date(iso)),
       });
     });
   };
@@ -4188,12 +4201,24 @@ function App() {
         </div>
       )}
 
-      {/* 꾹 눌러 옮긴 직후: 자동으로 잡힌 시각을 알려주고, 고치거나 되돌릴 수 있게 */}
-      {reorderToast && (
-        <div className="undo-toast reorder-toast">
-          <span>{format(new Date(reorderToast.memo.recordedAt), 'aa h:mm', { locale: ko })}(으)로 옮겼어요</span>
-          <button className="undo-btn" onClick={editReorderTime}>시간 수정</button>
-          <button className="undo-btn" onClick={undoReorder}>되돌리기</button>
+      {/* 꾹 눌러 옮긴 직후: 휠로 시각을 확인/수정해야 옮기기가 끝난다.
+          바깥을 눌러도 지금 보이는 시각으로 확정된다 (갇히지 않게) */}
+      {moveConfirm && (
+        <div className="block-sheet-overlay" onClick={confirmMove}>
+          <div className="block-sheet move-confirm-sheet" onClick={e => e.stopPropagation()}>
+            <div className="block-sheet-handle" />
+            <div className="block-sheet-head">
+              <h3>몇 시 기록으로 옮길까요?</h3>
+            </div>
+            <TimeWheelPicker
+              value={moveConfirm.draftStr}
+              onChange={v => setMoveConfirm(m => (m ? { ...m, draftStr: v } : m))}
+            />
+            <div className="block-sheet-actions">
+              <button className="btn-cancel" onClick={undoMove}>되돌리기</button>
+              <button className="btn-save" onClick={confirmMove}>이 시각으로 옮기기</button>
+            </div>
+          </div>
         </div>
       )}
 
