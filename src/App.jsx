@@ -16,7 +16,7 @@ import {
   parse
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft } from 'lucide-react';
+import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft, Palette, HelpCircle } from 'lucide-react';
 import { supabase, setRememberMe, getRememberMe } from './supabase';
 import { track, identifyUser, resetUser, markFirstMemo } from './analytics';
 import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
@@ -62,6 +62,13 @@ const COLOR_BORDER = {
 
 // 터치 기기 여부 (모바일에서는 입력창 자동 포커스를 하지 않음)
 const IS_TOUCH_DEVICE = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+
+// 터치/마우스 구분을 CSS 미디어쿼리(hover)에 맡기지 않고 body 클래스로 내려준다.
+// 삼성 인터넷 등 일부 안드로이드 브라우저가 (hover: hover)를 '마우스 있음'으로
+// 잘못 답해서, 갤럭시가 PC 취급되어 스와이프 삭제가 사라지고 PC용 휴지통이 떴다.
+if (typeof document !== 'undefined') {
+  document.body.classList.add(IS_TOUCH_DEVICE ? 'touch-device' : 'mouse-device');
+}
 
 // 습관 키워드 색상 (배경은 --habit-* CSS 변수, 테두리는 한 톤 진하게)
 const HABIT_BORDER = {
@@ -162,27 +169,42 @@ function buildMonthlyData(memos, habitKeywords) {
   return result;
 }
 
-// ── 스와이프 훅 ───────────────────────────────────────────────
-function useSwipe(onSwipeLeft, onSwipeRight, threshold = 60) {
-  const startX = useRef(null);
-  const startY = useRef(null);
+// ── 걸린 시간 표기 ───────────────────────────────────────────
+function formatDuration(min) {
+  const m = Math.round(min);
+  if (m < 1) return null;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  if (h === 0) return `${r}분`;
+  if (r === 0) return `${h}시간`;
+  return `${h}시간 ${r}분`;
+}
 
-  const onTouchStart = (e) => {
-    startX.current = e.touches[0].clientX;
-    startY.current = e.touches[0].clientY;
-  };
+// ── 본문 속 링크 ─────────────────────────────────────────────
+// 캡처 그룹 하나로 split하면 홀수 인덱스가 링크다
+const URL_REGEX = /(https?:\/\/[^\s]+|www\.[^\s]+)/g;
 
-  const onTouchEnd = (e) => {
-    if (startX.current === null) return;
-    const dx = e.changedTouches[0].clientX - startX.current;
-    const dy = Math.abs(e.changedTouches[0].clientY - startY.current);
-    if (dy > 40) return; // 세로 스크롤 무시
-    if (dx < -threshold) onSwipeLeft?.();
-    else if (dx > threshold) onSwipeRight?.();
-    startX.current = null;
-  };
-
-  return { onTouchStart, onTouchEnd };
+function renderLineWithLinks(line) {
+  // /g 정규식은 test()가 lastIndex를 옮겨 다음 호출을 놓치므로 검사는 따로 한다
+  if (!/https?:\/\/|www\./.test(line)) return line;
+  return line.split(URL_REGEX).map((part, i) => {
+    if (i % 2 === 1) {
+      const href = part.startsWith('www.') ? `https://${part}` : part;
+      return (
+        <a
+          key={i}
+          className="memo-link"
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+        >
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
 }
 
 // ── 할 일 정렬·묶기 ──────────────────────────────────────────
@@ -216,8 +238,17 @@ function todoDayLabel(date) {
 }
 
 // ── 메모 아이템 컴포넌트 ──────────────────────────────────────
-function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords, dimmed }) {
+// 제스처가 셋이라 한 곳에서 조율한다:
+//   짧게 탭 → 수정 시트, 좌우로 밀기 → 삭제 버튼, 꾹 누르기(0.45초) → 순서 옮기기.
+// 예전에는 touch 이벤트를 썼는데, 포인터 이벤트로 바꿔서 PC 마우스도 같이 통한다.
+function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, duration, reorder }) {
   const [swiped, setSwiped] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [dragDy, setDragDy] = useState(0);
+  // { x, y, id, mode: 'pending' | 'swipe' | 'scroll' | 'drag', timer }
+  const gestureRef = useRef(null);
+  // 스와이프·드래그 뒤에 따라오는 click이 수정 시트를 열지 않게 막는다
+  const suppressClickRef = useRef(false);
 
   // 습관 키워드가 포함된 메모는 키워드 색으로 표시 (사용자가 직접 색을 고른 경우는 그대로)
   const memoDateKey = format(new Date(memo.recordedAt), 'yyyy-MM-dd');
@@ -232,19 +263,94 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
     ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
     : (COLOR_BORDER[memo.color || 'default'] || '#e8e8f0');
 
-  const swipe = useSwipe(
-    () => setSwiped(true),
-    () => setSwiped(false),
-    50
-  );
+  const clearGesture = () => {
+    if (gestureRef.current?.timer) clearTimeout(gestureRef.current.timer);
+    gestureRef.current = null;
+  };
+
+  const endDrag = (commit) => {
+    setDragging(false);
+    setDragDy(0);
+    reorder?.onEnd(commit);
+  };
+
+  const onPointerDown = (e) => {
+    // 지난 제스처가 남긴 클릭 억제를 여기서 푼다 (다음 탭까지 막으면 안 된다)
+    suppressClickRef.current = false;
+    if (!e.isPrimary) return;
+    if (e.target.closest('button, a, input, textarea')) return;
+    clearGesture();
+    const g = { x: e.clientX, y: e.clientY, id: e.pointerId, mode: 'pending', timer: null };
+    g.timer = setTimeout(() => {
+      if (gestureRef.current !== g || g.mode !== 'pending') return;
+      g.mode = 'drag';
+      suppressClickRef.current = true;
+      setSwiped(false);
+      setDragging(true);
+      navigator.vibrate?.(15);
+      reorder?.onStart(memo);
+    }, 450);
+    gestureRef.current = g;
+  };
+
+  const onPointerMove = (e) => {
+    const g = gestureRef.current;
+    if (!g || e.pointerId !== g.id) return;
+    if (e.pointerType === 'mouse' && !(e.buttons & 1)) return; // 마우스는 누른 채 끌 때만
+    const dx = e.clientX - g.x;
+    const dy = e.clientY - g.y;
+    if (g.mode === 'drag') {
+      setDragDy(dy);
+      reorder?.onMove(e.clientY);
+      return;
+    }
+    if (g.mode === 'pending' && Math.hypot(dx, dy) > 8) {
+      clearTimeout(g.timer);
+      // 가로로 확실히 밀면 스와이프, 아니면 세로 스크롤에 맡긴다
+      g.mode = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'swipe' : 'scroll';
+    }
+  };
+
+  const onPointerUp = (e) => {
+    const g = gestureRef.current;
+    if (!g || e.pointerId !== g.id) return;
+    if (g.mode === 'drag') {
+      endDrag(true);
+    } else if (g.mode === 'swipe') {
+      const dx = e.clientX - g.x;
+      if (dx < -40) { setSwiped(true); suppressClickRef.current = true; }
+      else if (dx > 40) { setSwiped(false); suppressClickRef.current = true; }
+    }
+    clearGesture();
+  };
+
+  const onPointerCancel = () => {
+    if (gestureRef.current?.mode === 'drag') endDrag(false);
+    clearGesture();
+  };
 
   return (
     <div
-      className={`memo-swipe-wrapper ${swiped ? 'swiped' : ''}`}
-      style={dimmed ? { opacity: 0.45 } : undefined}
+      className={`memo-swipe-wrapper ${swiped ? 'swiped' : ''}${dragging ? ' dragging' : ''}`}
+      style={{
+        ...(dimmed ? { opacity: 0.45 } : null),
+        ...(dragging ? { transform: `translateY(${dragDy}px)` } : null),
+      }}
       // 채팅창 ↔ 타임블럭을 오갈 때 '보고 있던 시각'을 이 값으로 읽는다
       data-at={memo.recordedAt}
-      {...swipe}
+      // 순서 옮기기가 떨어뜨릴 자리를 찾을 때 쓴다
+      data-id={memo.id}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onClickCapture={(e) => {
+        if (suppressClickRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          suppressClickRef.current = false;
+        }
+      }}
     >
       {/* 삭제 버튼 (스와이프 시 노출) */}
       <button
@@ -269,6 +375,10 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
           title="기록 수정하기"
         >
           <span className="memo-time">{format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}</span>
+          {/* 구간 기록은 얼마나 걸렸는지도 함께 보여준다 */}
+          {duration != null && formatDuration(duration) && (
+            <span className="memo-duration">{formatDuration(duration)}</span>
+          )}
         </div>
         <div
           className="memo-content"
@@ -278,7 +388,7 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
         >
           {memo.content.split('\n').map((line, i, arr) => (
             <React.Fragment key={i}>
-              {line}
+              {renderLineWithLinks(line)}
               {i !== arr.length - 1 && <br />}
             </React.Fragment>
           ))}
@@ -296,6 +406,169 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, isTouchDevice, habitKeywords
         >
           <Trash2 size={15} />
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── 시간 휠 피커 ─────────────────────────────────────────────
+// 기기 기본 time 입력은 iOS는 휠, 갤럭시는 시계 다이얼이라 제각각이었다.
+// 어느 기기에서나 똑같이 위아래로 돌려 고르도록 앱 안에서 직접 그린다.
+// 스크롤 스냅으로 굴러가고, 멈춘 자리의 값을 읽는다.
+const WHEEL_ITEM_H = 36;
+
+function WheelColumn({ options, value, onChange, ariaLabel }) {
+  const ref = useRef(null);
+  const settleTimer = useRef(null);
+  // 마지막으로 우리가 보고한 값. 바깥에서 온 값 변화(다른 기록 열기 등)와 구분한다
+  const reportedRef = useRef(value);
+
+  const indexOf = (v) => options.findIndex(o => o.value === v);
+
+  // 처음 열릴 때 현재 값 자리로
+  useEffect(() => {
+    const idx = indexOf(value);
+    if (idx >= 0 && ref.current) ref.current.scrollTop = idx * WHEEL_ITEM_H;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 바깥에서 값이 바뀌면 그 자리로 (내가 굴려서 보고한 값이면 이미 그 자리다)
+  useEffect(() => {
+    if (value === reportedRef.current) return;
+    const idx = indexOf(value);
+    if (idx >= 0 && ref.current) ref.current.scrollTop = idx * WHEEL_ITEM_H;
+    reportedRef.current = value;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  // 스크롤이 멎으면 가운데 온 값을 읽는다
+  const handleScroll = () => {
+    clearTimeout(settleTimer.current);
+    settleTimer.current = setTimeout(() => {
+      const el = ref.current;
+      if (!el) return;
+      const idx = Math.max(0, Math.min(options.length - 1, Math.round(el.scrollTop / WHEEL_ITEM_H)));
+      const opt = options[idx];
+      if (opt.value !== value) {
+        reportedRef.current = opt.value;
+        onChange(opt.value);
+      }
+    }, 140);
+  };
+
+  useEffect(() => () => clearTimeout(settleTimer.current), []);
+
+  return (
+    <div className="wheel-col" ref={ref} onScroll={handleScroll} aria-label={ariaLabel}>
+      <div className="wheel-pad" aria-hidden="true" />
+      {options.map((o, i) => (
+        <div
+          key={o.value}
+          className={`wheel-item${o.value === value ? ' wheel-item--active' : ''}`}
+          onClick={() => ref.current?.scrollTo({ top: i * WHEEL_ITEM_H, behavior: 'smooth' })}
+        >
+          {o.label}
+        </div>
+      ))}
+      <div className="wheel-pad" aria-hidden="true" />
+    </div>
+  );
+}
+
+const WHEEL_AMPM_OPTS = [{ value: 'AM', label: '오전' }, { value: 'PM', label: '오후' }];
+const WHEEL_HOUR_OPTS = Array.from({ length: 12 }, (_, i) => ({ value: i + 1, label: String(i + 1) }));
+const WHEEL_MIN_OPTS = Array.from({ length: 60 }, (_, i) => ({ value: i, label: String(i).padStart(2, '0') }));
+
+function TimeWheelPicker({ value, onChange }) {
+  const [h24, m] = (value || '09:00').split(':').map(Number);
+  const ampm = h24 < 12 ? 'AM' : 'PM';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+
+  const emit = (nextAmpm, nextH12, nextM) => {
+    let h = nextH12 % 12;
+    if (nextAmpm === 'PM') h += 12;
+    onChange(`${String(h).padStart(2, '0')}:${String(nextM).padStart(2, '0')}`);
+  };
+
+  return (
+    <div className="time-wheel">
+      <div className="time-wheel-band" aria-hidden="true" />
+      <WheelColumn options={WHEEL_AMPM_OPTS} value={ampm} onChange={v => emit(v, h12, m)} ariaLabel="오전/오후" />
+      <WheelColumn options={WHEEL_HOUR_OPTS} value={h12} onChange={v => emit(ampm, v, m)} ariaLabel="시" />
+      <WheelColumn options={WHEEL_MIN_OPTS} value={m} onChange={v => emit(ampm, h12, v)} ariaLabel="분" />
+    </div>
+  );
+}
+
+// 'HH:mm'을 '오후 2:15' 꼴로
+const timeLabel12 = (str) => {
+  if (!str) return '--:--';
+  const [h, m] = str.split(':').map(Number);
+  const ampm = h < 12 ? '오전' : '오후';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${ampm} ${h12}:${String(m).padStart(2, '0')}`;
+};
+
+// ── 온보딩 ───────────────────────────────────────────────────
+// 처음 온 사람에게 핵심 사용법을 카드 몇 장으로. 닫으면 다시 안 뜨고,
+// 마이페이지 '사용법 다시 보기'로 언제든 다시 볼 수 있다.
+const ONBOARDING_KEY = 'timememo-onboarding-done';
+const ONBOARDING_SLIDES = [
+  {
+    emoji: '💬',
+    title: '채팅하듯 기록해요',
+    desc: '생각날 때 한 줄 적어 보내면\n지금 시각과 함께 남아요.\n하루가 대화처럼 쌓입니다.',
+  },
+  {
+    emoji: '⏱️',
+    title: '걸린 시간도 남겨요',
+    desc: '기록을 탭하면 시작~종료 시간을 정할 수 있어요.\n우측 상단 격자 버튼을 누르면\n하루가 시간표(타임블럭)로 보여요.',
+  },
+  {
+    emoji: '👆',
+    title: '제스처로 빠르게',
+    desc: '기록을 왼쪽으로 밀면 삭제,\n꾹 누른 채 위아래로 끌면 순서를 옮겨요.\n전송 버튼을 누른 채 위/아래로 끌면\n이전 기록부터 · 다음 기록까지 이어서 저장돼요.',
+  },
+  {
+    emoji: '🗓️',
+    title: '할 일과 먼슬리',
+    desc: '할 일을 적어뒀다가 끝나면 기록으로 옮기고,\n먼슬리에서 습관 키워드와 가계부를\n한눈에 볼 수 있어요.',
+  },
+];
+
+function OnboardingOverlay({ onClose }) {
+  const [idx, setIdx] = useState(0);
+  const last = idx === ONBOARDING_SLIDES.length - 1;
+  const slide = ONBOARDING_SLIDES[idx];
+
+  const close = (action) => {
+    localStorage.setItem(ONBOARDING_KEY, '1');
+    track('Onboarding', { action, slide: idx });
+    onClose();
+  };
+
+  return (
+    <div className="onboarding-overlay">
+      <div className="onboarding-card">
+        <button type="button" className="onboarding-skip" onClick={() => close('skipped')}>건너뛰기</button>
+        <div className="onboarding-emoji" aria-hidden="true">{slide.emoji}</div>
+        <h2 className="onboarding-title">{slide.title}</h2>
+        <p className="onboarding-desc">{slide.desc}</p>
+        <div className="onboarding-dots" aria-hidden="true">
+          {ONBOARDING_SLIDES.map((_, i) => <span key={i} className={i === idx ? 'active' : ''} />)}
+        </div>
+        <div className="onboarding-actions">
+          {idx > 0 && (
+            <button type="button" className="onboarding-prev" onClick={() => setIdx(i => i - 1)}>이전</button>
+          )}
+          <button
+            type="button"
+            className="onboarding-next"
+            onClick={() => (last ? close('completed') : setIdx(i => i + 1))}
+          >
+            {last ? '시작하기' : '다음'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -506,6 +779,14 @@ function App() {
   // 열었을 때의 시각 값. 사용자가 시간을 건드리지 않았으면 저장할 때 시간 관련
   // 필드를 아예 손대지 않는다 (자동으로 이어지던 설정이 조용히 고정값으로 굳는 걸 막는다)
   const [editInitial, setEditInitial] = useState(null);
+  // 시간 휠이 지금 어느 칸(시작/종료)을 고치고 있는지
+  const [openTimeWheel, setOpenTimeWheel] = useState(null); // 'start' | 'end' | null
+  // 온보딩 (첫 방문 안내)
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  // 꾹 눌러 순서 옮기기 (채팅창)
+  const [draggingMemoId, setDraggingMemoId] = useState(null);
+  const [reorderDrop, setReorderDrop] = useState(null); // 이 기록 앞에 놓는다 (id) | 'end' | null
+  const reorderRef = useRef(null);
   const [showCalendar, setShowCalendar] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [showScheduleView, setShowScheduleView] = useState(false);
@@ -531,6 +812,28 @@ function App() {
   const scrollPositionRef = useRef(null);
   const [isCalendarScrolling, setIsCalendarScrolling] = useState(false);
   const calendarScrollTimeoutRef = useRef(null);
+
+  // ── 온보딩: 처음 온 사람(체험, 기록 0)에게 한 번만 ───────────
+  // 기존 계정 사용자에게는 자동으로 띄우지 않는다 — 마이페이지에서 다시 볼 수 있다.
+  useEffect(() => {
+    if (authLoading) return;
+    if (localStorage.getItem(ONBOARDING_KEY) === '1') return;
+    if (!currentUser && memos.length === 0) {
+      setShowOnboarding(true);
+      track('Onboarding', { action: 'shown' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading]);
+
+  // ── 순서 옮기는 동안 화면 스크롤을 멈춘다 ────────────────────
+  // touch-action은 제스처 시작 시점에 정해져 도중에 못 바꾸므로,
+  // 드래그 중에만 touchmove 기본 동작을 직접 막는다.
+  useEffect(() => {
+    if (!draggingMemoId) return;
+    const prevent = (e) => e.preventDefault();
+    window.addEventListener('touchmove', prevent, { passive: false });
+    return () => window.removeEventListener('touchmove', prevent);
+  }, [draggingMemoId]);
 
   // ── 현재 시간 (스케줄 뷰 빨간 줄 등) 1분마다 갱신 ─────────────
   const [nowTime, setNowTime] = useState(new Date());
@@ -848,6 +1151,66 @@ function App() {
   // 채팅창은 고른 날짜 하루만 보여준다. 헤더 날짜와 화면 내용이 어긋나면 안 된다.
   const chatMemos = [...displayedMemos, ...lateNightMemos];
 
+  // ── 채팅창 순서 옮기기 (꾹 눌러 드래그) ──────────────────────
+  // 채팅은 시간순 정렬이라, 순서를 바꾼다 = 시각을 바꾼다.
+  // 떨어뜨린 자리의 앞뒤 기록 시각 사이 한가운데로 옮긴다.
+  const beginMemoReorder = (memo) => {
+    const els = [...(timelineRef.current?.querySelectorAll('.memo-swipe-wrapper[data-id]') || [])]
+      .filter(el => el.dataset.id !== String(memo.id));
+    reorderRef.current = { memo, els };
+    setDraggingMemoId(memo.id);
+    setReorderDrop(null);
+  };
+
+  const moveMemoReorder = (clientY) => {
+    const st = reorderRef.current;
+    if (!st) return;
+    let drop = 'end';
+    for (const el of st.els) {
+      const r = el.getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) { drop = el.dataset.id; break; }
+    }
+    setReorderDrop(prev => (prev === drop ? prev : drop));
+  };
+
+  const endMemoReorder = async (commit) => {
+    const st = reorderRef.current;
+    const drop = reorderDrop;
+    reorderRef.current = null;
+    setDraggingMemoId(null);
+    setReorderDrop(null);
+    if (!commit || !st || drop == null) return;
+
+    const ordered = chatMemos.filter(m => m.id !== st.memo.id);
+    let prev;
+    let next = null;
+    if (drop === 'end') {
+      prev = ordered[ordered.length - 1] || null;
+    } else {
+      const idx = ordered.findIndex(m => String(m.id) === drop);
+      if (idx < 0) return;
+      next = ordered[idx];
+      prev = idx > 0 ? ordered[idx - 1] : null;
+    }
+    const own = new Date(st.memo.recordedAt).getTime();
+    const prevMs = prev ? new Date(prev.recordedAt).getTime() : null;
+    const nextMs = next ? new Date(next.recordedAt).getTime() : null;
+    // 이미 그 사이에 있으면(제자리) 아무것도 하지 않는다
+    if ((prevMs == null || prevMs <= own) && (nextMs == null || own <= nextMs)) return;
+
+    let newMs;
+    if (prevMs != null && nextMs != null) newMs = Math.round((prevMs + nextMs) / 2);
+    else if (nextMs != null) newMs = Math.max(selectedDayStartMs, nextMs - 30 * 60000);
+    else if (prevMs != null) newMs = prevMs + 30 * 60000;
+    else return;
+
+    const iso = new Date(newMs).toISOString();
+    const ok = await writeMemoFields(st.memo.id, { recorded_at: iso }, { recordedAt: iso });
+    if (ok) track('Memo Reordered', { guest: isGuest });
+  };
+
+  const memoReorder = { onStart: beginMemoReorder, onMove: moveMemoReorder, onEnd: endMemoReorder };
+
   // 기록이 이 기기에만 있다는 안내를 지금 띄울 때인지.
   //
   // 홈 화면 앱에서도 띄운다. 사파리의 7일 삭제만 비켜갈 뿐, 기록이 이 기기
@@ -902,6 +1265,17 @@ function App() {
 
   // 편집 시트가 블록 구간을 계산할 때 쓰는 기준점 (타임블럭과 같은 판 위에서 재야 한다)
   const dayStartMs = windowStartMs;
+
+  // ── 구간 기록의 걸린 시간 (채팅창 표시용) ────────────────────
+  // 타임블럭이 그리는 구간과 똑같은 규칙으로 계산해야 두 화면의 숫자가 같다.
+  const chatDurations = {};
+  if (timelineMemos.length > 0) {
+    for (const b of buildDayBlocks(timelineMemos, {
+      dayStartMs: windowStartMs, nowMs: nowTime.getTime(), gridMinutes: windowMinutes,
+    })) {
+      if (isRangeMemo(b.memo)) chatDurations[b.memo.id] = b.endPos - b.startPos;
+    }
+  }
 
   const dayInWindow = (day) => windowDays.some(d => isSameDay(d, day));
 
@@ -1461,6 +1835,7 @@ function App() {
     setEditEndStr(snapshot.end);
     setEditMode(snapshot.mode);
     setEditInitial(snapshot);
+    setOpenTimeWheel(null);
   };
 
   // 한 순간 ↔ 구간 전환. 저장을 눌러야 반영된다.
@@ -1473,12 +1848,15 @@ function App() {
       end.setHours(h, m + MIN_BLOCK_MINUTES, 0, 0);
       setEditEndStr(hhmm(end));
     }
+    // 순간으로 돌아가면 종료 칸이 사라진다 — 열려 있던 종료 휠도 같이 닫는다
+    if (mode === 'moment') setOpenTimeWheel(w => (w === 'end' ? null : w));
     setEditMode(mode);
   };
 
   const closeBlockEditor = () => {
     setEditingMemo(null);
     setEditInitial(null);
+    setOpenTimeWheel(null);
   };
 
   // 기록 한 건을 고쳐 쓴다. 체험 모드는 서버 대신 브라우저에 쓴다.
@@ -3274,17 +3652,27 @@ function App() {
                   style={{ marginTop: groupIdx > 0 ? '10px' : '0' }}
                 >
                   {group.map(memo => (
-                    <MemoItem
-                      key={memo.id}
-                      memo={memo}
-                      onEdit={openBlockEditor}
-                      onDeleteWithUndo={handleDeleteWithUndo}
-                      habitKeywords={habitKeywords}
-                      dimmed={!isSameDay(new Date(memo.recordedAt), selectedDate)}
-                    />
+                    <React.Fragment key={memo.id}>
+                      {/* 꾹 눌러 옮기는 중, 여기 떨어뜨리면 이 기록 앞에 놓인다 */}
+                      {draggingMemoId && reorderDrop === String(memo.id) && (
+                        <div className="drop-indicator" aria-hidden="true" />
+                      )}
+                      <MemoItem
+                        memo={memo}
+                        onEdit={openBlockEditor}
+                        onDeleteWithUndo={handleDeleteWithUndo}
+                        habitKeywords={habitKeywords}
+                        dimmed={!isSameDay(new Date(memo.recordedAt), selectedDate)}
+                        duration={chatDurations[memo.id]}
+                        reorder={memoReorder}
+                      />
+                    </React.Fragment>
                   ))}
                 </div>
               ))
+            )}
+            {draggingMemoId && reorderDrop === 'end' && (
+              <div className="drop-indicator" aria-hidden="true" />
             )}
             {/* 바닥 여백 — 이 빈 곳에서 좌우로 밀면 날짜가 넘어간다 */}
             {chatMemos.length > 0 && <div className="timeline-bottom-space" aria-hidden="true" />}
@@ -3404,6 +3792,24 @@ function App() {
                 </button>
               </div>
 
+              {/* 앱 사용법 다시 보기 */}
+              <div className="mypage-card">
+                <div className="card-header-icon">
+                  <HelpCircle size={18} style={{ color: 'var(--primary-color)' }} />
+                  <h3>앱 사용법</h3>
+                </div>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px', lineHeight: 1.5 }}>
+                  처음 안내에서 보여드린 사용법을 다시 볼 수 있어요.
+                </p>
+                <button
+                  className="btn-cancel"
+                  style={{ width: '100%' }}
+                  onClick={() => { setShowOnboarding(true); track('Onboarding', { action: 'reopened' }); }}
+                >
+                  사용법 다시 보기
+                </button>
+              </div>
+
               {/* Billing Card */}
               <div className="mypage-card billing-card">
                 <div className="card-header-icon">
@@ -3510,6 +3916,8 @@ function App() {
         <div className="input-area">
           {/* 컬러 팔레트 */}
           <div className="color-picker-wrapper">
+            {/* 빈 동그라미만 있으면 할 일 체크로 오해받는다 — 팔레트 아이콘을 넣어
+                '색을 고르는 버튼'임이 보이게 한다 */}
             <button
               className="color-trigger-btn"
               style={{
@@ -3518,7 +3926,10 @@ function App() {
               }}
               onClick={() => setShowColorPicker(p => !p)}
               title="메모 색상 선택"
-            />
+              aria-label="메모 색상 선택"
+            >
+              <Palette size={15} strokeWidth={2.2} />
+            </button>
             {showColorPicker && (
               <div className="color-palette-popup">
                 {COLOR_PALETTE.map(c => (
@@ -3940,29 +4351,39 @@ function App() {
                   value={editDateStr}
                   onChange={e => setEditDateStr(e.target.value)}
                 />
+                {/* 기기 기본 time 입력은 갤럭시에서 시계 다이얼이 떠서 불편했다.
+                    어느 기기에서나 똑같도록 앱이 직접 그리는 휠로 고른다 */}
                 <div className="block-time-row">
-                  <input
-                    type="time"
-                    className="block-input"
-                    value={editStartStr}
-                    onChange={e => setEditStartStr(e.target.value)}
+                  <button
+                    type="button"
+                    className={`block-input block-time-btn${openTimeWheel === 'start' ? ' open' : ''}`}
+                    onClick={() => setOpenTimeWheel(w => (w === 'start' ? null : 'start'))}
                     /* 자동으로 잇는 중에는 시작이 이전 기록을 따라가므로 직접 못 고친다 */
                     disabled={editMode === 'range' && isAutoStart(editingMemo)}
-                  />
+                  >
+                    {timeLabel12(editStartStr)}
+                  </button>
                   {editMode === 'range' && (
                     <>
                       <span className="block-time-sep">→</span>
-                      <input
-                        type="time"
-                        className="block-input"
-                        value={editEndStr}
-                        onChange={e => setEditEndStr(e.target.value)}
+                      <button
+                        type="button"
+                        className={`block-input block-time-btn${openTimeWheel === 'end' ? ' open' : ''}`}
+                        onClick={() => setOpenTimeWheel(w => (w === 'end' ? null : 'end'))}
                         /* 자동으로 잇는 중에는 끝 시각이 다음 기록을 따라가므로 직접 못 고친다 */
                         disabled={isAutoEnd(editingMemo)}
-                      />
+                      >
+                        {timeLabel12(editEndStr)}
+                      </button>
                     </>
                   )}
                 </div>
+                {openTimeWheel === 'start' && !(editMode === 'range' && isAutoStart(editingMemo)) && (
+                  <TimeWheelPicker value={editStartStr} onChange={setEditStartStr} />
+                )}
+                {openTimeWheel === 'end' && editMode === 'range' && !isAutoEnd(editingMemo) && (
+                  <TimeWheelPicker value={editEndStr} onChange={setEditEndStr} />
+                )}
                 {editMode === 'range' && (
                   <label className="block-auto-toggle">
                     <input
@@ -4016,6 +4437,9 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* 온보딩 — 처음 온 사람에게 한 번, 마이페이지에서 다시 보기 가능 */}
+      {showOnboarding && <OnboardingOverlay onClose={() => setShowOnboarding(false)} />}
 
     </div>
   );

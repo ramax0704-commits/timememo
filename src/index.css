@@ -222,6 +222,29 @@ body {
   overflow: hidden;
   border-radius: 12px;
   background-color: transparent;
+  /* 세로 스크롤만 브라우저에 맡긴다. 가로로 미는 건 스와이프 삭제가 받는다 */
+  touch-action: pan-y;
+}
+
+/* 꾹 눌러 순서 옮기는 중 — 들려서 손가락을 따라온다 */
+.memo-swipe-wrapper.dragging {
+  z-index: 20;
+  overflow: visible;
+}
+.memo-swipe-wrapper.dragging .memo-item {
+  opacity: 0.92;
+}
+.memo-swipe-wrapper.dragging .memo-content {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+/* 떨어뜨릴 자리 표시줄 */
+.drop-indicator {
+  height: 3px;
+  border-radius: 2px;
+  background-color: var(--primary-color);
+  margin: 3px 8px 3px 66px;
+  flex-shrink: 0;
 }
 
 .memo-delete-reveal-btn {
@@ -290,29 +313,25 @@ body {
   z-index: 2;
 }
 
+/* 터치/마우스 구분은 미디어쿼리(hover)가 아니라 JS가 body에 붙이는 클래스로 한다.
+   삼성 인터넷 등 일부 안드로이드 브라우저가 (hover: hover)를 '마우스 있음'으로
+   잘못 답해서, 갤럭시에서 스와이프 삭제가 사라지고 탭할 때 PC용 휴지통이 떴다. */
+
 /* 터치 디바이스: 스와이프 버튼 기본값 숨김, 스와이프 시만 표시 */
-@media (hover: none) {
-  .memo-hover-delete-btn { display: none; }
-  .memo-delete-reveal-btn {
-    display: none;
-  }
-  .memo-swipe-wrapper.swiped .memo-delete-reveal-btn {
-    display: flex;
-  }
-}
+body.touch-device .memo-hover-delete-btn { display: none; }
+body.touch-device .memo-delete-reveal-btn { display: none; }
+body.touch-device .memo-swipe-wrapper.swiped .memo-delete-reveal-btn { display: flex; }
 
 /* 마우스 디바이스: 호버 시만 버튼 표시 */
-@media (hover: hover) {
-  .memo-swipe-wrapper:hover .memo-hover-delete-btn {
-    opacity: 1;
-  }
-  .memo-hover-delete-btn:hover {
-    color: #ff3b30;
-    background-color: #fff0ef;
-  }
-  /* 스와이프 삭제 버튼은 웹에서 숨김 */
-  .memo-delete-reveal-btn { display: none; }
+body.mouse-device .memo-swipe-wrapper:hover .memo-hover-delete-btn {
+  opacity: 1;
 }
+body.mouse-device .memo-hover-delete-btn:hover {
+  color: #ff3b30;
+  background-color: #fff0ef;
+}
+/* 스와이프 삭제 버튼은 웹에서 숨김 */
+body.mouse-device .memo-delete-reveal-btn { display: none; }
 
 .memo-time-container {
   display: flex;
@@ -348,15 +367,32 @@ body {
   line-height: 1.5;
   color: var(--text-main);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  flex: 1;
+  /* 카톡처럼 글자 길이만큼만 말풍선이 늘어난다 */
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
   word-break: break-word;
   transition: box-shadow 0.2s;
-  /* 웹 호버 시 우측 버튼 공간 확보 */
-  margin-right: 28px;
 }
 
-@media (hover: none) {
-  .memo-content { margin-right: 0; }
+/* 웹 호버 시 우측 버튼 공간 확보 */
+body.mouse-device .memo-content { max-width: calc(100% - 28px); }
+
+/* 본문 속 링크 — 탭하면 새 탭으로 열린다 (수정 시트는 안 열림) */
+.memo-link {
+  color: var(--primary-color);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+/* 구간 기록의 걸린 시간 (시각 아래 작게) */
+.memo-duration {
+  font-size: 0.66rem;
+  font-weight: 500;
+  color: #a7a9b7;
+  margin-top: 2px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .memo-content:hover {
@@ -553,6 +589,11 @@ body.keyboard-open .input-toolbar { display: flex; }
   cursor: pointer;
   transition: border-color 0.2s, transform 0.15s;
   padding: 0;
+  /* 안에 팔레트 아이콘이 들어간다 — 빈 동그라미면 할 일 체크로 오해받는다 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(70, 70, 95, 0.5);
 }
 .color-trigger-btn:hover {
   border-color: var(--primary-color);
@@ -1132,6 +1173,95 @@ body.keyboard-open .input-toolbar { display: flex; }
   color: #a0a0ac;
   font-size: 0.9rem;
   flex: none;
+}
+
+/* 시간 칸 — 누르면 아래에 휠이 열린다 */
+.block-time-btn {
+  text-align: center;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.block-time-btn.open {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  font-weight: 600;
+}
+.block-time-btn:disabled { cursor: default; }
+
+/* ── 시간 휠 피커 ────────────────────────────────────────────── */
+/* 기기 기본 time 입력 대신 앱이 직접 그린다.
+   iOS든 갤럭시든 똑같이 위아래로 돌려서 고른다. */
+.time-wheel {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  background: #f7f7fa;
+  border-radius: 12px;
+  padding: 4px 8px;
+}
+
+/* 가운데 선택 띠 */
+.time-wheel-band {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 36px;
+  background: #ffffff;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px #e5e5ee;
+}
+
+/* 위아래 흐려지는 그라데이션 */
+.time-wheel::after {
+  content: '';
+  position: absolute;
+  inset: 4px 8px;
+  border-radius: 10px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    #f7f7fa 0%,
+    rgba(247, 247, 250, 0) 28%,
+    rgba(247, 247, 250, 0) 72%,
+    #f7f7fa 100%
+  );
+}
+
+.wheel-col {
+  position: relative;
+  flex: 1;
+  height: 180px; /* 위아래 패딩 72 + 항목 36 — 딱 5칸 보인다 */
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+}
+.wheel-col::-webkit-scrollbar { display: none; }
+
+.wheel-pad {
+  height: 72px;
+  flex-shrink: 0;
+}
+
+.wheel-item {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  scroll-snap-align: center;
+  font-size: 1rem;
+  color: #b0b2c0;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.wheel-item--active {
+  color: var(--text-main);
+  font-weight: 700;
 }
 
 .block-auto-toggle {
@@ -2146,3 +2276,107 @@ body.keyboard-open .input-toolbar { display: flex; }
   height: 1px;
   background-color: #f1f3f5;
 }
+
+/* ── 온보딩 ──────────────────────────────────────────────────── */
+/* 처음 온 사람에게 핵심 사용법을 카드로. 닫으면 다시 안 뜬다. */
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 20, 30, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+  padding: 24px;
+}
+
+.onboarding-card {
+  position: relative;
+  width: 100%;
+  max-width: 340px;
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 40px 24px 24px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.onboarding-skip {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  border: none;
+  background: none;
+  color: #a0a0ac;
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 6px;
+}
+
+.onboarding-emoji {
+  font-size: 3rem;
+  line-height: 1;
+  margin-bottom: 16px;
+}
+
+.onboarding-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0 0 10px;
+  color: var(--text-main);
+}
+
+.onboarding-desc {
+  font-size: 0.875rem;
+  color: #666;
+  line-height: 1.65;
+  margin: 0 0 20px;
+  white-space: pre-line;
+  min-height: 92px; /* 카드 높이가 슬라이드마다 널뛰지 않게 */
+}
+
+.onboarding-dots {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+.onboarding-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e0e0e8;
+  transition: background 0.2s;
+}
+.onboarding-dots span.active { background: var(--primary-color); }
+
+.onboarding-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.onboarding-prev {
+  flex: 1;
+  padding: 12px;
+  border-radius: 12px;
+  border: none;
+  background: #f0f0f5;
+  color: #666;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.onboarding-next {
+  flex: 2;
+  padding: 12px;
+  border-radius: 12px;
+  border: none;
+  background: var(--primary-color);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.onboarding-next:active { background: var(--primary-hover); }
