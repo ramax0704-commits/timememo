@@ -245,8 +245,8 @@ function todoDayLabel(date) {
 // 예전에는 touch 이벤트를 썼는데, 포인터 이벤트로 바꿔서 PC 마우스도 같이 통한다.
 function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, duration, reorder }) {
   const [swiped, setSwiped] = useState(false);
+  // 드래그 중 위치는 App이 자동 스크롤과 함께 DOM에 직접 그린다 (여기선 상태만)
   const [dragging, setDragging] = useState(false);
-  const [dragDy, setDragDy] = useState(0);
   // { x, y, id, mode: 'pending' | 'swipe' | 'scroll' | 'drag', timer }
   const gestureRef = useRef(null);
   // 스와이프·드래그 뒤에 따라오는 click이 수정 시트를 열지 않게 막는다
@@ -272,7 +272,6 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
 
   const endDrag = (commit) => {
     setDragging(false);
-    setDragDy(0);
     reorder?.onEnd(commit);
   };
 
@@ -290,7 +289,7 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
       setSwiped(false);
       setDragging(true);
       navigator.vibrate?.(15);
-      reorder?.onStart(memo);
+      reorder?.onStart(memo, g.y);
     }, 450);
     gestureRef.current = g;
   };
@@ -302,7 +301,6 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
     const dx = e.clientX - g.x;
     const dy = e.clientY - g.y;
     if (g.mode === 'drag') {
-      setDragDy(dy);
       reorder?.onMove(e.clientY);
       return;
     }
@@ -334,10 +332,7 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
   return (
     <div
       className={`memo-swipe-wrapper ${swiped ? 'swiped' : ''}${dragging ? ' dragging' : ''}`}
-      style={{
-        ...(dimmed ? { opacity: 0.45 } : null),
-        ...(dragging ? { transform: `translateY(${dragDy}px)` } : null),
-      }}
+      style={dimmed ? { opacity: 0.45 } : undefined}
       // 채팅창 ↔ 타임블럭을 오갈 때 '보고 있던 시각'을 이 값으로 읽는다
       data-at={memo.recordedAt}
       // 순서 옮기기가 떨어뜨릴 자리를 찾을 때 쓴다
@@ -1168,23 +1163,66 @@ function App() {
   // ── 채팅창 순서 옮기기 (꾹 눌러 드래그) ──────────────────────
   // 채팅은 시간순 정렬이라, 순서를 바꾼다 = 시각을 바꾼다.
   // 떨어뜨린 자리의 앞뒤 기록 시각 사이 한가운데로 옮긴다.
-  const beginMemoReorder = (memo) => {
-    const els = [...(timelineRef.current?.querySelectorAll('.memo-swipe-wrapper[data-id]') || [])]
+  // 드래그 중 기록이 화면 밖(헤더 뒤)으로 사라지면 안 된다.
+  // 손가락이 가장자리에 닿으면 목록을 자동 스크롤하고, 기록은 화면 안에 붙잡아둔다.
+  const REORDER_EDGE = 70;      // 이 안쪽에 손가락이 오면 자동 스크롤
+  const REORDER_PIN = 40;       // 기록이 화면 끝에서 이만큼 안쪽에 고정
+
+  const applyChatDrag = () => {
+    const st = reorderRef.current;
+    const cont = timelineRef.current;
+    if (!st || !cont || !st.el) return;
+    const r = cont.getBoundingClientRect();
+    // 손가락이 컨테이너를 벗어나도 기록은 화면 안에 고정한다
+    const pinnedY = Math.max(r.top + REORDER_PIN, Math.min(r.bottom - REORDER_PIN, st.lastY));
+    // 자동 스크롤로 밀린 만큼도 함께 따라와야 손가락 밑에 머문다
+    const dy = (pinnedY - st.startY) + (cont.scrollTop - st.startScrollTop);
+    st.el.style.transform = `translateY(${dy}px)`;
+    let drop = 'end';
+    for (const el of st.els) {
+      const rr = el.getBoundingClientRect();
+      if (pinnedY < rr.top + rr.height / 2) { drop = el.dataset.id; break; }
+    }
+    setReorderDrop(prev => (prev === drop ? prev : drop));
+  };
+
+  const beginMemoReorder = (memo, startY) => {
+    const cont = timelineRef.current;
+    const els = [...(cont?.querySelectorAll('.memo-swipe-wrapper[data-id]') || [])]
       .filter(el => el.dataset.id !== String(memo.id));
-    reorderRef.current = { memo, els };
+    const el = cont?.querySelector(`.memo-swipe-wrapper[data-id="${memo.id}"]`) || null;
+    const st = {
+      memo, els, el,
+      startY, lastY: startY,
+      startScrollTop: cont?.scrollTop ?? 0,
+      raf: 0,
+    };
+    reorderRef.current = st;
     setDraggingMemoId(memo.id);
     setReorderDrop(null);
+    // 가장자리 자동 스크롤 — 손가락이 안 움직여도 계속 밀려야 하므로 프레임마다 돈다
+    const step = () => {
+      if (reorderRef.current !== st) return;
+      const c = timelineRef.current;
+      if (c) {
+        const r = c.getBoundingClientRect();
+        if (st.lastY < r.top + REORDER_EDGE) {
+          c.scrollTop -= Math.min(14, (r.top + REORDER_EDGE - st.lastY) / 3);
+        } else if (st.lastY > r.bottom - REORDER_EDGE) {
+          c.scrollTop += Math.min(14, (st.lastY - (r.bottom - REORDER_EDGE)) / 3);
+        }
+        applyChatDrag();
+      }
+      st.raf = requestAnimationFrame(step);
+    };
+    st.raf = requestAnimationFrame(step);
   };
 
   const moveMemoReorder = (clientY) => {
     const st = reorderRef.current;
     if (!st) return;
-    let drop = 'end';
-    for (const el of st.els) {
-      const r = el.getBoundingClientRect();
-      if (clientY < r.top + r.height / 2) { drop = el.dataset.id; break; }
-    }
-    setReorderDrop(prev => (prev === drop ? prev : drop));
+    st.lastY = clientY;
+    applyChatDrag();
   };
 
   const endMemoReorder = async (commit) => {
@@ -1193,6 +1231,10 @@ function App() {
     reorderRef.current = null;
     setDraggingMemoId(null);
     setReorderDrop(null);
+    if (st) {
+      cancelAnimationFrame(st.raf);
+      if (st.el) st.el.style.transform = '';
+    }
     if (!commit || !st || drop == null) return;
 
     const ordered = chatMemos.filter(m => m.id !== st.memo.id);
@@ -1222,40 +1264,79 @@ function App() {
     const ok = await writeMemoFields(st.memo.id, { recorded_at: iso }, { recordedAt: iso });
     if (!ok) return;
     track('Memo Reordered', { guest: isGuest });
-    // 옮기기는 아직 안 끝났다 — 휠로 시각을 확인/수정해야 완료다.
-    // 구간 기록은 휠이 '시작 시간'을 다루므로, 구간 길이와
-    // 시작↔기록시각의 간격을 같이 담아둔다.
+    // 옮기기는 아직 안 끝났다 — 시각을 확인/수정해야 완료다.
+    // 구간 기록은 시작·종료를 각각 고칠 수 있게 둘 다 담아둔다.
     const isRange = isRangeMemo(st.memo);
     const before = blockRangeOf(st.memo);
     const after = blockRangeOf(st.memo, { recordedAt: iso });
+    const startStr = hhmm(isRange ? after.start : new Date(iso));
+    const endStr = hhmm(after.end);
     setMoveConfirm({
       memoId: st.memo.id,
       prevIso: st.memo.recordedAt,
       appliedIso: iso,
       isRange,
-      durationMin: Math.round((after.end.getTime() - after.start.getTime()) / 60000),
-      startOffsetMin: isRange ? Math.round((newMs - after.start.getTime()) / 60000) : 0,
-      appliedStartIso: isRange ? after.start.toISOString() : iso,
-      draftStr: hhmm(isRange ? after.start : new Date(iso)),
+      baseIso: isRange ? after.start.toISOString() : iso, // 날짜의 기준
+      draftStart: startStr,
+      draftEnd: endStr,
+      initStart: startStr,
+      initEnd: endStr,
+      wheel: 'start',
       prevLabel: isRange
         ? `${timeLabelOf(before.start)} → ${timeLabelOf(before.end)}`
         : timeLabelOf(st.memo.recordedAt),
     });
   };
 
-  // 확정: 휠에서 고른 시각으로 옮기기를 마친다.
-  // 구간 기록의 휠은 '시작 시간'이다 — 기록 시각은 시작에서 원래 간격만큼 뒤에 둔다.
+  // 확정: 휠에서 고친 시각으로 옮기기를 마친다.
+  // 시작·종료를 손대지 않았으면 드롭 시각 그대로 두고 아무것도 더 쓰지 않는다.
   const confirmMove = async () => {
     const m = moveConfirm;
     if (!m) return;
     setMoveConfirm(null);
-    const [h, mi] = m.draftStr.split(':').map(Number);
-    const start = new Date(m.appliedStartIso);
-    start.setHours(h, mi, 0, 0);
-    const iso = new Date(start.getTime() + (m.startOffsetMin || 0) * 60000).toISOString();
-    if (iso !== m.appliedIso) {
+    const startChanged = m.draftStart !== m.initStart;
+    const endChanged = m.isRange && m.draftEnd !== m.initEnd;
+    if (!startChanged && !endChanged) return;
+
+    const toMin = (s) => { const [h, mi] = s.split(':').map(Number); return h * 60 + mi; };
+    const base = new Date(m.baseIso);
+
+    if (!m.isRange) {
+      const [h, mi] = m.draftStart.split(':').map(Number);
+      base.setHours(h, mi, 0, 0);
+      const iso = base.toISOString();
       await writeMemoFields(m.memoId, { recorded_at: iso }, { recordedAt: iso });
+      return;
     }
+
+    // 구간: 수정 시트의 저장과 같은 규칙 —
+    // 시작·종료를 직접 정했으니 자동 잇기 대신 명시적인 구간으로 굳힌다.
+    const startMin = toMin(m.draftStart);
+    let endMin = toMin(m.draftEnd);
+    if (endMin < startMin) endMin += 1440; // 자정을 넘긴 구간
+    base.setHours(0, startMin, 0, 0);
+    const startMs = base.getTime();
+    const endMs = startMs + (endMin - startMin) * 60000;
+    // 기록 시각(말풍선에 찍히는 시각)은 구간 안으로 끌어온다
+    const ownMs = Math.min(Math.max(new Date(m.appliedIso).getTime(), startMs), endMs);
+    const iso = new Date(ownMs).toISOString();
+    await writeMemoFields(
+      m.memoId,
+      {
+        recorded_at: iso,
+        back_minutes: Math.round((ownMs - startMs) / 60000),
+        end_minutes: Math.round((endMs - ownMs) / 60000),
+        spans_from_prev: false,
+        spans_to_next: false,
+      },
+      {
+        recordedAt: iso,
+        backMinutes: Math.round((ownMs - startMs) / 60000),
+        endMinutes: Math.round((endMs - ownMs) / 60000),
+        spansFromPrev: false,
+        spansToNext: false,
+      },
+    );
   };
 
   // 되돌리기 — 옮기기 전 시각·자리로 복구
@@ -1303,8 +1384,20 @@ function App() {
     badge.textContent = format(new Date(windowStartMs + t * 60000), 'aa h:mm', { locale: ko });
   };
 
+  // 드래그 위치 반영 — 손가락을 화면 안에 붙잡고(pinned), 자동 스크롤만큼 따라온다
+  const applyScheduleDrag = (g) => {
+    const cont = scheduleViewRef.current;
+    if (!cont) return;
+    const r = cont.getBoundingClientRect();
+    const pinnedY = Math.max(r.top + REORDER_PIN, Math.min(r.bottom - REORDER_PIN, g.lastClientY));
+    g.dy = (pinnedY - g.y) + (cont.scrollTop - g.startScrollTop);
+    g.el.style.transform = `translateY(${g.dy}px) scale(0.96)`;
+    updateScheduleDragBadge(g);
+  };
+
   const endScheduleDrag = (g, commit) => {
     clearTimeout(g.timer);
+    cancelAnimationFrame(g.raf);
     if (g.prevent) window.removeEventListener('touchmove', g.prevent);
     g.el.classList.remove('schedule-block--moving');
     g.el.style.transform = '';
@@ -1319,23 +1412,27 @@ function App() {
     writeMemoFields(g.schedule.memo.id, { recorded_at: iso }, { recordedAt: iso }).then((ok) => {
       if (!ok) return;
       track('Memo Reordered', { guest: isGuest, view: 'schedule' });
-      // 옮기기는 아직 안 끝났다 — 휠로 시각을 확인/수정해야 완료다.
-      // 구간 기록은 휠이 '시작 시간'을 다룬다 (블록의 시작·끝은 이미 계산돼 있다).
+      // 옮기기는 아직 안 끝났다 — 시각을 확인/수정해야 완료다.
+      // 구간 기록은 시작·종료를 각각 고칠 수 있다 (블록의 시작·끝은 이미 계산돼 있다).
       const isRange = isRangeMemo(g.schedule.memo);
+      const durationMin = Math.round(g.schedule.endPos - g.schedule.startPos);
       const startBefore = new Date(windowStartMs + g.schedule.startPos * 60000);
       const endBefore = new Date(windowStartMs + g.schedule.endPos * 60000);
       const startAfter = new Date(windowStartMs + g.newStartPos * 60000);
+      const endAfter = new Date(startAfter.getTime() + durationMin * 60000);
+      const startStr = hhmm(isRange ? startAfter : new Date(iso));
+      const endStr = hhmm(endAfter);
       setMoveConfirm({
         memoId: g.schedule.memo.id,
         prevIso: oldIso,
         appliedIso: iso,
         isRange,
-        durationMin: Math.round(g.schedule.endPos - g.schedule.startPos),
-        startOffsetMin: isRange
-          ? Math.round((new Date(oldIso).getTime() - startBefore.getTime()) / 60000)
-          : 0,
-        appliedStartIso: isRange ? startAfter.toISOString() : iso,
-        draftStr: hhmm(isRange ? startAfter : new Date(iso)),
+        baseIso: isRange ? startAfter.toISOString() : iso,
+        draftStart: startStr,
+        draftEnd: endStr,
+        initStart: startStr,
+        initEnd: endStr,
+        wheel: 'start',
         prevLabel: isRange
           ? `${timeLabelOf(startBefore)} → ${timeLabelOf(endBefore)}`
           : timeLabelOf(oldIso),
@@ -1348,19 +1445,36 @@ function App() {
     if (!e.isPrimary) return;
     const el = e.currentTarget;
     const g = {
-      id: e.pointerId, x: e.clientX, y: e.clientY, el, schedule,
+      id: e.pointerId, x: e.clientX, y: e.clientY, lastClientY: e.clientY, el, schedule,
       mode: 'pending', dy: 0, timer: null, prevent: null, newStartPos: null,
+      startScrollTop: scheduleViewRef.current?.scrollTop ?? 0, raf: 0,
     };
     g.timer = setTimeout(() => {
       if (scheduleDragRef.current !== g || g.mode !== 'pending') return;
       g.mode = 'drag';
       scheduleSuppressClickRef.current = true;
       navigator.vibrate?.(15);
-      // '이동 가능 상태'가 눈에 보이게 — 들리고, 파란 테두리가 생기고, 시각 배지가 뜬다
+      // '이동 가능 상태'가 눈에 보이게 — 살짝 줄어들며 들리고, 시각 배지가 뜬다
       el.classList.add('schedule-block--moving');
       g.prevent = (ev) => ev.preventDefault();
       window.addEventListener('touchmove', g.prevent, { passive: false });
-      updateScheduleDragBadge(g);
+      applyScheduleDrag(g);
+      // 가장자리 자동 스크롤 — 위로 쭉 끌면 헤더에 가려지는 대신 판이 넘어간다
+      const step = () => {
+        if (scheduleDragRef.current !== g || g.mode !== 'drag') return;
+        const cont = scheduleViewRef.current;
+        if (cont) {
+          const r = cont.getBoundingClientRect();
+          if (g.lastClientY < r.top + REORDER_EDGE) {
+            cont.scrollTop -= Math.min(14, (r.top + REORDER_EDGE - g.lastClientY) / 3);
+          } else if (g.lastClientY > r.bottom - REORDER_EDGE) {
+            cont.scrollTop += Math.min(14, (g.lastClientY - (r.bottom - REORDER_EDGE)) / 3);
+          }
+          applyScheduleDrag(g);
+        }
+        g.raf = requestAnimationFrame(step);
+      };
+      g.raf = requestAnimationFrame(step);
     }, 450);
     scheduleDragRef.current = g;
   };
@@ -1376,9 +1490,8 @@ function App() {
       return;
     }
     if (g.mode !== 'drag') return;
-    g.dy = dy;
-    g.el.style.transform = `translateY(${dy}px)`;
-    updateScheduleDragBadge(g);
+    g.lastClientY = e.clientY;
+    applyScheduleDrag(g);
   };
 
   const onScheduleBlockPointerUp = (e) => {
@@ -4238,24 +4351,49 @@ function App() {
           <div className="block-sheet move-confirm-sheet" onClick={e => e.stopPropagation()}>
             <div className="block-sheet-handle" />
             <div className="block-sheet-head">
-              <h3>{moveConfirm.isRange ? '시작 시간을 몇 시로 옮길까요?' : '몇 시 기록으로 옮길까요?'}</h3>
+              <h3>{moveConfirm.isRange ? '언제부터 언제까지로 옮길까요?' : '몇 시 기록으로 옮길까요?'}</h3>
             </div>
             {/* 옮기기 전 시각 — 되돌리기를 누르면 여기로 돌아간다 */}
             <p className="move-confirm-prev">기존 · {moveConfirm.prevLabel}</p>
+            {moveConfirm.isRange && (
+              /* 구간은 시작·종료를 각각 고친다 — 누른 칸이 아래 휠에 열린다 */
+              <div className="block-time-row">
+                <button
+                  type="button"
+                  className={`block-input block-time-btn${moveConfirm.wheel === 'start' ? ' open' : ''}`}
+                  onClick={() => setMoveConfirm(m => (m ? { ...m, wheel: 'start' } : m))}
+                >
+                  {timeLabel12(moveConfirm.draftStart)}
+                </button>
+                <span className="block-time-sep">→</span>
+                <button
+                  type="button"
+                  className={`block-input block-time-btn${moveConfirm.wheel === 'end' ? ' open' : ''}`}
+                  onClick={() => setMoveConfirm(m => (m ? { ...m, wheel: 'end' } : m))}
+                >
+                  {timeLabel12(moveConfirm.draftEnd)}
+                </button>
+              </div>
+            )}
             <TimeWheelPicker
-              value={moveConfirm.draftStr}
-              onChange={v => setMoveConfirm(m => (m ? { ...m, draftStr: v } : m))}
+              value={moveConfirm.isRange && moveConfirm.wheel === 'end' ? moveConfirm.draftEnd : moveConfirm.draftStart}
+              onChange={v => setMoveConfirm(m => {
+                if (!m) return m;
+                return m.isRange && m.wheel === 'end' ? { ...m, draftEnd: v } : { ...m, draftStart: v };
+              })}
             />
-            {/* 구간 기록: 휠이 시작 시간이므로, 옮겨질 구간 전체를 미리 보여준다 */}
+            {/* 구간 기록: 옮겨질 구간 전체와 길이. 종료가 시작보다 이르면 다음날로 이어진다 */}
             {moveConfirm.isRange && (() => {
-              const [h, mi] = moveConfirm.draftStr.split(':').map(Number);
-              const s = new Date(moveConfirm.appliedStartIso);
-              s.setHours(h, mi, 0, 0);
-              const e = new Date(s.getTime() + moveConfirm.durationMin * 60000);
-              const dur = formatDuration(moveConfirm.durationMin);
+              const toMin = (s) => { const [h, mi] = s.split(':').map(Number); return h * 60 + mi; };
+              const startMin = toMin(moveConfirm.draftStart);
+              let endMin = toMin(moveConfirm.draftEnd);
+              const crossed = endMin < startMin;
+              if (crossed) endMin += 1440;
+              const dur = formatDuration(endMin - startMin);
               return (
                 <p className="move-confirm-range">
-                  {timeLabelOf(s)} → {timeLabelOf(e)}{dur ? ` · ${dur}` : ''}
+                  {timeLabel12(moveConfirm.draftStart)} → {timeLabel12(moveConfirm.draftEnd)}
+                  {crossed ? ' (다음날)' : ''}{dur ? ` · ${dur}` : ''}
                 </p>
               );
             })()}
