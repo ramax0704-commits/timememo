@@ -241,7 +241,7 @@ function todoDayLabel(date) {
 // 제스처가 셋이라 한 곳에서 조율한다:
 //   짧게 탭 → 수정 시트, 좌우로 밀기 → 삭제 버튼, 꾹 누르기(0.45초) → 순서 옮기기.
 // 예전에는 touch 이벤트를 썼는데, 포인터 이벤트로 바꿔서 PC 마우스도 같이 통한다.
-function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, reorder }) {
+function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, duration, reorder }) {
   const [swiped, setSwiped] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [dragDy, setDragDy] = useState(0);
@@ -389,6 +389,11 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, reord
             </React.Fragment>
           ))}
         </div>
+
+        {/* 구간 기록은 말풍선 뒤에 걸린 시간을 회색으로 살짝 */}
+        {duration != null && formatDuration(duration) && (
+          <span className="memo-duration">{formatDuration(duration)}</span>
+        )}
 
         {/* 웹 호버 삭제 버튼 */}
         <button
@@ -783,6 +788,8 @@ function App() {
   const [draggingMemoId, setDraggingMemoId] = useState(null);
   const [reorderDrop, setReorderDrop] = useState(null); // 이 기록 앞에 놓는다 (id) | 'end' | null
   const reorderRef = useRef(null);
+  // 옮긴 직후 뜨는 토스트 — 자동으로 잡힌 시각을 바로 고치거나 되돌릴 수 있다
+  const [reorderToast, setReorderToast] = useState(null); // { memo, prevIso, timer }
   const [showCalendar, setShowCalendar] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [showScheduleView, setShowScheduleView] = useState(false);
@@ -1151,6 +1158,8 @@ function App() {
   // 채팅은 시간순 정렬이라, 순서를 바꾼다 = 시각을 바꾼다.
   // 떨어뜨린 자리의 앞뒤 기록 시각 사이 한가운데로 옮긴다.
   const beginMemoReorder = (memo) => {
+    // 이전 이동의 토스트가 남아 있으면 정리한다 (되돌릴 대상이 섞이면 안 된다)
+    setReorderToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return null; });
     const els = [...(timelineRef.current?.querySelectorAll('.memo-swipe-wrapper[data-id]') || [])]
       .filter(el => el.dataset.id !== String(memo.id));
     reorderRef.current = { memo, els };
@@ -1202,7 +1211,33 @@ function App() {
 
     const iso = new Date(newMs).toISOString();
     const ok = await writeMemoFields(st.memo.id, { recorded_at: iso }, { recordedAt: iso });
-    if (ok) track('Memo Reordered', { guest: isGuest });
+    if (!ok) return;
+    track('Memo Reordered', { guest: isGuest });
+    // 자동으로 잡힌 시각이 마음에 안 들 수 있다 — 바로 고치거나 되돌릴 길을 띄운다
+    const timer = setTimeout(() => setReorderToast(null), 8000);
+    setReorderToast(prev => {
+      if (prev?.timer) clearTimeout(prev.timer);
+      return { memo: { ...st.memo, recordedAt: iso }, prevIso: st.memo.recordedAt, timer };
+    });
+  };
+
+  // 옮기기 되돌리기 — 원래 시각으로 복구
+  const undoReorder = async () => {
+    const t = reorderToast;
+    if (!t) return;
+    clearTimeout(t.timer);
+    setReorderToast(null);
+    await writeMemoFields(t.memo.id, { recorded_at: t.prevIso }, { recordedAt: t.prevIso });
+  };
+
+  // 옮긴 기록의 시각을 바로 다듬는다 — 수정 시트를 열고 시간 휠까지 펼쳐준다
+  const editReorderTime = () => {
+    const t = reorderToast;
+    if (!t) return;
+    clearTimeout(t.timer);
+    setReorderToast(null);
+    openBlockEditor(t.memo);
+    setOpenTimeWheel('start');
   };
 
   const memoReorder = { onStart: beginMemoReorder, onMove: moveMemoReorder, onEnd: endMemoReorder };
@@ -1261,6 +1296,17 @@ function App() {
 
   // 편집 시트가 블록 구간을 계산할 때 쓰는 기준점 (타임블럭과 같은 판 위에서 재야 한다)
   const dayStartMs = windowStartMs;
+
+  // ── 구간 기록의 걸린 시간 (채팅창 말풍선 뒤 회색 표시용) ──────
+  // 타임블럭이 그리는 구간과 똑같은 규칙으로 계산해야 두 화면의 숫자가 같다.
+  const chatDurations = {};
+  if (timelineMemos.length > 0) {
+    for (const b of buildDayBlocks(timelineMemos, {
+      dayStartMs: windowStartMs, nowMs: nowTime.getTime(), gridMinutes: windowMinutes,
+    })) {
+      if (isRangeMemo(b.memo)) chatDurations[b.memo.id] = b.endPos - b.startPos;
+    }
+  }
 
 
   const dayInWindow = (day) => windowDays.some(d => isSameDay(d, day));
@@ -3649,6 +3695,7 @@ function App() {
                         onDeleteWithUndo={handleDeleteWithUndo}
                         habitKeywords={habitKeywords}
                         dimmed={!isSameDay(new Date(memo.recordedAt), selectedDate)}
+                        duration={chatDurations[memo.id]}
                         reorder={memoReorder}
                       />
                     </React.Fragment>
@@ -4017,6 +4064,15 @@ function App() {
         </div>
       )}
 
+      {/* 꾹 눌러 옮긴 직후: 자동으로 잡힌 시각을 알려주고, 고치거나 되돌릴 수 있게 */}
+      {reorderToast && (
+        <div className="undo-toast reorder-toast">
+          <span>{format(new Date(reorderToast.memo.recordedAt), 'aa h:mm', { locale: ko })}(으)로 옮겼어요</span>
+          <button className="undo-btn" onClick={editReorderTime}>시간 수정</button>
+          <button className="undo-btn" onClick={undoReorder}>되돌리기</button>
+        </div>
+      )}
+
       {/* 할 일 시트 — 화면을 옮기지 않고 아래에서 올라온다 */}
       {showTodoSheet && (
         <div className="todo-backdrop" onClick={() => setShowTodoSheet(false)}>
@@ -4369,15 +4425,6 @@ function App() {
                 {openTimeWheel === 'end' && editMode === 'range' && !isAutoEnd(editingMemo) && (
                   <TimeWheelPicker value={editEndStr} onChange={setEditEndStr} />
                 )}
-                {/* 구간이면 얼마나 걸렸는지를 여기서 보여준다.
-                    채팅창에 넣었더니 기록 시각과 겹쳐 정신없다는 피드백으로 옮겨왔다 */}
-                {editMode === 'range' && editStartStr && editEndStr && (() => {
-                  const toMin = (s) => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
-                  let d = toMin(editEndStr) - toMin(editStartStr);
-                  if (d < 0) d += 1440; // 자정을 넘긴 구간
-                  const label = formatDuration(d);
-                  return label ? <p className="block-duration">걸린 시간 · {label}</p> : null;
-                })()}
                 {editMode === 'range' && (
                   <label className="block-auto-toggle">
                     <input
