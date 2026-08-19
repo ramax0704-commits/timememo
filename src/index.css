@@ -154,7 +154,8 @@ body {
 .timeline {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  /* 좌우는 좁게 — 말풍선이 차지할 폭을 넓힌다 */
+  padding: 20px 10px;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -383,16 +384,6 @@ body.mouse-device .memo-content { max-width: calc(100% - 28px); }
   color: var(--primary-color);
   text-decoration: underline;
   word-break: break-all;
-}
-
-/* 구간 기록의 걸린 시간 (시각 아래 작게) */
-.memo-duration {
-  font-size: 0.66rem;
-  font-weight: 500;
-  color: #a7a9b7;
-  margin-top: 2px;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 
 .memo-content:hover {
@@ -1187,6 +1178,15 @@ body.keyboard-open .input-toolbar { display: flex; }
   font-weight: 600;
 }
 .block-time-btn:disabled { cursor: default; }
+
+/* 수정 시트: 구간의 걸린 시간 */
+.block-duration {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--primary-color);
+  text-align: center;
+}
 
 /* ── 시간 휠 피커 ────────────────────────────────────────────── */
 /* 기기 기본 time 입력 대신 앱이 직접 그린다.

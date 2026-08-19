@@ -241,7 +241,7 @@ function todoDayLabel(date) {
 // 제스처가 셋이라 한 곳에서 조율한다:
 //   짧게 탭 → 수정 시트, 좌우로 밀기 → 삭제 버튼, 꾹 누르기(0.45초) → 순서 옮기기.
 // 예전에는 touch 이벤트를 썼는데, 포인터 이벤트로 바꿔서 PC 마우스도 같이 통한다.
-function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, duration, reorder }) {
+function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, reorder }) {
   const [swiped, setSwiped] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [dragDy, setDragDy] = useState(0);
@@ -375,10 +375,6 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
           title="기록 수정하기"
         >
           <span className="memo-time">{format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}</span>
-          {/* 구간 기록은 얼마나 걸렸는지도 함께 보여준다 */}
-          {duration != null && formatDuration(duration) && (
-            <span className="memo-duration">{formatDuration(duration)}</span>
-          )}
         </div>
         <div
           className="memo-content"
@@ -1266,16 +1262,6 @@ function App() {
   // 편집 시트가 블록 구간을 계산할 때 쓰는 기준점 (타임블럭과 같은 판 위에서 재야 한다)
   const dayStartMs = windowStartMs;
 
-  // ── 구간 기록의 걸린 시간 (채팅창 표시용) ────────────────────
-  // 타임블럭이 그리는 구간과 똑같은 규칙으로 계산해야 두 화면의 숫자가 같다.
-  const chatDurations = {};
-  if (timelineMemos.length > 0) {
-    for (const b of buildDayBlocks(timelineMemos, {
-      dayStartMs: windowStartMs, nowMs: nowTime.getTime(), gridMinutes: windowMinutes,
-    })) {
-      if (isRangeMemo(b.memo)) chatDurations[b.memo.id] = b.endPos - b.startPos;
-    }
-  }
 
   const dayInWindow = (day) => windowDays.some(d => isSameDay(d, day));
 
@@ -3663,7 +3649,6 @@ function App() {
                         onDeleteWithUndo={handleDeleteWithUndo}
                         habitKeywords={habitKeywords}
                         dimmed={!isSameDay(new Date(memo.recordedAt), selectedDate)}
-                        duration={chatDurations[memo.id]}
                         reorder={memoReorder}
                       />
                     </React.Fragment>
@@ -4384,6 +4369,15 @@ function App() {
                 {openTimeWheel === 'end' && editMode === 'range' && !isAutoEnd(editingMemo) && (
                   <TimeWheelPicker value={editEndStr} onChange={setEditEndStr} />
                 )}
+                {/* 구간이면 얼마나 걸렸는지를 여기서 보여준다.
+                    채팅창에 넣었더니 기록 시각과 겹쳐 정신없다는 피드백으로 옮겨왔다 */}
+                {editMode === 'range' && editStartStr && editEndStr && (() => {
+                  const toMin = (s) => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
+                  let d = toMin(editEndStr) - toMin(editStartStr);
+                  if (d < 0) d += 1440; // 자정을 넘긴 구간
+                  const label = formatDuration(d);
+                  return label ? <p className="block-duration">걸린 시간 · {label}</p> : null;
+                })()}
                 {editMode === 'range' && (
                   <label className="block-auto-toggle">
                     <input
