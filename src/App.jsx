@@ -776,6 +776,10 @@ function App() {
   const [editEndStr, setEditEndStr] = useState('');     // HH:mm
   // 'moment' = 한 순간 (시각 하나) | 'range' = 구간 (시작~종료)
   const [editMode, setEditMode] = useState('moment');
+  // 자동 잇기 체크박스도 초안이다 — 저장을 눌러야 반영된다.
+  // (예전엔 누르는 즉시 저장돼서, 배경을 눌러 '취소'해도 이미 바뀌어 있었다)
+  const [editSpansFromPrev, setEditSpansFromPrev] = useState(false);
+  const [editSpansToNext, setEditSpansToNext] = useState(false);
   // 열었을 때의 시각 값. 사용자가 시간을 건드리지 않았으면 저장할 때 시간 관련
   // 필드를 아예 손대지 않는다 (자동으로 이어지던 설정이 조용히 고정값으로 굳는 걸 막는다)
   const [editInitial, setEditInitial] = useState(null);
@@ -2162,6 +2166,8 @@ function App() {
       start: startStr,
       end: hhmm(end),
       mode: range ? 'range' : 'moment',
+      autoStart: isAutoStart(memo),
+      autoEnd: isAutoEnd(memo),
     };
     setEditingMemo(memo);
     setEditContentStr(memo.content);
@@ -2170,6 +2176,8 @@ function App() {
     setEditStartStr(snapshot.start);
     setEditEndStr(snapshot.end);
     setEditMode(snapshot.mode);
+    setEditSpansFromPrev(snapshot.autoStart);
+    setEditSpansToNext(snapshot.autoEnd);
     setEditInitial(snapshot);
     setOpenTimeWheel(null);
   };
@@ -2213,46 +2221,27 @@ function App() {
     return true;
   };
 
-  // '다음 기록까지 자동으로 잇기' 토글 (마지막 기록이면 지금까지).
-  // 종료 시각을 직접 정하는 것과 배타적이라, 켜면 직접 정한 값을 비운다.
-  // '이전 기록부터 자동으로 잇기' 토글.
-  // 시작 시각을 직접 정하는 것과 배타적이라, 켜면 직접 정한 값을 비운다.
-  const toggleSpansFromPrev = async () => {
-    const memo = editingMemo;
-    if (!memo) return;
-    const turningOn = !isAutoStart(memo);
-    const patch = { spansFromPrev: turningOn, backMinutes: 0 };
-    const ok = await writeMemoFields(
-      memo.id,
-      { spans_from_prev: turningOn, back_minutes: 0 },
-      patch,
-    );
-    if (!ok) return;
-    track('Memo Edited', { changed: 'block', block_option: 'spans_from_prev', turned_on: turningOn });
-    // 자동으로 다시 계산된 구간을 입력칸에 반영한다
-    const { start, end } = blockRangeOf(memo, patch);
-    setEditStartStr(hhmm(start));
-    setEditEndStr(hhmm(end));
-    setEditInitial(prev => ({ ...prev, start: hhmm(start), end: hhmm(end) }));
+  // '이전 기록부터 / 다음 기록까지 자동으로 잇기' 토글 — 초안만 바꾼다 (저장해야 반영).
+  // 직접 정한 시각과 배타적이라, 켜면 그 칸은 자동 계산값을 보여주고 잠긴다.
+  const toggleDraftSpansFromPrev = () => {
+    const next = !editSpansFromPrev;
+    setEditSpansFromPrev(next);
+    if (next && editingMemo) {
+      // 켜면 시작이 어떻게 계산될지 미리 보여준다
+      const { start } = blockRangeOf(editingMemo, { spansFromPrev: true, backMinutes: 0 });
+      setEditStartStr(hhmm(start));
+      setOpenTimeWheel(w => (w === 'start' ? null : w));
+    }
   };
 
-  const toggleSpansToNext = async () => {
-    const memo = editingMemo;
-    if (!memo) return;
-    const turningOn = !isAutoEnd(memo);
-    const patch = { spansToNext: turningOn, endMinutes: 0 };
-    const ok = await writeMemoFields(
-      memo.id,
-      { spans_to_next: turningOn, end_minutes: 0 },
-      patch,
-    );
-    if (!ok) return;
-    track('Memo Edited', { changed: 'block', block_option: 'spans_to_next', turned_on: turningOn });
-    // 자동으로 다시 계산된 구간을 입력칸에 반영한다
-    const { start, end } = blockRangeOf(memo, patch);
-    setEditStartStr(hhmm(start));
-    setEditEndStr(hhmm(end));
-    setEditInitial(prev => ({ ...prev, start: hhmm(start), end: hhmm(end) }));
+  const toggleDraftSpansToNext = () => {
+    const next = !editSpansToNext;
+    setEditSpansToNext(next);
+    if (next && editingMemo) {
+      const { end } = blockRangeOf(editingMemo, { spansToNext: true, endMinutes: 0 });
+      setEditEndStr(hhmm(end));
+      setOpenTimeWheel(w => (w === 'end' ? null : w));
+    }
   };
 
   const saveBlockEdit = async () => {
@@ -2267,7 +2256,10 @@ function App() {
     const startChanged = editStartStr !== init.start;
     const endChanged = editEndStr !== init.end;
     const modeChanged = editMode !== init.mode;
-    const timeTouched = dateChanged || startChanged || endChanged || modeChanged;
+    // 자동 잇기 체크박스도 초안이라 저장 시점에 비교한다
+    const autoStartChanged = editMode === 'range' && editSpansFromPrev !== !!init.autoStart;
+    const autoEndChanged = editMode === 'range' && editSpansToNext !== !!init.autoEnd;
+    const timeTouched = dateChanged || startChanged || endChanged || modeChanged || autoStartChanged || autoEndChanged;
     const toMin = (str) => { const [h, m] = str.split(':').map(Number); return h * 60 + m; };
     const canWriteTime = editDateStr && editStartStr && (editMode === 'moment' || editEndStr);
 
@@ -2306,19 +2298,34 @@ function App() {
         }
         // 손댄 쪽만 바꾼다. 시작만 고쳤는데 자동으로 따라가던 종료까지 굳어버리면
         // 사용자가 하지도 않은 결정을 대신 내린 셈이 된다.
-        if (startChanged || ownMoved || modeChanged) {
-          // 직접 정한 시각이 자동 규칙을 이긴다.
-          // 켜둔 채로 두면 이전 기록을 옮길 때 방금 정한 값이 되돌아간다.
-          dbFields.back_minutes = ownMin - startMin;
-          dbFields.spans_from_prev = false;
-          localFields.backMinutes = dbFields.back_minutes;
-          localFields.spansFromPrev = false;
+        if (autoStartChanged || startChanged || ownMoved || modeChanged) {
+          if (editSpansFromPrev) {
+            // 자동 잇기를 켠 채 저장 — 시작은 이전 기록을 따라간다
+            dbFields.spans_from_prev = true;
+            dbFields.back_minutes = 0;
+            localFields.spansFromPrev = true;
+            localFields.backMinutes = 0;
+          } else {
+            // 직접 정한 시각이 자동 규칙을 이긴다.
+            // 켜둔 채로 두면 이전 기록을 옮길 때 방금 정한 값이 되돌아간다.
+            dbFields.back_minutes = ownMin - startMin;
+            dbFields.spans_from_prev = false;
+            localFields.backMinutes = dbFields.back_minutes;
+            localFields.spansFromPrev = false;
+          }
         }
-        if (endChanged || ownMoved || modeChanged) {
-          dbFields.end_minutes = endMin - ownMin;
-          dbFields.spans_to_next = false;
-          localFields.endMinutes = dbFields.end_minutes;
-          localFields.spansToNext = false;
+        if (autoEndChanged || endChanged || ownMoved || modeChanged) {
+          if (editSpansToNext) {
+            dbFields.spans_to_next = true;
+            dbFields.end_minutes = 0;
+            localFields.spansToNext = true;
+            localFields.endMinutes = 0;
+          } else {
+            dbFields.end_minutes = endMin - ownMin;
+            dbFields.spans_to_next = false;
+            localFields.endMinutes = dbFields.end_minutes;
+            localFields.spansToNext = false;
+          }
         }
       }
     }
@@ -4817,7 +4824,7 @@ function App() {
                     className={`block-input block-time-btn${openTimeWheel === 'start' ? ' open' : ''}`}
                     onClick={() => setOpenTimeWheel(w => (w === 'start' ? null : 'start'))}
                     /* 자동으로 잇는 중에는 시작이 이전 기록을 따라가므로 직접 못 고친다 */
-                    disabled={editMode === 'range' && isAutoStart(editingMemo)}
+                    disabled={editMode === 'range' && editSpansFromPrev}
                   >
                     {timeLabel12(editStartStr)}
                   </button>
@@ -4829,25 +4836,25 @@ function App() {
                         className={`block-input block-time-btn${openTimeWheel === 'end' ? ' open' : ''}`}
                         onClick={() => setOpenTimeWheel(w => (w === 'end' ? null : 'end'))}
                         /* 자동으로 잇는 중에는 끝 시각이 다음 기록을 따라가므로 직접 못 고친다 */
-                        disabled={isAutoEnd(editingMemo)}
+                        disabled={editSpansToNext}
                       >
                         {timeLabel12(editEndStr)}
                       </button>
                     </>
                   )}
                 </div>
-                {openTimeWheel === 'start' && !(editMode === 'range' && isAutoStart(editingMemo)) && (
+                {openTimeWheel === 'start' && !(editMode === 'range' && editSpansFromPrev) && (
                   <TimeWheelPicker value={editStartStr} onChange={setEditStartStr} />
                 )}
-                {openTimeWheel === 'end' && editMode === 'range' && !isAutoEnd(editingMemo) && (
+                {openTimeWheel === 'end' && editMode === 'range' && !editSpansToNext && (
                   <TimeWheelPicker value={editEndStr} onChange={setEditEndStr} />
                 )}
                 {editMode === 'range' && (
                   <label className="block-auto-toggle">
                     <input
                       type="checkbox"
-                      checked={isAutoStart(editingMemo)}
-                      onChange={toggleSpansFromPrev}
+                      checked={editSpansFromPrev}
+                      onChange={toggleDraftSpansFromPrev}
                     />
                     <span className="block-auto-toggle-text">
                       <strong>이전 기록부터 이어서 표시</strong>
@@ -4859,8 +4866,8 @@ function App() {
                   <label className="block-auto-toggle">
                     <input
                       type="checkbox"
-                      checked={isAutoEnd(editingMemo)}
-                      onChange={toggleSpansToNext}
+                      checked={editSpansToNext}
+                      onChange={toggleDraftSpansToNext}
                     />
                     <span className="block-auto-toggle-text">
                       <strong>다음 기록까지 자동으로 잇기</strong>
