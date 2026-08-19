@@ -2448,3 +2448,12 @@ body.keyboard-open .input-toolbar { display: flex; }
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+
+/* 오후(12:00~24:00) 배경 — 아주 옅은 회색으로 오전/오후를 은은하게 구분 */
+.schedule-pm-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background-color: rgba(105, 110, 135, 0.045);
+  pointer-events: none;
+}

@@ -3501,6 +3501,18 @@ function App() {
             ))}
           </div>
           <div className="schedule-grid" style={{ height: `${totalPx}px` }}>
+            {/* 오후(12시~자정)에만 아주 옅은 회색을 깔아 오전/오후가 한눈에 구분되게 */}
+            {windowDays.map((_, i) => (
+              <div
+                key={`pm-${i}`}
+                className="schedule-pm-band"
+                aria-hidden="true"
+                style={{
+                  top: `${timeToPx(i * DAY_MINUTES + 720)}px`,
+                  height: `${timeToPx((i + 1) * DAY_MINUTES) - timeToPx(i * DAY_MINUTES + 720)}px`,
+                }}
+              />
+            ))}
             {hours.map(hour => (
               <div key={hour} className="schedule-hour-slot" style={{ top: `${timeToPx(hour * 60)}px` }} />
             ))}
