@@ -16,7 +16,7 @@ import {
   parse
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft, Palette, HelpCircle } from 'lucide-react';
+import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft, Palette, HelpCircle, MessageSquare } from 'lucide-react';
 import { supabase, setRememberMe, getRememberMe } from './supabase';
 import { track, identifyUser, resetUser, markFirstMemo } from './analytics';
 import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
@@ -548,6 +548,75 @@ const ONBOARDING_SLIDES = [
     desc: '할 일을 적어뒀다가 끝나면 기록으로 옮기고,\n먼슬리에서 습관 키워드와 가계부를\n한눈에 볼 수 있어요.',
   },
 ];
+
+// 사용 후기·의견·문의 입력칸. 로그인 화면(비로그인)과 마이페이지(로그인) 공용.
+// feedback 테이블에 저장되고, 읽기 정책이 없어 앱에서는 아무도 못 읽는다 —
+// 내용은 Supabase 대시보드에서만 본다. Mixpanel에는 원칙대로 길이만 보낸다.
+function FeedbackCard({ user }) {
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const submit = async () => {
+    const content = text.trim();
+    if (!content || sending) return;
+    setSending(true);
+    try {
+      const { error } = await supabase.from('feedback').insert({
+        content: content.slice(0, 2000),
+        user_id: user?.id ?? null,
+      });
+      if (error) throw error;
+      track('Feedback Sent', { guest: !user, content_length: content.length });
+      setText('');
+      setSent(true);
+    } catch {
+      alert('전송에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (sent) {
+    return (
+      <p style={{ fontSize: '0.85rem', color: 'var(--primary-color)', textAlign: 'center', margin: '8px 0', lineHeight: 1.5 }}>
+        남겨주셔서 감사합니다. 잘 읽어볼게요 🙂
+        <button
+          type="button"
+          onClick={() => setSent(false)}
+          style={{ display: 'block', margin: '6px auto 0', background: 'none', border: 'none', color: '#999', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}
+        >
+          하나 더 남기기
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <textarea
+        className="input-field"
+        rows={3}
+        maxLength={2000}
+        placeholder={user
+          ? '불편한 점, 바라는 점, 문의 무엇이든 편하게 남겨주세요.'
+          : '불편한 점, 바라는 점, 문의 무엇이든 편하게 남겨주세요.\n답장이 필요하면 이메일 등 연락처를 함께 적어주세요.'}
+        value={text}
+        onChange={e => setText(e.target.value)}
+        style={{ resize: 'none', fontSize: '0.875rem', lineHeight: 1.5 }}
+      />
+      <button
+        type="button"
+        className="btn-save"
+        onClick={submit}
+        disabled={!text.trim() || sending}
+        style={{ width: '100%', opacity: !text.trim() || sending ? 0.5 : 1 }}
+      >
+        {sending ? '보내는 중...' : '의견 보내기'}
+      </button>
+    </div>
+  );
+}
 
 function OnboardingOverlay({ onClose }) {
   const [idx, setIdx] = useState(0);
@@ -3932,6 +4001,14 @@ function App() {
               개인정보처리방침
             </a>
           </p>
+          {/* 비로그인 사용자용 의견·문의 창구 — 마이페이지가 없으니 여기 둔다 */}
+          <div style={{ marginTop: '18px', paddingTop: '18px', borderTop: '1px solid #eee' }}>
+            <p style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: '#555', margin: '0 0 8px' }}>
+              <MessageSquare size={15} style={{ color: 'var(--primary-color)' }} />
+              의견 보내기
+            </p>
+            <FeedbackCard user={null} />
+          </div>
           {/* 체험 중에는 마이페이지를 못 보므로 여기에도 둔다 (지금 어느 코드인지 확인용) */}
           <p className="build-stamp">
             {format(new Date(__BUILD_TIME__), 'yyyy.MM.dd HH:mm')} 배포 · {__BUILD_COMMIT__}
@@ -4250,6 +4327,18 @@ function App() {
                 >
                   사용법 다시 보기
                 </button>
+              </div>
+
+              {/* 의견 보내기 — 내용은 feedback 테이블로, 앱에서는 못 읽음 */}
+              <div className="mypage-card">
+                <div className="card-header-icon">
+                  <MessageSquare size={18} style={{ color: 'var(--primary-color)' }} />
+                  <h3>의견 보내기</h3>
+                </div>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px', lineHeight: 1.5 }}>
+                  써보시면서 느낀 점을 들려주세요. 다음 업데이트에 큰 도움이 됩니다.
+                </p>
+                <FeedbackCard user={currentUser} />
               </div>
 
               {/* Billing Card */}
