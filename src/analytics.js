@@ -8,7 +8,18 @@ const token = import.meta.env.VITE_MIXPANEL_TOKEN;
 
 // 토큰이 없으면 조용히 꺼둔다.
 // Supabase와 달리 분석 도구는 없어도 앱이 돌아가야 하므로 alert를 띄우지 않는다.
-export const analyticsEnabled = Boolean(token);
+// 로컬 개발(npm run dev) 중에는 아예 보내지 않는다 — 개발하며 누른 클릭이
+// 전부 실제 사용자 행동으로 집계돼 지표를 오염시키는 걸 8/20 분석에서 확인했다.
+export const analyticsEnabled = Boolean(token) && !import.meta.env.DEV;
+
+// 내부 계정 (본인 + 테스트용 지인 계정). 이 계정으로 한 번이라도 로그인한 기기는
+// 이후 로그아웃해도 영구히 집계에서 뺀다 (opt-out이 기기 로컬에 저장됨).
+// 실사용자 ~80명 규모에서는 본인 테스트 몇 번이 지표 전체를 흔들기 때문.
+const INTERNAL_USER_IDS = new Set([
+  'a5d8a793-5abe-486c-a5c2-20ecc4eb2c43', // 정혜인 (본인)
+  '9f4963ae-5285-4ff0-b918-4f86c920c6f2', // 미섬촌장 (본인 테스트)
+  '528953af-2986-4d33-9d78-8744e0ed0074', // 우디 (지인 테스트)
+]);
 
 if (analyticsEnabled) {
   mixpanel.init(token, {
@@ -49,6 +60,12 @@ export function track(event, props) {
 export function identifyUser(user) {
   if (!analyticsEnabled || !user?.id) return;
   try {
+    // 내부 계정이면 이 기기를 통째로 집계 제외. identify보다 먼저 해야
+    // 이번 세션 이벤트도 안 나간다.
+    if (INTERNAL_USER_IDS.has(user.id)) {
+      mixpanel.opt_out_tracking();
+      return;
+    }
     mixpanel.identify(user.id);
     // 이메일은 보내지 않는다. 가입일과 로그인 수단만 있으면 코호트 분석은 충분하다.
     mixpanel.people.set({
