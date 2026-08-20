@@ -18,7 +18,6 @@ export const analyticsEnabled = Boolean(token) && !import.meta.env.DEV;
 const INTERNAL_USER_IDS = new Set([
   'a5d8a793-5abe-486c-a5c2-20ecc4eb2c43', // 정혜인 (본인)
   '9f4963ae-5285-4ff0-b918-4f86c920c6f2', // 미섬촌장 (본인 테스트)
-  '528953af-2986-4d33-9d78-8744e0ed0074', // 우디 (지인 테스트)
 ]);
 
 if (analyticsEnabled) {
