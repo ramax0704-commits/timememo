@@ -532,6 +532,16 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 .input-field::placeholder { color: #aaaaaa; }
 
+/* 채팅 입력칸 — 여러 줄로 자라는 textarea */
+.input-field--chat {
+  resize: none;
+  line-height: 1.4;
+  max-height: 110px;
+  overflow-y: auto;
+  font-family: inherit;
+  display: block;
+}
+
 /* 전송 버튼: 누른 채 위/아래로 끌면 이어서 표시 방식이 바뀐다 */
 .send-wrap {
   position: relative;
@@ -688,8 +698,12 @@ body.keyboard-open .input-toolbar { display: flex; }
 .undo-toast {
   position: absolute;
   bottom: calc(var(--tab-height) + 12px);
-  left: 50%;
-  transform: translateX(-50%);
+  /* translateX(-50%) 중앙정렬은 등장 애니메이션(slideUp의 transform)이 덮어써서
+     오른쪽에서 삐걱대며 들어왔다 — 좌우 0 + margin auto로 정렬한다 */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
   background-color: #333;
   color: white;
   padding: 12px 20px;

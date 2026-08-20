@@ -2540,6 +2540,8 @@ function App() {
       spans_to_next: mode === 'next',
     };
     setInputText('');
+    // 여러 줄로 자라 있던 입력칸을 한 줄로 되돌린다
+    if (inputRef.current) inputRef.current.style.height = 'auto';
 
     // 체험 모드: 서버 대신 브라우저에 담는다
     if (isGuest) {
@@ -2760,8 +2762,13 @@ function App() {
   };
 
   const handleKeyDown = (e) => {
-    if (e.nativeEvent.isComposing) return;
+    // 229 = IME가 조합 중에 흘려보내는 키 — 진짜 키입력이 아니다
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) {
+      // 터치 기기의 엔터는 줄바꿈이다 — 전송은 보내기 버튼으로만 (카톡과 같다).
+      // 일부 모바일 키보드가 글이 길어지면 엔터를 멋대로 흘려보내서,
+      // 쓰던 내용이 저절로 등록돼버리는 일이 있었다.
+      if (IS_TOUCH_DEVICE) return;
       e.preventDefault();
       handleAddMemo();
     }
@@ -4377,13 +4384,20 @@ function App() {
             )}
           </div>
 
-          <input
+          {/* 여러 줄을 쓸 수 있는 textarea. 모바일 엔터는 줄바꿈, 전송은 버튼.
+              (PC는 엔터로 저장, Shift+엔터로 줄바꿈) */}
+          <textarea
             ref={inputRef}
-            type="text"
-            className="input-field"
-            placeholder="메모를 입력하세요... (엔터로 저장)"
+            rows={1}
+            className="input-field input-field--chat"
+            placeholder={IS_TOUCH_DEVICE ? '메모를 입력하세요...' : '메모를 입력하세요... (엔터로 저장)'}
             value={inputText}
-            onChange={e => setInputText(e.target.value)}
+            onChange={e => {
+              setInputText(e.target.value);
+              // 줄 수만큼 자라고, 너무 길면 안에서 스크롤
+              e.target.style.height = 'auto';
+              e.target.style.height = `${Math.min(e.target.scrollHeight, 110)}px`;
+            }}
             onKeyDown={handleKeyDown}
             autoFocus={!IS_TOUCH_DEVICE}
           />
