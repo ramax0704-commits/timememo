@@ -12,12 +12,12 @@ const token = import.meta.env.VITE_MIXPANEL_TOKEN;
 // 전부 실제 사용자 행동으로 집계돼 지표를 오염시키는 걸 8/20 분석에서 확인했다.
 export const analyticsEnabled = Boolean(token) && !import.meta.env.DEV;
 
-// 내부 계정 (본인 + 테스트용 지인 계정). 이 계정으로 한 번이라도 로그인한 기기는
+// 테스트 전용 계정. 이 계정으로 한 번이라도 로그인한 기기는
 // 이후 로그아웃해도 영구히 집계에서 뺀다 (opt-out이 기기 로컬에 저장됨).
-// 실사용자 ~80명 규모에서는 본인 테스트 몇 번이 지표 전체를 흔들기 때문.
+// 본인 실사용 계정(ramax)은 사용자 결정으로 집계에 포함한다 — 로컬 개발 오염은
+// 위의 DEV 차단이 막고, 실사용 행동은 진짜 사용으로 보기로 함 (2026-08-20).
 const INTERNAL_USER_IDS = new Set([
-  'a5d8a793-5abe-486c-a5c2-20ecc4eb2c43', // 정혜인 (본인)
-  '9f4963ae-5285-4ff0-b918-4f86c920c6f2', // 미섬촌장 (본인 테스트)
+  '9f4963ae-5285-4ff0-b918-4f86c920c6f2', // 미섬촌장 (테스트 전용)
 ]);
 
 if (analyticsEnabled) {
