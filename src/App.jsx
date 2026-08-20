@@ -3180,6 +3180,9 @@ function App() {
 
   const dateFormatted = format(selectedDate, 'M월 d일 (E)', { locale: ko });
   const headerTitle = isToday(selectedDate) ? `${dateFormatted} - 오늘` : dateFormatted;
+  // '오늘로' 버튼이 떠 있으면 토스트는 그 위로 올라간다 (겹치면 못 누른다)
+  const todayFabVisible = activeView === 'timeline' && !isToday(selectedDate);
+  const toastClass = `undo-toast${todayFabVisible ? ' undo-toast--above-fab' : ''}`;
   const memoGroups = groupMemosByHour(chatMemos);
   const weekStart = startOfWeek(selectedDate);
   const weekTitle = `${format(weekStart, 'M월 d일', { locale: ko })} ~ ${format(endOfWeek(selectedDate), 'M월 d일', { locale: ko })}`;
@@ -3532,15 +3535,15 @@ function App() {
             ))}
           </div>
           <div className="schedule-grid" style={{ height: `${totalPx}px` }}>
-            {/* 오후(12시~자정)에만 아주 옅은 회색을 깔아 오전/오후가 한눈에 구분되게 */}
+            {/* 오전(자정~12시)에만 아주 옅은 회색을 깔아 오전/오후가 한눈에 구분되게 */}
             {windowDays.map((_, i) => (
               <div
-                key={`pm-${i}`}
-                className="schedule-pm-band"
+                key={`am-${i}`}
+                className="schedule-am-band"
                 aria-hidden="true"
                 style={{
-                  top: `${timeToPx(i * DAY_MINUTES + 720)}px`,
-                  height: `${timeToPx((i + 1) * DAY_MINUTES) - timeToPx(i * DAY_MINUTES + 720)}px`,
+                  top: `${timeToPx(i * DAY_MINUTES)}px`,
+                  height: `${timeToPx(i * DAY_MINUTES + 720) - timeToPx(i * DAY_MINUTES)}px`,
                 }}
               />
             ))}
@@ -4299,6 +4302,21 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* 토스트 — '오늘로' 버튼과 같은 기준(콘텐츠 영역) 안에 띄운다.
+            기본 자리는 버튼 자리, 버튼이 떠 있으면 그 위로 (겹치면 못 누른다) */}
+        {undoToast && (
+          <div className={toastClass}>
+            <span>메모가 삭제되었습니다</span>
+            <button className="undo-btn" onClick={handleUndo}>취소</button>
+          </div>
+        )}
+        {moveUndoToast && (
+          <div className={toastClass}>
+            <span>기록을 옮겼어요</span>
+            <button className="undo-btn" onClick={undoMoveAfterConfirm}>되돌리기</button>
+          </div>
+        )}
       </div>
 
       {/* 키보드가 올라와 있을 때만 뜨는 툴바.
@@ -4470,21 +4488,6 @@ function App() {
         </button>
       </nav>
 
-      {/* Undo Toast */}
-      {undoToast && (
-        <div className="undo-toast">
-          <span>메모가 삭제되었습니다</span>
-          <button className="undo-btn" onClick={handleUndo}>취소</button>
-        </div>
-      )}
-
-      {/* 옮기기 확정 직후 — 잠깐 마음 바꿀 수 있는 되돌리기 */}
-      {moveUndoToast && (
-        <div className="undo-toast">
-          <span>기록을 옮겼어요</span>
-          <button className="undo-btn" onClick={undoMoveAfterConfirm}>되돌리기</button>
-        </div>
-      )}
 
       {/* 꾹 눌러 옮긴 직후: 휠로 시각을 확인/수정해야 옮기기가 끝난다.
           바깥을 누르면 시간을 정하지 않겠다는 뜻 — 되돌리기와 같다 */}

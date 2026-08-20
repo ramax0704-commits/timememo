@@ -697,7 +697,8 @@ body.keyboard-open .input-toolbar { display: flex; }
 /* ── Undo Toast ──────────────────────────────────────────────── */
 .undo-toast {
   position: absolute;
-  bottom: calc(var(--tab-height) + 12px);
+  /* 콘텐츠 영역(main-content) 기준 — '오늘로' 버튼과 같은 자리 */
+  bottom: 16px;
   /* translateX(-50%) 중앙정렬은 등장 애니메이션(slideUp의 transform)이 덮어써서
      오른쪽에서 삐걱대며 들어왔다 — 좌우 0 + margin auto로 정렬한다 */
   left: 0;
@@ -1679,6 +1680,11 @@ body.keyboard-open .input-toolbar { display: flex; }
   animation: slideUp 0.3s ease-out;
 }
 
+/* '오늘로' 버튼이 떠 있으면 그 위로 (겹치면 버튼을 못 누른다) */
+.undo-toast--above-fab {
+  bottom: 64px;
+}
+
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(20px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -2464,8 +2470,8 @@ body.keyboard-open .input-toolbar { display: flex; }
   font-variant-numeric: tabular-nums;
 }
 
-/* 오후(12:00~24:00) 배경 — 아주 옅은 회색으로 오전/오후를 은은하게 구분 */
-.schedule-pm-band {
+/* 오전(00:00~12:00) 배경 — 아주 옅은 회색으로 오전/오후를 은은하게 구분 (오후는 흰색) */
+.schedule-am-band {
   position: absolute;
   left: 0;
   right: 0;
