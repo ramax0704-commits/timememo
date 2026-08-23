@@ -3,7 +3,7 @@
 // AI는 여기 없다. 오늘의 모양(리듬 곡선·총 기록 시간·연속 일수), 다음(기록 N일차),
 // 이번 주 리포트는 전부 이 파일의 순수 함수로 만든다. 추정이 아니라 기록에서 그대로
 // 세어 나오는 값이라 첫날 사용자에게도 빈 값이 뜰 일이 없다.
-import { format, isSameDay, addDays, differenceInCalendarDays } from 'date-fns';
+import { format, addDays, differenceInCalendarDays } from 'date-fns';
 
 // AI 회고(시간 배분·회고 글)는 당일 기록이 이 개수부터 만들 수 있다. 그 전엔 계산 블록만.
 export const SUMMARY_MIN_RECORDS = 5;
@@ -23,18 +23,33 @@ export const ACTIVITY_CAP_MIN = 180;
 export const dateKeyOf = (d) => format(d, 'yyyy-MM-dd');
 const DAY_MIN = 24 * 60;
 
+// ── 하루의 경계 = 새벽 2시 ─────────────────────────────────────
+// 자정~01:59에 쓴 기록은 '그 밤'의 끝이지 다음 날의 시작이 아니다. 회고·기록 수·연속 일수·
+// 이번 주는 모두 이 경계로 센다. (타임라인·시간표의 날짜 헤더는 달력 날짜 그대로 — 새벽 1시에
+// 열면 13일이 보이고, 그 기록이 12일 회고에 들어간다는 건 2시 자리의 구분선으로 알린다.)
+export const DAY_START_HOUR = 2;
+export const DAY_START_MIN = DAY_START_HOUR * 60;
+export const reviewDayOf = (d) => new Date(new Date(d).getTime() - DAY_START_MIN * 60000);
+export const reviewKeyOf = (d) => dateKeyOf(reviewDayOf(d));
+// 기록 시각 → 회고 하루 안에서의 분 (02:00 = 0, 다음날 01:59 = 1439)
+export const minuteInReviewDay = (d) => {
+  const t = new Date(d);
+  return (t.getHours() * 60 + t.getMinutes() - DAY_START_MIN + DAY_MIN) % DAY_MIN;
+};
+
 // ── 누적 기록일 / 연속 일수 ───────────────────────────────────
 // 누적 = 기록이 있는 날이 며칠. 하루 빠져도 줄지 않는다.
 export function countRecordDays(memos) {
   const days = new Set();
-  for (const m of memos) days.add(dateKeyOf(new Date(m.recordedAt)));
+  for (const m of memos) days.add(reviewKeyOf(new Date(m.recordedAt)));
   return days.size;
 }
 
 // 연속 = 오늘(오늘 기록이 없으면 어제)부터 거슬러 올라가며 빠짐없이 기록한 날 수.
 export function countStreak(memos, now) {
-  const days = new Set(memos.map(m => dateKeyOf(new Date(m.recordedAt))));
-  let cursor = days.has(dateKeyOf(now)) ? now : addDays(now, -1);
+  const days = new Set(memos.map(m => reviewKeyOf(new Date(m.recordedAt))));
+  const today = reviewDayOf(now);
+  let cursor = days.has(dateKeyOf(today)) ? today : addDays(today, -1);
   let streak = 0;
   while (days.has(dateKeyOf(cursor))) {
     streak += 1;
@@ -79,10 +94,9 @@ export function formatAgo(from, now) {
 // 정확한 칸이 아니라 흐름이고, 하루 전체 위에 놓여야 "내 하루가 어느 쪽에 실려 있나"가 보인다.
 export const CURVE_STEP_MIN = 30;
 export function buildDayCurve(dayMemos) {
-  const times = dayMemos.map(m => {
-    const d = new Date(m.recordedAt);
-    return d.getHours() * 60 + d.getMinutes();
-  });
+  // 곡선의 가로축은 회고 하루(02:00 → 다음날 02:00)다. 자정 넘어 쓴 기록이 왼쪽 끝이 아니라
+  // 오른쪽 끝(하루의 마무리)에 놓인다.
+  const times = dayMemos.map(m => minuteInReviewDay(m.recordedAt));
   const sigma = 75;
   const points = [];
   let max = 0;
@@ -97,7 +111,7 @@ export function buildDayCurve(dayMemos) {
   }
   const norm = max > 0 ? points.map(p => ({ t: p.t, y: p.v / max })) : points.map(p => ({ t: p.t, y: 0 }));
   const peak = max > 0 ? norm.reduce((a, b) => (b.y > a.y ? b : a)) : null;
-  return { points: norm, peakMinute: peak ? peak.t : null, hasData: max > 0 };
+  return { points: norm, peakMinute: peak ? peak.t : null, hasData: max > 0, offsetMin: DAY_START_MIN };
 }
 
 // 기록 시각을 시간대 버킷으로 (이번 주 '몰린 시간대' 계산용)
@@ -133,19 +147,23 @@ export function assignDurations(sortedMemos, now) {
 
 // ── 시간대별 흐름 (오전·점심·오후·저녁) ─────────────────────────
 // AI 없이 기록 시각만으로 나눈다. 각 칸에 기록 수와 대표 기록(첫 기록)을 둔다.
+// from/to는 시각(시). 하루가 새벽 2시에 시작하므로 '밤'(자정~2시)은 맨 뒤다.
 export const DAY_SEGMENTS = [
-  { key: 'night', label: '밤', from: 0, to: 5 },
+  { key: 'dawn', label: '새벽', from: 2, to: 5 },
   { key: 'morning', label: '오전', from: 5, to: 12 },
   { key: 'noon', label: '점심', from: 12, to: 14 },
   { key: 'afternoon', label: '오후', from: 14, to: 18 },
   { key: 'evening', label: '저녁', from: 18, to: 24 },
+  { key: 'night', label: '밤', from: 24, to: 26 },
 ];
 export function buildSegments(sortedMemos, now) {
-  const nowHour = now ? now.getHours() : null;
+  // 회고 하루 안의 분으로 비교한다 (02:00 = 0). 밤 칸(24~26시)은 다음날 0~2시.
+  const toMin = (h) => h * 60 - DAY_START_MIN;
+  const nowMin = now ? minuteInReviewDay(now) : null;
   return DAY_SEGMENTS.map(seg => {
     const items = sortedMemos.filter(m => {
-      const h = new Date(m.recordedAt).getHours();
-      return h >= seg.from && h < seg.to;
+      const t = minuteInReviewDay(m.recordedAt);
+      return t >= toMin(seg.from) && t < toMin(seg.to);
     });
     const cats = groupByCategory(items).filter(g => g.name !== UNCATEGORIZED);
     return {
@@ -154,9 +172,9 @@ export function buildSegments(sortedMemos, now) {
       count: items.length,
       topCategory: cats[0]?.name ?? null,
       // 지금이 이 칸 안이면 '진행 중', 지났으면 '끝', 아직이면 '예정'
-      state: nowHour == null ? 'done' : nowHour >= seg.to ? 'done' : nowHour >= seg.from ? 'now' : 'later',
+      state: nowMin == null ? 'done' : nowMin >= toMin(seg.to) ? 'done' : nowMin >= toMin(seg.from) ? 'now' : 'later',
     };
-  }).filter(seg => seg.key !== 'night' || seg.count > 0); // 밤(0~5시)은 기록 있을 때만
+  }).filter(seg => (seg.key !== 'night' && seg.key !== 'dawn') || seg.count > 0); // 새벽·밤은 기록 있을 때만
 }
 
 // ── 카테고리 집계 ──────────────────────────────────────────────
@@ -206,14 +224,15 @@ export function categoryHints(memos, perCategory = 3) {
 }
 
 // ── 오늘의 모양 + 다음 ────────────────────────────────────────
-export function buildDayFacts(dayMemos, allMemos, now) {
+// now: 오늘이면 현재 시각, 지난 날이면 그 하루의 끝(다음날 01:59). past=true면 '진행 중' 칸이 없다.
+export function buildDayFacts(dayMemos, allMemos, now, { past = false } = {}) {
   const sorted = [...dayMemos].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
   const recordDays = countRecordDays(allMemos);
   const durations = assignDurations(sorted, now);
   const categories = groupByCategory(sorted, durations).filter(g => g.name !== UNCATEGORIZED);
   return {
     durations,
-    segments: buildSegments(sorted, now),
+    segments: buildSegments(sorted, past ? null : now),
     count: sorted.length,
     firstAt: new Date(sorted[0].recordedAt),
     lastAt: new Date(sorted[sorted.length - 1].recordedAt),
@@ -232,10 +251,13 @@ export function buildDayFacts(dayMemos, allMemos, now) {
 // 오늘을 포함한 최근 7일. 달력 주(월~일)로 하면 월요일마다 텅 비어 보인다.
 export function buildWeekFacts(memos, now) {
   const days = [];
+  // 창의 끝은 달력 날짜의 오늘. (새벽 1시여도 오늘은 오늘 — 그 날의 회고가 아직 비어 있을 뿐)
+  const todayKey = dateKeyOf(now);
   for (let i = WEEKLY_DAYS - 1; i >= 0; i--) {
-    const d = addDays(now, -i);
+    const d = addDays(new Date(now.getFullYear(), now.getMonth(), now.getDate()), -i);
+    const key = dateKeyOf(d);
     const items = memos
-      .filter(m => isSameDay(new Date(m.recordedAt), d))
+      .filter(m => reviewKeyOf(new Date(m.recordedAt)) === key)
       .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
     days.push({ date: d, key: dateKeyOf(d), count: items.length, items, spanMinutes: spanMinutes(items) });
   }
@@ -245,7 +267,8 @@ export function buildWeekFacts(memos, now) {
   // 날마다 따로 계산한다 — 어제 마지막 기록이 오늘 첫 기록까지 이어지면 안 된다
   const durations = new Map();
   for (const d of days) {
-    const dayEnd = isSameDay(d.date, now) ? now : new Date(d.date.getFullYear(), d.date.getMonth(), d.date.getDate(), 23, 59);
+    // 하루의 끝은 다음날 01:59 (새벽 2시 경계)
+    const dayEnd = d.key === todayKey ? now : new Date(d.date.getFullYear(), d.date.getMonth(), d.date.getDate() + 1, DAY_START_HOUR - 1, 59);
     for (const [id, min] of assignDurations(d.items, dayEnd)) durations.set(id, min);
   }
   return {

@@ -13,7 +13,7 @@
 import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Sparkles, Lock, Inbox, RefreshCw, X, Plus, Flame } from 'lucide-react';
+import { Sparkles, Lock, Inbox, RefreshCw, X, Plus, Flame, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, WEEKLY_DAYS, UNCATEGORIZED, groupByCategory, formatMinutes,
 } from './daySummary';
@@ -45,10 +45,17 @@ function curvePath(points) {
   return { line: d, area };
 }
 
+const ampmLabel = (h) => {
+  const hh = ((h % 24) + 24) % 24;
+  return hh < 12 ? `오전 ${hh === 0 ? 12 : hh}시` : `오후 ${hh === 12 ? 12 : hh - 12}시`;
+};
+
 export function DayCurve({ curve, now, peakLabel }) {
   if (!curve?.hasData) return null;
   const { line, area } = curvePath(curve.points);
-  const nowMin = now ? now.getHours() * 60 + now.getMinutes() : null;
+  // 가로축은 회고 하루(새벽 2시 → 다음날 새벽 2시). 곡선 좌표도 그 기준이다.
+  const offset = curve.offsetMin ?? 0;
+  const nowMin = now ? (now.getHours() * 60 + now.getMinutes() - offset + 1440) % 1440 : null;
   // 현재 시각의 곡선 높이 (가장 가까운 점)
   let nowPt = null;
   if (nowMin != null) {
@@ -81,11 +88,11 @@ export function DayCurve({ curve, now, peakLabel }) {
           <span className="day-curve-now-dot" style={{ left: `${nowPt.x}%`, top: `${(nowPt.y / CURVE_H) * 100}%` }} />
         )}
         {peakX != null && peakLabel && (
-          <span className={`day-curve-peak${peakX > 70 ? ' day-curve-peak--left' : ''}`} style={{ left: `${peakX}%` }}>{peakLabel}</span>
+          <span className={`day-curve-peak${peakX > 70 ? ' day-curve-peak--left' : peakX < 14 ? ' day-curve-peak--start' : ''}`} style={{ left: `${peakX}%` }}>{peakLabel}</span>
         )}
       </div>
       <div className="day-curve-axis">
-        <span>오전 12시</span><span>오전 6시</span><span>오후 12시</span><span>오후 6시</span>
+        {[0, 6, 12, 18].map(h => <span key={h}>{ampmLabel(h + offset / 60)}</span>)}
       </div>
     </div>
   );
@@ -200,7 +207,7 @@ function SegmentBlock({ segments }) {
           <div key={seg.key} className={`seg-row seg-row--${seg.state}`}>
             <div className="seg-head">
               <span className="seg-label">{seg.label}</span>
-              <span className="seg-range">{String(seg.from).padStart(2, '0')}–{String(seg.to).padStart(2, '0')}시</span>
+              <span className="seg-range">{String(seg.from % 24).padStart(2, '0')}–{String(seg.to % 24).padStart(2, '0')}시</span>
               {seg.state === 'now' && <span className="seg-now">진행 중</span>}
               <span className="seg-count">{seg.count > 0 ? `${seg.count}개` : (seg.state === 'later' ? '' : '기록 없음')}</span>
             </div>
@@ -360,13 +367,14 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
 // ── 오늘의 모양 (블록 1) ──────────────────────────────────────
 // 몰린 시간은 곡선의 꼭대기(가우시안 합의 최대점)로 잡는다. 기록이 한 칸에 몰린 게 아니라
 // 여러 시각에 흩어져 있을 때도 '무게중심'이 보이기 때문이다.
-const peakHourFromCurve = (curve) => (curve?.peakMinute != null ? Math.floor(curve.peakMinute / 60) : null);
+const peakHourFromCurve = (curve) => (curve?.peakMinute != null ? Math.floor(((curve.peakMinute + (curve.offsetMin ?? 0)) % 1440) / 60) : null);
 
-function ShapeBlock({ facts, now }) {
+function ShapeBlock({ facts, now, dayLabel }) {
   const peakHour = peakHourFromCurve(facts.curve);
   const peakLabel = peakHour != null ? `${hourLabel(peakHour)}쯤 가장 많이` : null;
   return (
     <section className="day-summary shape" aria-label="오늘의 모양">
+      {dayLabel && <div className="shape-date">{dayLabel}</div>}
       <div className="shape-top">
         <div className="shape-main">
           <span className="day-summary-stat-label">총 기록 시간</span>
@@ -455,7 +463,7 @@ function WeekView({ week, onViewed }) {
 
 // ── 화면 ──────────────────────────────────────────────────────
 export default function ReviewScreen({
-  facts, todayMemos, week, now, ai, locked, busy, usesLeft, fixedCategories,
+  facts, todayMemos, dayLabel, dateLabel, isToday = true, onPrevDay, onNextDay, week, now, ai, locked, busy, usesLeft, fixedCategories,
   onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline, onEditCategory,
 }) {
   const [mode, setMode] = useState('today'); // 'today' | 'week'
@@ -477,18 +485,38 @@ export default function ReviewScreen({
 
       {mode === 'week' ? (
         <WeekView week={week} onViewed={onWeekViewed} />
-      ) : !facts ? (
-        <div className="review-empty">
-          <Inbox size={44} strokeWidth={1} />
-          <p>
-            오늘 기록이 아직 없어요.<br />
-            타임라인에 한 줄 남기면 여기에 하루의 모양이 쌓여요.
-          </p>
-          <button type="button" className="day-summary-btn" onClick={onGoTimeline}>기록하러 가기</button>
-        </div>
       ) : (
         <>
-          <ShapeBlock facts={facts} now={now} />
+          {/* 날짜 이동 — 지난 날의 회고도 본다. 오늘이 끝이라 다음은 오늘에서 막힌다 */}
+          {dateLabel && (
+            <div className="review-date-nav">
+              <button type="button" className="review-date-btn" onClick={onPrevDay} aria-label="이전 날">
+                <ChevronLeft size={18} />
+              </button>
+              <span className="review-date-label">{dateLabel}</span>
+              <button type="button" className="review-date-btn" onClick={onNextDay} disabled={isToday} aria-label="다음 날">
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          )}
+          {!facts ? (
+            <div className="review-empty">
+              <Inbox size={44} strokeWidth={1} />
+              {isToday ? (
+                <>
+                  <p>
+                    오늘 기록이 아직 없어요.<br />
+                    타임라인에 한 줄 남기면 여기에 하루의 모양이 쌓여요.
+                  </p>
+                  <button type="button" className="day-summary-btn" onClick={onGoTimeline}>기록하러 가기</button>
+                </>
+              ) : (
+                <p>이 날은 기록이 없어요.</p>
+              )}
+            </div>
+          ) : (
+            <>
+          <ShapeBlock facts={facts} now={isToday ? now : null} dayLabel={dayLabel} />
 
           {/* 시간대별 흐름 — AI 없이, 하루 중간에도 볼 수 있는 칸 */}
           <SegmentBlock segments={facts.segments} />
@@ -520,6 +548,8 @@ export default function ReviewScreen({
                 : '주간 리포트가 열렸어요 · 이번 주 탭'}
             </span>
           </footer>
+            </>
+          )}
         </>
       )}
     </div>

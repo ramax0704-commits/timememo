@@ -29,12 +29,40 @@
     .updated, footer { color: #999; }
     a { color: #8fa3ff; }
   }
+  .topbar { margin: 0 0 1.25rem; font-size: .95rem; }
+  .topbar a { text-decoration: none; }
 </style>
+<script>
+  // 가입 동의 시트에서 온 경우(?from=consent) 뒤로/돌아가기는 동의 시트로 복귀한다.
+  // 새 창으로 열렸을 수도 있어 history.back()에 기대지 않고 주소로 돌아간다.
+  (function () {
+    var fromConsent = /[?&]from=consent/.test(location.search);
+    var target = fromConsent ? '/?consent=1' : '/';
+    document.addEventListener('DOMContentLoaded', function () {
+      var links = document.querySelectorAll('a[data-back]');
+      for (var i = 0; i < links.length; i++) {
+        links[i].setAttribute('href', target);
+        links[i].onclick = null;
+        if (!fromConsent) {
+          links[i].addEventListener('click', function (e) {
+            if (history.length > 1) { e.preventDefault(); history.back(); }
+          });
+        }
+      }
+      // 방침 안의 약관 링크 등도 출처를 이어 준다
+      if (fromConsent) {
+        var inner = document.querySelectorAll('a[href="/privacy.html"], a[href="/terms.html"]');
+        for (var j = 0; j < inner.length; j++) inner[j].setAttribute('href', inner[j].getAttribute('href') + '?from=consent');
+      }
+    });
+  })();
+</script>
 </head>
 <body>
 
+<p class="topbar"><a href="/" data-back>← 뒤로</a></p>
 <h1>타임메모 개인정보처리방침</h1>
-<p class="updated">최종 수정일: 2026년 8월 16일</p>
+<p class="updated">최종 수정일: 2026년 8월 25일</p>
 
 <p>타임메모(이하 "서비스")는 이용자가 직접 남긴 기록을 다루는 서비스입니다. 기록은 이용자 본인만 볼 수 있으며, 운영자는 이용자의 기록 내용을 열람하지 않습니다.</p>
 
@@ -44,6 +72,10 @@
   <tr><td>이메일 주소</td><td>구글 로그인 또는 이메일 가입 시</td><td>계정 식별, 로그인</td></tr>
   <tr><td>이용자가 작성한 기록 (메모, 할 일, 습관 키워드, 색상, 기록 시각)</td><td>이용자가 직접 입력</td><td>서비스 제공 (기록 저장 및 표시)</td></tr>
   <tr><td>서비스 이용 기록 (화면 이동, 기능 사용 여부, 접속 시각, 기기·브라우저 종류)</td><td>자동 수집</td><td>어떤 기능이 쓰이는지 파악해 서비스 개선</td></tr>
+      <tr><td>이름, 프로필 사진 (구글 계정 정보)</td><td>구글 로그인 시 구글이 제공</td><td>마이페이지 표시</td></tr>
+      <tr><td>AI 회고 요청 시 당일 기록의 시각과 내용</td><td>이용자가 '회고 만들기'를 누를 때</td><td>AI 회고 생성 (아래 2항의 Anthropic에 전송)</td></tr>
+      <tr><td>의견 보내기로 남긴 내용</td><td>이용자가 직접 입력</td><td>문의 응대, 서비스 개선</td></tr>
+      <tr><td>약관·개인정보 동의 시각</td><td>가입 시</td><td>동의 사실 증빙</td></tr>
 </table>
 
 <div class="note">
@@ -61,8 +93,11 @@
   <tr><td>Vercel</td><td>웹사이트 호스팅</td><td>접속 요청 처리에 필요한 정보</td></tr>
   <tr><td>Google</td><td>구글 로그인</td><td>로그인에 사용한 계정의 이메일 주소</td></tr>
   <tr><td>Mixpanel</td><td>이용 기록 분석</td><td>1항의 "서비스 이용 기록" (기록 내용 제외)</td></tr>
+      <tr><td>Anthropic (미국)</td><td>AI 회고 생성</td><td>이용자가 회고 만들기를 누른 날의 기록 시각·내용. 생성 목적으로만 쓰이며 Anthropic은 API로 받은 데이터를 모델 학습에 쓰지 않습니다.</td></tr>
 </table>
 
+<h2>2-1. 동의</h2>
+<p>구글 로그인으로 가입할 때 이용약관과 이 방침(개인정보 수집·이용, 국외 처리 위탁 포함)에 대한 필수 동의를 받습니다. 동의를 거부하면 계정 없이 기기에만 기록을 남기는 체험 모드로 이용할 수 있으며, 이 경우 기록은 서버에 저장되지 않습니다.</p>
 <h2>3. 보관 기간과 파기</h2>
 <ul>
   <li>이용자의 계정과 기록은 <strong>회원 탈퇴 시 즉시 삭제</strong>되며 복구되지 않습니다.</li>
@@ -92,7 +127,7 @@
 
 <footer>
   이 방침이 변경되면 이 페이지에 수정일과 함께 공지합니다.<br />
-  <a href="/">← 타임메모로 돌아가기</a>
+  <a href="/" data-back>← 타임메모로 돌아가기</a>
 </footer>
 
 </body>

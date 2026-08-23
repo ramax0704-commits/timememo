@@ -52,7 +52,7 @@ export default function Splash({ onGoogle, onGuest }) {
       <div className="splash-body">
         <div className="splash-brand">타임메모</div>
         <h1 className="splash-title">
-          순간의 기록으로<br />하루 기록을 완성해 보세요
+          순간의 기록을 모아 간편하게<br />하루 일기를 작성해보세요
         </h1>
         <p className="splash-desc">지금 하는 일을 한 줄씩 보내면, 하루가 시간 위에 놓이고 회고가 남아요.</p>
         <ChatLoop />

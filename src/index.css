@@ -2835,3 +2835,110 @@ body.keyboard-open .input-toolbar { display: flex; }
   border: none;
 }
 .splash-btn--guest:active { background-color: var(--primary-hover); }
+
+/* ── 하루의 경계(새벽 2시) 표시 ─────────────────────────────── */
+/* 채팅창: 기록 사이 얇은 점선 + 가운데 작은 글씨 */
+.timeline-day-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 4px 10px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  letter-spacing: -0.01em;
+}
+.timeline-day-divider::before,
+.timeline-day-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px dashed var(--border-color);
+}
+.timeline-day-divider span { flex-shrink: 0; }
+/* 회고 탭은 헤더가 없어졌으므로 상태바 자리를 직접 비운다 */
+.review-screen { padding-top: max(env(safe-area-inset-top), 16px); }
+/* 오늘의 모양 맨 위 날짜 */
+.shape-date {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+/* ── 회고 탭 날짜 이동 ──────────────────────────────────────── */
+.review-date-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+.review-date-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+.review-date-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.review-date-btn:active { background-color: #eef0f7; }
+.review-date-btn:disabled { opacity: 0.25; cursor: default; }
+/* 곡선 꼭대기 라벨이 왼쪽 끝에 붙으면 잘리지 않게 */
+.day-curve-peak--start { transform: none; }
+
+/* ── 가입 전 동의 시트 ──────────────────────────────────────── */
+.consent-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 95;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-end;
+}
+.consent-sheet {
+  width: 100%;
+  background: #fff;
+  border-radius: 20px 20px 0 0;
+  padding: 22px 20px max(env(safe-area-inset-bottom), 20px);
+  animation: sheet-up 0.25s ease-out;
+}
+@keyframes sheet-up { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.consent-title { margin: 0 0 6px; font-size: 1.1rem; font-weight: 700; }
+.consent-desc { margin: 0 0 14px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; }
+.consent-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 4px;
+  cursor: pointer;
+  font-size: 0.92rem;
+}
+.consent-row input { position: absolute; opacity: 0; width: 0; height: 0; }
+.consent-check {
+  flex-shrink: 0;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid #cfd3e0;
+  color: transparent;
+  font-size: 0.8rem;
+  display: flex; align-items: center; justify-content: center;
+  margin-top: 1px;
+}
+.consent-row--on .consent-check { background: var(--primary-color); border-color: var(--primary-color); color: #fff; }
+.consent-text { display: block; line-height: 1.45; }
+.consent-text em { font-style: normal; color: var(--primary-color); font-weight: 600; }
+.consent-text a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.consent-sub { display: block; margin-top: 2px; font-size: 0.74rem; color: var(--text-muted); }
+.consent-divider { border-top: 1px solid #eef0f5; margin: 4px 0; }
+.consent-btn { width: 100%; margin-top: 14px; }
+.consent-btn:disabled { opacity: 0.4; }
+.consent-close {
+  display: block; width: 100%; margin-top: 8px; padding: 10px;
+  background: none; border: none; color: #999; font-size: 0.85rem; cursor: pointer;
+}

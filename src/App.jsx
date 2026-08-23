@@ -21,8 +21,8 @@ import { supabase, setRememberMe, getRememberMe } from './supabase';
 import { track, identifyUser, resetUser, markFirstMemo } from './analytics';
 import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
 import {
-  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, FIXED_CATEGORY_FROM_DAY, dateKeyOf, buildDayFacts, buildWeekFacts,
-  toSummaryRecords, countRecordDays, topCategories, categoryHints,
+  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, FIXED_CATEGORY_FROM_DAY, DAY_START_MIN, dateKeyOf, reviewKeyOf,
+  buildDayFacts, buildWeekFacts, toSummaryRecords, countRecordDays, topCategories, categoryHints,
 } from './daySummary';
 import { requestDaySummary, summaryCacheKey, peekSummaryCache } from './summaryAI';
 import ReviewScreen from './ReviewScreen';
@@ -612,6 +612,98 @@ function FeedbackCard({ user }) {
 }
 
 
+// ── 받은 의견 (관리자 전용) ─────────────────────────────────
+// 서버의 admin_list_feedback()가 호출자 이메일을 확인하므로, 여기서의 이메일 비교는
+// "카드를 보여줄지"만 정한다. 다른 계정이 호출해도 빈 목록이 온다.
+const ADMIN_EMAIL = 'ramax0704@gmail.com';
+
+// ── 가입 전 동의 ──────────────────────────────────────────────
+// 구글 로그인은 곧 가입이라, 처음 누를 때 이용약관·개인정보 수집에 동의를 받는다.
+// 동의 시각은 기기(localStorage)에 먼저 남기고, 로그인이 끝나면 settings.consent_at에도 적는다.
+const CONSENT_KEY = 'timememo-consent';
+const CONSENT_VERSION = '2026-08-25';
+// 전문 페이지(약관·방침)는 같은 창에서 열리고, 거기서 돌아올 때 '/?consent=1'로 온다.
+// 앱은 그 표시를 보고 로그인 화면 + 동의 시트를 다시 띄운다 (새 창으로 열려도 동작한다).
+const consentReturnRequested = () => {
+  try { return new URLSearchParams(window.location.search).get('consent') === '1'; } catch { return false; }
+};
+
+function ConsentRow({ checked, onChange, children }) {
+  return (
+    <label className={`consent-row${checked ? ' consent-row--on' : ''}`}>
+      <input type="checkbox" checked={checked} onChange={onChange} />
+      <span className="consent-check" aria-hidden="true">✓</span>
+      <span className="consent-text">{children}</span>
+    </label>
+  );
+}
+
+function ConsentSheet({ onAgree, onClose }) {
+  const [terms, setTerms] = useState(false);
+  const [privacy, setPrivacy] = useState(false);
+  const all = terms && privacy;
+  const toggleAll = () => { const v = !all; setTerms(v); setPrivacy(v); };
+  return (
+    <div className="consent-backdrop" onClick={onClose}>
+      <div className="consent-sheet" role="dialog" aria-label="서비스 이용 동의" onClick={e => e.stopPropagation()}>
+        <h3 className="consent-title">시작하기 전에 동의가 필요해요</h3>
+        <p className="consent-desc">구글 계정으로 로그인하면 타임메모에 가입돼요. 기록은 본인만 볼 수 있어요.</p>
+        <ConsentRow checked={all} onChange={toggleAll}><strong>전체 동의</strong></ConsentRow>
+        <div className="consent-divider" />
+        <ConsentRow checked={terms} onChange={() => setTerms(v => !v)}>
+          <em>[필수]</em> <a href="/terms.html?from=consent" onClick={e => e.stopPropagation()}>이용약관</a> 동의
+        </ConsentRow>
+        <ConsentRow checked={privacy} onChange={() => setPrivacy(v => !v)}>
+          <em>[필수]</em> <a href="/privacy.html?from=consent" onClick={e => e.stopPropagation()}>개인정보 수집·이용</a> 동의
+          <span className="consent-sub">이메일·이름·기록 내용 / 서비스 제공·AI 회고 생성 / 탈퇴 시까지 보관 · 국외(Supabase·Anthropic 등) 처리 포함</span>
+        </ConsentRow>
+        <button type="button" className="btn-save consent-btn" disabled={!all} onClick={onAgree}>
+          동의하고 구글로 계속하기
+        </button>
+        <button type="button" className="consent-close" onClick={onClose}>다음에 할게요</button>
+      </div>
+    </div>
+  );
+}
+
+function AdminFeedbackList() {
+  const [items, setItems] = useState(null); // null = 불러오는 중
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    supabase.rpc('admin_list_feedback').then(({ data, error }) => {
+      if (!alive) return;
+      if (error) { setFailed(true); setItems([]); return; }
+      setItems(data ?? []);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  if (items === null) {
+    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>불러오는 중...</p>;
+  }
+  if (failed) {
+    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>목록을 불러오지 못했어요. (admin_list_feedback 함수가 DB에 있는지 확인)</p>;
+  }
+  if (items.length === 0) {
+    return <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>아직 받은 의견이 없어요.</p>;
+  }
+  return (
+    <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '50vh', overflowY: 'auto' }}>
+      {items.map(f => (
+        <li key={f.id} style={{ padding: '10px 12px', background: 'var(--bg-app)', borderRadius: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.user_email || '비로그인'}</span>
+            <span style={{ flexShrink: 0 }}>{format(new Date(f.created_at), 'M월 d일 HH:mm')}</span>
+          </div>
+          <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{f.content}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // ── 블록 구간 계산 (타임블럭 뷰와 위클리 뷰가 함께 쓴다) ──
 // 기본은 30분짜리 짧은 블록. 자동으로 이어 붙이면 실제보다 오래 한 것처럼 보여
 // 부담을 주기 때문에, 앞뒤로 늘리는 건 기록마다 켜는 선택제다.
@@ -774,7 +866,6 @@ function App() {
   const [selectedColor, setSelectedColor] = useState('default');
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeView, setActiveView] = useState('timeline'); // 'timeline' | 'settings'
-  const [previousView, setPreviousView] = useState('timeline');
 
   // Auth States
   const [currentUser, setCurrentUser] = useState(null);
@@ -814,6 +905,8 @@ function App() {
   });
   const weekViewedRef = useRef(false);
   const [summaryUses, setSummaryUses] = useState(readSummaryUses);
+  const [reviewDayPick, setReviewDayPick] = useState(null); // 회고 탭에서 고른 날 (null=오늘)
+  const [showConsent, setShowConsent] = useState(false); // 가입 전 동의 시트
   // 입력창 질문. 질문형이 동사를 유도해 분류가 잘 되게 한다. 보낼 때마다 다음 질문으로 돈다.
   const [promptIdx, setPromptIdx] = useState(() => Math.floor(Math.random() * INPUT_PROMPTS.length));
   // 이번 세션에 '회고를 만들었다 / 오늘의 모양을 봤다'를 날짜별로 기억 (이벤트 중복 방지)
@@ -1175,7 +1268,12 @@ function App() {
       scrollPositionRef.current = null;
       return;
     }
-    if (memos.length > prevCount) el.scrollTop = el.scrollHeight;
+    if (memos.length > prevCount) {
+      // 바닥 여백(날짜 넘기기용 빈 칸)까지 내려가면 키보드가 열린 좁은 화면에서 기록이 위로 밀려
+      // 띠 밑에 숨는다. 마지막 기록이 바닥에 닿는 자리까지만 내린다.
+      const spacer = el.querySelector('.timeline-bottom-space');
+      el.scrollTop = Math.max(0, el.scrollHeight - (spacer?.offsetHeight ?? 0) - el.clientHeight);
+    }
   }, [memos]);
 
   // ── 모바일 Visual Viewport ───────────────────────────────────
@@ -1222,20 +1320,66 @@ function App() {
   });
   // 채팅창은 고른 날짜 하루만 보여준다. 헤더 날짜와 화면 내용이 어긋나면 안 된다.
   const chatMemos = [...displayedMemos, ...lateNightMemos];
+  // 하루의 경계(새벽 2시)를 채팅창에 한 줄로 표시한다. 경계 앞뒤에 기록이 다 있을 때만.
+  //  - 이 날짜 02:00: 위쪽 0~2시 기록은 전날 회고에 들어간다 → "여기부터 이 날의 하루"
+  //  - 다음날 00:00: 아래쪽 새벽 기록은 이 날 회고에 들어간다 → "다음날 새벽 · 이 날의 하루에 포함"
+  const chatDividers = (() => {
+    const map = new Map();
+    const sorted = [...chatMemos].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+    const dawnEndMs = selectedDayStartMs + DAY_START_MIN * 60000;
+    const nextDayMs = selectedDayStartMs + DAY_MINUTES * 60000;
+    const dayText = format(selectedDate, 'M월 d일');
+    let prev = null;
+    for (const m of sorted) {
+      const t = new Date(m.recordedAt).getTime();
+      if (prev != null) {
+        if (prev < dawnEndMs && t >= dawnEndMs) map.set(m.id, `여기부터 ${dayText}의 하루`);
+        if (prev < nextDayMs && t >= nextDayMs) map.set(m.id, `다음날 새벽 · ${dayText}의 하루에 포함`);
+      }
+      prev = t;
+    }
+    return map;
+  })();
 
   // ── 오늘의 회고 ──────────────────────────────────────────────
   // 대상은 항상 '오늘'이다 (헤더에서 고른 날짜가 아니라). 오늘의 모양(1)과 다음(4)은 여기서
   // 바로 계산하고, 시간 배분(2)·눈에 띈 것(3)은 회고 탭에서 사용자가 버튼을 눌렀을 때만 만든다.
+  // 기록이 어느 날 회고에 들어가는지는 새벽 2시 경계(daySummary.reviewKeyOf)로 정한다.
+  // 자정~01:59 기록은 전날의 끝이라 전날 회고에 들어간다.
+  // '오늘'은 달력 날짜다 (새벽 1시여도 오늘은 24일). 새벽 2시 경계는 "자정~01:59 기록은 전날 회고에
+  // 들어간다"에만 쓴다 — 그래서 새벽 1시의 24일 회고는 비어 있고, ‹로 23일에 가면 방금 쓴 기록이 들어 있다.
   const todayKey = dateKeyOf(nowTime);
+  const todayReviewDate = new Date(nowTime.getFullYear(), nowTime.getMonth(), nowTime.getDate());
+  // 회고 탭에서 보고 있는 날. null = 오늘. 지난 날로 넘기면 그 날의 회고를 본다.
+  // 횟수 제한은 언제나 '오늘' 기준으로 센다 — 지난 날 회고를 만들어도 오늘 횟수가 깎인다.
+  const reviewDay = reviewDayPick ?? todayReviewDate;
+  const reviewKey = dateKeyOf(reviewDay);
+  const reviewIsToday = reviewKey === todayKey;
   const todayMemos = memos
-    .filter(m => isSameDay(new Date(m.recordedAt), nowTime))
+    .filter(m => reviewKeyOf(new Date(m.recordedAt)) === reviewKey)
     .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
-  const todayFacts = todayMemos.length > 0 ? buildDayFacts(todayMemos, memos, nowTime) : null;
+  // 다음날 자정~새벽 2시 기록이 이 하루에 들어가 있을 때만 "어느 날 · 새벽 2시까지"를 적어 준다.
+  // (그런 기록이 없으면 달력 날짜와 같으니 따로 말할 게 없다)
+  const hasDawnTail = todayMemos.some(m => !isSameDay(new Date(m.recordedAt), reviewDay));
+  const todayLabel = hasDawnTail ? `${format(reviewDay, 'M월 d일 (E)', { locale: ko })} · 새벽 2시까지` : null;
+  const reviewDateLabel = reviewIsToday
+    ? `${format(reviewDay, 'M월 d일 (E)', { locale: ko })} · 오늘`
+    : format(reviewDay, 'M월 d일 (E)', { locale: ko });
+  // 지난 날은 그 하루의 끝(다음날 01:59)을 '지금'으로 삼아 마지막 기록의 길이를 잰다
+  const reviewDayEnd = reviewIsToday
+    ? nowTime
+    : new Date(reviewDay.getFullYear(), reviewDay.getMonth(), reviewDay.getDate() + 1, 1, 59);
+  const todayFacts = todayMemos.length > 0 ? buildDayFacts(todayMemos, memos, reviewDayEnd, { past: !reviewIsToday }) : null;
   const weekFacts = buildWeekFacts(memos, nowTime);
   const todayRecords = todayFacts ? toSummaryRecords(todayMemos) : null;
-  const summaryKey = todayRecords ? summaryCacheKey(todayKey, todayRecords, reviewCategories) : null;
+  const summaryKey = todayRecords ? summaryCacheKey(reviewKey, todayRecords, reviewCategories) : null;
   const summaryUsesLeft = Math.max(0, SUMMARY_DAILY_LIMIT - (summaryUses[todayKey] || 0));
   const canGenerate = Boolean(summaryKey) && todayMemos.length >= SUMMARY_MIN_RECORDS && summaryUsesLeft > 0;
+  const goReviewDay = (delta) => {
+    const next = addDays(reviewDay, delta);
+    if (dateKeyOf(next) > todayKey) return;
+    setReviewDayPick(dateKeyOf(next) === todayKey ? null : next);
+  };
 
   // 고정 세트 저장. 로그인이면 settings, 체험이면 기기.
   const saveReviewCategories = useCallback(async (list) => {
@@ -1248,6 +1392,32 @@ function App() {
       updated_at: new Date().toISOString(),
     });
     if (error) console.error('Error saving review categories:', error);
+  }, [currentUser]);
+
+  // 약관·방침 전문을 보고 '/?consent=1'로 돌아온 사람은 동의 시트를 다시 띄운다
+  useEffect(() => {
+    if (authLoading) return;
+    if (!consentReturnRequested()) return;
+    try { window.history.replaceState(null, '', '/'); } catch { /* 무시 */ }
+    if (currentUser) return;
+    const id = setTimeout(() => { setShowLogin(true); setShowConsent(true); }, 0);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading]);
+
+  // 기기에 남긴 동의 시각을 계정에도 적어 둔다 (한 번만). 동의 증빙은 서버에 있어야 한다.
+  useEffect(() => {
+    if (!currentUser) return;
+    let local = null;
+    try { local = JSON.parse(localStorage.getItem(CONSENT_KEY) || 'null'); } catch { /* 무시 */ }
+    if (!local?.at) return;
+    let alive = true;
+    supabase.from('settings').select('consent_at').eq('user_id', currentUser.id).maybeSingle().then(({ data, error }) => {
+      if (!alive || error || data?.consent_at) return;
+      supabase.from('settings').upsert({ user_id: currentUser.id, consent_at: local.at, consent_version: local.version ?? null, updated_at: new Date().toISOString() })
+        .then(({ error: e }) => { if (e) console.error('Error saving consent:', e); });
+    });
+    return () => { alive = false; };
   }, [currentUser]);
 
   // 누적 기록일이 4일에 닿으면 그때까지 많이 쓰인 상위 5개를 고정 세트로 삼는다. 한 번 정하면 안 바꾼다.
@@ -1264,8 +1434,15 @@ function App() {
   const summaryForScreen =
     !summaryAI.key ? { status: 'idle' }
       : summaryAI.key === summaryKey ? summaryAI
-      : (summaryAI.status === 'ok' && summaryAI.key.startsWith(`${todayKey}|`)) ? { ...summaryAI, stale: true }
+      : (summaryAI.status === 'ok' && summaryAI.key.startsWith(`${reviewKey}|`)) ? { ...summaryAI, stale: true }
       : { status: 'idle' };
+
+  // 회고 탭을 나가면 보던 날짜를 오늘로 되돌린다 (다음에 들어올 때 늘 오늘부터)
+  useEffect(() => {
+    if (activeView === 'review') return;
+    const id = setTimeout(() => setReviewDayPick(null), 0);
+    return () => clearTimeout(id);
+  }, [activeView]);
 
   // 앱을 다시 열었을 때: 이미 만들어 둔 오늘 회고가 기기에 있으면 버튼 없이 바로 보여준다
   useEffect(() => {
@@ -1310,7 +1487,7 @@ function App() {
     const key = summaryKey;
     const records = todayRecords;
     const sorted = todayMemos;
-    const regenerate = summaryGeneratedRef.current.has(todayKey);
+    const regenerate = summaryGeneratedRef.current.has(reviewKey);
     const facts = {
       count: todayFacts.count,
       spanMinutes: todayFacts.spanMinutes,
@@ -1322,7 +1499,7 @@ function App() {
     setSummaryAI({ key, status: 'loading', data: null, mock: false });
     try {
       const { data, mock, fromCache } = await requestDaySummary({
-        dateKey: todayKey,
+        dateKey: reviewKey,
         records,
         facts,
         fixedCategories: reviewCategories,
@@ -1345,7 +1522,7 @@ function App() {
         }
       }
       await writeMemoCategories(pairs);
-      summaryGeneratedRef.current.add(todayKey);
+      summaryGeneratedRef.current.add(reviewKey);
       track('summary_generated', {
         memo_count: records.length,
         record_days: countRecordDays(memos),
@@ -2680,6 +2857,18 @@ function App() {
     }
   };
 
+  // 처음 구글 로그인을 누르면 동의부터. 이미 동의한 기기(또는 로그인 상태)는 바로 진행.
+  const requestGoogleSignIn = () => {
+    if (currentUser || localStorage.getItem(CONSENT_KEY)) { handleGoogleSignIn(); return; }
+    track('Consent', { action: 'shown' });
+    setShowConsent(true);
+  };
+  const agreeAndSignIn = () => {
+    try { localStorage.setItem(CONSENT_KEY, JSON.stringify({ at: new Date().toISOString(), version: CONSENT_VERSION })); } catch { /* 무시 */ }
+    track('Consent', { action: 'agreed' });
+    setShowConsent(false);
+    handleGoogleSignIn();
+  };
   const handleGoogleSignIn = async () => {
     setSubmittingAuth(true);
     setAuthError('');
@@ -3742,6 +3931,10 @@ function App() {
     if (authView === 'forgotPassword') {
       return (
         <div className="app-container auth-wrapper">
+        {/* 로그인 화면은 따로 그려지므로 동의 시트도 여기서 한 번 더 */}
+        {showConsent && (
+          <ConsentSheet onAgree={agreeAndSignIn} onClose={() => { track('Consent', { action: 'closed' }); setShowConsent(false); }} />
+        )}
           <div className="auth-card">
             <div className="auth-logo">
               <span className="auth-logo-icon">🔑</span>
@@ -3811,6 +4004,9 @@ function App() {
     );
     return (
       <div className="app-container auth-wrapper">
+        {showConsent && (
+          <ConsentSheet onAgree={agreeAndSignIn} onClose={() => { track('Consent', { action: 'closed' }); setShowConsent(false); }} />
+        )}
         <div className="auth-card">
           <div className="auth-logo">
             <span className="auth-logo-icon">🕒</span>
@@ -3868,7 +4064,7 @@ function App() {
             )}
             {/* 구글은 가입 절차가 따로 없어 로그인/회원가입 양쪽에 둔다 */}
             {showEmailFields && <div className="auth-divider"><span>또는</span></div>}
-            <button type="button" className="google-signin-btn" onClick={handleGoogleSignIn} disabled={submittingAuth}>
+            <button type="button" className="google-signin-btn" onClick={requestGoogleSignIn} disabled={submittingAuth}>
               <svg viewBox="0 0 24 24" width="18" height="18" style={{ marginRight: '10px' }}>
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                 <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -3913,6 +4109,10 @@ function App() {
           </button>
           {/* 처음 들어온 사람이 가입 전에 확인할 수 있어야 해서 로그인 화면에 둔다 */}
           <p style={{ textAlign: 'center', marginTop: '14px', fontSize: '0.8rem', color: '#999' }}>
+            <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: '#999' }}>
+              이용약관
+            </a>
+            <span style={{ margin: '0 8px' }}>·</span>
             <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: '#999' }}>
               개인정보처리방침
             </a>
@@ -3949,7 +4149,7 @@ function App() {
         </div>
       )}
       {/* Header */}
-      {activeView !== 'settings' && (
+      {activeView !== 'settings' && activeView !== 'review' && (
         <header className="header">
           {activeView === 'timeline' && (
             <button
@@ -4100,6 +4300,9 @@ function App() {
                       {draggingMemoId && reorderDrop === String(memo.id) && (
                         <div className="drop-indicator" aria-hidden="true" />
                       )}
+                      {chatDividers.has(memo.id) && (
+                        <div className="timeline-day-divider" aria-hidden="true"><span>{chatDividers.get(memo.id)}</span></div>
+                      )}
                       <MemoItem
                         memo={memo}
                         onEdit={openBlockEditor}
@@ -4126,6 +4329,11 @@ function App() {
           <ReviewScreen
             facts={todayFacts}
             todayMemos={todayMemos}
+            dayLabel={todayLabel}
+            dateLabel={reviewDateLabel}
+            isToday={reviewIsToday}
+            onPrevDay={() => goReviewDay(-1)}
+            onNextDay={() => goReviewDay(1)}
             week={weekFacts}
             now={nowTime}
             ai={tour.active ? tourAI : summaryForScreen}
@@ -4133,7 +4341,7 @@ function App() {
             busy={tour.active ? tour.aiStatus === 'loading' : summaryBusy}
             usesLeft={tour.active ? SUMMARY_DAILY_LIMIT : summaryUsesLeft}
             fixedCategories={reviewCategories}
-            viewKey={todayKey}
+            viewKey={reviewKey}
             onViewed={handleSummaryViewed}
             onWeekViewed={handleWeekViewed}
             onGenerate={tour.active ? tourGenerate : generateSummary}
@@ -4141,39 +4349,12 @@ function App() {
             onGoTimeline={() => setActiveView('timeline')}
             onLoginClick={() => {
               track('Summary Login Click', { memo_count: todayFacts?.count ?? 0 });
-              handleGoogleSignIn();
+              requestGoogleSignIn();
             }}
           />
         ) : (
           /* ── 마이페이지 ── */
           <div style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f5f5f5' }}>
-            {/* 헤더 */}
-            <div style={{
-              backgroundColor: 'white',
-              borderBottom: '1px solid #e5e5e5',
-              padding: '12px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px'
-            }}>
-              <button
-                onClick={() => setActiveView(previousView)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '6px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#999',
-                  fontSize: '1.2rem'
-                }}
-              >
-                ←
-              </button>
-              <h1 style={{ fontSize: '1.1rem', fontWeight: '700', margin: 0, flex: 1 }}>마이페이지</h1>
-            </div>
 
             <div style={{
               maxWidth: '480px',
@@ -4274,6 +4455,17 @@ function App() {
                 </p>
                 <FeedbackCard user={currentUser} />
               </div>
+
+              {/* 받은 의견 — 관리자 계정에서만 보임 (서버 함수도 이메일을 확인함) */}
+              {currentUser?.email === ADMIN_EMAIL && (
+                <div className="mypage-card">
+                  <div className="card-header-icon">
+                    <MessageSquare size={18} style={{ color: 'var(--primary-color)' }} />
+                    <h3>받은 의견</h3>
+                  </div>
+                  <AdminFeedbackList />
+                </div>
+              )}
 
               {/* Billing Card */}
               <div className="mypage-card billing-card">
@@ -4490,7 +4682,6 @@ function App() {
           onClick={() => {
             // 마이페이지는 계정 화면이라 체험 중에는 보여줄 게 없다
             if (isGuest) { setShowLogin(true); return; }
-            setPreviousView(activeView);
             setActiveView('settings');
           }}
         >
@@ -4973,13 +5164,16 @@ function App() {
         </div>
       )}
 
+      {showConsent && (
+        <ConsentSheet onAgree={agreeAndSignIn} onClose={() => { track('Consent', { action: 'closed' }); setShowConsent(false); }} />
+      )}
       {/* 온보딩 — 처음 온 사람에게 한 번, 마이페이지에서 다시 보기 가능 */}
       {showSplash && (
         <Splash
           onGoogle={() => {
             localStorage.setItem(SPLASH_KEY, '1');
             track('Splash', { action: 'google' });
-            handleGoogleSignIn();
+            requestGoogleSignIn();
           }}
           onGuest={() => {
             localStorage.setItem(SPLASH_KEY, '1');
