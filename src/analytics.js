@@ -101,9 +101,45 @@ export function resetUser() {
   }
 }
 
+// ── 마지막 방문 일자 ─────────────────────────────────────────
+// 재방문(특히 '첫 기록 다음날 다시 왔나')을 Mixpanel 밖에서도 셀 수 있게 기기에 남긴다.
+// 날짜만 저장한다 (yyyy-MM-dd, 기기 로컬 기준). 분석이 꺼져 있어도 기록은 해둔다.
+const LAST_VISIT_KEY = 'timememo-last-visit';
+
+function localDateKey(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function noteVisit() {
+  const today = localDateKey(new Date());
+  let last = null;
+  try {
+    last = localStorage.getItem(LAST_VISIT_KEY);
+    localStorage.setItem(LAST_VISIT_KEY, today);
+  } catch {
+    // 저장이 막힌 환경이면 첫 방문처럼 취급한다
+  }
+  let daysSince = null;
+  if (last && /^\d{4}-\d{2}-\d{2}$/.test(last)) {
+    const [y, m, d] = last.split('-').map(Number);
+    const [ty, tm, td] = today.split('-').map(Number);
+    daysSince = Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(y, m - 1, d)) / 86400000);
+  }
+  return {
+    last_visit_date: last,
+    // null = 이 기기에서 처음. 0 = 오늘 이미 왔었음. 1 = 어제 왔음(다음날 재방문).
+    days_since_last_visit: daysSince,
+    is_return_visit: daysSince !== null && daysSince >= 1,
+    is_next_day_return: daysSince === 1,
+  };
+}
+
 // 앱이 한 번 열릴 때마다 1회. '마지막 접속일'과 재방문율은 Mixpanel이 이 이벤트로 계산한다.
+// 여기에 기기 로컬로 센 마지막 방문 일자를 함께 싣는다 (비로그인도 같은 기기면 잡힌다).
+const visit = noteVisit();
 if (analyticsEnabled) {
-  track('App Opened');
+  track('App Opened', visit);
 }
 
 export default mixpanel;

@@ -16,10 +16,17 @@ import {
   parse
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft, Palette, HelpCircle, MessageSquare } from 'lucide-react';
+import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft, Palette, HelpCircle, MessageSquare, Sparkles } from 'lucide-react';
 import { supabase, setRememberMe, getRememberMe } from './supabase';
 import { track, identifyUser, resetUser, markFirstMemo } from './analytics';
 import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
+import {
+  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, FIXED_CATEGORY_FROM_DAY, dateKeyOf, buildDayFacts, buildWeekFacts,
+  toSummaryRecords, countRecordDays, topCategories, categoryHints,
+} from './daySummary';
+import { requestDaySummary, summaryCacheKey, peekSummaryCache } from './summaryAI';
+import ReviewScreen from './ReviewScreen';
+import DayShapeStrip from './DayShapeStrip';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
 function rowToMemo(row) {
@@ -36,6 +43,8 @@ function rowToMemo(row) {
     backMinutes: row.back_minutes ?? 0,
     // 종료 시각을 직접 고쳤을 때 '기록 시각에서 몇 분 후'인지. spansToNext보다 우선한다
     endMinutes: row.end_minutes ?? 0,
+    // 회고에서 붙는 활동 카테고리. null = 미분류. 본문은 건드리지 않는다.
+    category: row.category ?? null,
   };
 }
 
@@ -139,36 +148,6 @@ function formatMoneyShort(n) {
 }
 
 // ── 날짜별 먼슬리 집계 ─────────────────────────────────────────
-function buildMonthlyData(memos, habitKeywords) {
-  const result = {}; // key: 'YYYY-MM-DD'
-
-  memos.forEach(memo => {
-    const dateKey = format(new Date(memo.recordedAt), 'yyyy-MM-dd');
-    if (!result[dateKey]) result[dateKey] = { income: 0, expense: 0, habits: [] };
-
-    // 가계부
-    const fin = parseFinance(memo.content);
-    if (fin) {
-      if (fin.type === 'income') result[dateKey].income += fin.amount;
-      else result[dateKey].expense += fin.amount;
-    }
-
-    // 습관 키워드 (보관된 키워드는 종료일 이전 기록에만 적용)
-    habitKeywords.forEach(kwObj => {
-      if (
-        kwObj?.name &&
-        memo.content.includes(kwObj.name) &&
-        (!kwObj.endedAt || dateKey < kwObj.endedAt) &&
-        !result[dateKey].habits.find(h => h.name === kwObj.name)
-      ) {
-        result[dateKey].habits.push(kwObj);
-      }
-    });
-  });
-
-  return result;
-}
-
 // ── 걸린 시간 표기 ───────────────────────────────────────────
 // '1시간 30분'은 말풍선 안에 넣기엔 길고, '1:30'은 기록 시각과 헷갈린다.
 // 짧으면서 시각과 안 헷갈리는 '1h 30m' 꼴을 쓴다.
@@ -673,6 +652,21 @@ const isStandaloneApp = () =>
 // 권하는 꼴이라, 몇 줄 써서 아까워질 때쯤 알려준다.
 const SAVE_NOTICE_AFTER = 3;
 const SAVE_NOTICE_KEY = 'timememo-save-notice-dismissed';
+// 체험 모드의 고정 카테고리 세트 (로그인하면 settings.review_categories로)
+const REVIEW_CATEGORIES_KEY = 'timememo-review-categories';
+// 오늘 AI 회고를 몇 번 만들었는지 ({ 'yyyy-MM-dd': n }). 호출마다 비용이 나가므로 하루 횟수를 막는다.
+// 기기 로컬이라 완벽한 잠금은 아니다 — 진짜 결제 연동을 하면 서버에서 세야 한다.
+const SUMMARY_USES_KEY = 'timememo-summary-uses';
+function readSummaryUses() {
+  try {
+    const obj = JSON.parse(localStorage.getItem(SUMMARY_USES_KEY) || '{}');
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch {
+    return {};
+  }
+}
+// 입력창 플레이스홀더. 입력 필드를 나누지 않고 질문만 돌린다 — 입력 마찰은 이 서비스의 가장 큰 리스크다.
+const INPUT_PROMPTS = ['지금 뭐 하고 있어요?', '방금 뭐 끝냈어요?', '지금 어디서 뭐 해요?'];
 
 // 타임블럭은 날짜를 끊지 않고 이어서 스크롤한다.
 // 한 번에 그려두는 날짜 수 — 이보다 멀리 가려면 헤더 화살표나 달력을 쓴다.
@@ -802,7 +796,7 @@ function App() {
   const [inputText, setInputText] = useState('');
   const [selectedColor, setSelectedColor] = useState('default');
   const [showColorPicker, setShowColorPicker] = useState(false);
-  const [activeView, setActiveView] = useState('timeline'); // 'timeline' | 'monthly' | 'settings'
+  const [activeView, setActiveView] = useState('timeline'); // 'timeline' | 'settings'
   const [previousView, setPreviousView] = useState('timeline');
 
   // Auth States
@@ -826,6 +820,28 @@ function App() {
   const [migratingGuest, setMigratingGuest] = useState(false);
   // 체험 모드 = 로그인 안 한 상태. 기록은 브라우저에만 담긴다.
   const isGuest = !currentUser;
+
+  // ── 오늘의 회고(AI) 상태 ───────────────────────────────────
+  // key = 날짜 + 당일 기록 내용의 해시. 기록이 늘거나 바뀌면 키가 달라져 '이후 기록이 추가됨'을 안다.
+  const [summaryAI, setSummaryAI] = useState({ key: null, status: 'idle', data: null, mock: false });
+  const [summaryBusy, setSummaryBusy] = useState(false);
+  // 4일차부터 고정되는 사용자 카테고리 세트. 로그인은 settings.review_categories, 체험은 기기에.
+  const [reviewCategories, setReviewCategories] = useState(() => {
+    try {
+      const raw = localStorage.getItem(REVIEW_CATEGORIES_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.filter(c => typeof c === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const weekViewedRef = useRef(false);
+  const [summaryUses, setSummaryUses] = useState(readSummaryUses);
+  // 입력창 질문. 질문형이 동사를 유도해 분류가 잘 되게 한다. 보낼 때마다 다음 질문으로 돈다.
+  const [promptIdx, setPromptIdx] = useState(() => Math.floor(Math.random() * INPUT_PROMPTS.length));
+  // 이번 세션에 '회고를 만들었다 / 오늘의 모양을 봤다'를 날짜별로 기억 (이벤트 중복 방지)
+  const summaryGeneratedRef = useRef(new Set());
+  const summaryViewedRef = useRef(new Set());
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotEmailSent, setForgotEmailSent] = useState(false);
@@ -907,8 +923,6 @@ function App() {
   const timelineRef = useRef(null);
   const inputRef = useRef(null);
   const scrollPositionRef = useRef(null);
-  const [isCalendarScrolling, setIsCalendarScrolling] = useState(false);
-  const calendarScrollTimeoutRef = useRef(null);
 
   // ── 온보딩: 처음 온 사람(체험, 기록 0)에게 한 번만 ───────────
   // 기존 계정 사용자에게는 자동으로 띄우지 않는다 — 마이페이지에서 다시 볼 수 있다.
@@ -938,15 +952,6 @@ function App() {
     const interval = setInterval(() => setNowTime(new Date()), 60000);
     return () => clearInterval(interval);
   }, []);
-
-  // 위클리는 스크롤이 없어(7일 × 하루 전체가 한 화면) 자동 스크롤/터치 처리도 필요 없다
-
-  // ── 먼슬리는 항상 달력부터 보이게 (스크롤 위치가 남아 기록 목록이 먼저 보이던 문제) ─
-  const monthlyRef = useRef(null);
-  useEffect(() => {
-    if (activeView !== 'monthly' || !monthlyRef.current) return;
-    monthlyRef.current.scrollTop = 0;
-  }, [activeView]);
 
   // 타임블럭 스크롤러 — 자리 잡기는 아래 자동 스크롤 effect가 맡는다
   const scheduleViewRef = useRef(null);
@@ -1030,10 +1035,6 @@ function App() {
   useEffect(() => {
     // 로그인 화면을 보고 있는 동안은 세지 않는다 (앱 화면을 본 게 아니다)
     if (showLogin) return;
-    // 위클리·먼슬리는 트래킹하지 않는다. 지금 보려는 건 타임라인이 어떻게 쓰이는지다.
-    // previous_screen에도 안 남기려고 lastScreenRef까지 건드리지 않고 그냥 나간다
-    // (그래서 타임라인 → 위클리 → 타임라인은 같은 화면에 머문 것으로 취급된다)
-    if (activeView === 'weekly' || activeView === 'monthly') return;
     const screen =
       activeView === 'timeline'
         ? (showScheduleView ? 'timeline_schedule' : 'timeline_chat')
@@ -1106,6 +1107,7 @@ function App() {
         spans_from_prev: r.spans_from_prev ?? false,
         spans_to_next: r.spans_to_next ?? false,
         back_minutes: r.back_minutes ?? 0,
+        category: r.category ?? null,
       }));
       const { error } = await supabase.from('memos').insert(payload);
       if (error) {
@@ -1133,7 +1135,7 @@ function App() {
     const loadSettings = async () => {
       const { data, error } = await supabase
         .from('settings')
-        .select('habit_keywords')
+        .select('habit_keywords, review_categories')
         .eq('user_id', userId)
         .maybeSingle();
       if (error) {
@@ -1142,6 +1144,9 @@ function App() {
       }
       if (data?.habit_keywords && Array.isArray(data.habit_keywords)) {
         setHabitKeywords(data.habit_keywords);
+      }
+      if (Array.isArray(data?.review_categories)) {
+        setReviewCategories(data.review_categories.filter(c => typeof c === 'string'));
       }
     };
     loadSettings();
@@ -1247,6 +1252,167 @@ function App() {
   });
   // 채팅창은 고른 날짜 하루만 보여준다. 헤더 날짜와 화면 내용이 어긋나면 안 된다.
   const chatMemos = [...displayedMemos, ...lateNightMemos];
+
+  // ── 오늘의 회고 ──────────────────────────────────────────────
+  // 대상은 항상 '오늘'이다 (헤더에서 고른 날짜가 아니라). 오늘의 모양(1)과 다음(4)은 여기서
+  // 바로 계산하고, 시간 배분(2)·눈에 띈 것(3)은 회고 탭에서 사용자가 버튼을 눌렀을 때만 만든다.
+  const todayKey = dateKeyOf(nowTime);
+  const todayMemos = memos
+    .filter(m => isSameDay(new Date(m.recordedAt), nowTime))
+    .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+  const todayFacts = todayMemos.length > 0 ? buildDayFacts(todayMemos, memos, nowTime) : null;
+  const weekFacts = buildWeekFacts(memos, nowTime);
+  const todayRecords = todayFacts ? toSummaryRecords(todayMemos) : null;
+  const summaryKey = todayRecords ? summaryCacheKey(todayKey, todayRecords, reviewCategories) : null;
+  const summaryUsesLeft = Math.max(0, SUMMARY_DAILY_LIMIT - (summaryUses[todayKey] || 0));
+  const canGenerate = Boolean(summaryKey) && todayMemos.length >= SUMMARY_MIN_RECORDS && summaryUsesLeft > 0;
+
+  // 고정 세트 저장. 로그인이면 settings, 체험이면 기기.
+  const saveReviewCategories = useCallback(async (list) => {
+    setReviewCategories(list);
+    try { localStorage.setItem(REVIEW_CATEGORIES_KEY, JSON.stringify(list)); } catch { /* 무시 */ }
+    if (!currentUser) return;
+    const { error } = await supabase.from('settings').upsert({
+      user_id: currentUser.id,
+      review_categories: list,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) console.error('Error saving review categories:', error);
+  }, [currentUser]);
+
+  // 누적 기록일이 4일에 닿으면 그때까지 많이 쓰인 상위 5개를 고정 세트로 삼는다. 한 번 정하면 안 바꾼다.
+  useEffect(() => {
+    if (reviewCategories.length > 0) return;
+    if (countRecordDays(memos) < FIXED_CATEGORY_FROM_DAY) return;
+    const top = topCategories(memos);
+    if (top.length === 0) return;
+    const id = setTimeout(() => { saveReviewCategories(top); track('Categories Fixed', { count: top.length }); }, 0);
+    return () => clearTimeout(id);
+  }, [memos, reviewCategories.length, saveReviewCategories]);
+
+  // 회고 탭에 넘길 AI 상태. 같은 키면 그대로, 오늘 것인데 키가 달라졌으면 '이후 기록 추가됨'으로 표시.
+  const summaryForScreen =
+    !summaryAI.key ? { status: 'idle' }
+      : summaryAI.key === summaryKey ? summaryAI
+      : (summaryAI.status === 'ok' && summaryAI.key.startsWith(`${todayKey}|`)) ? { ...summaryAI, stale: true }
+      : { status: 'idle' };
+
+  // 앱을 다시 열었을 때: 이미 만들어 둔 오늘 회고가 기기에 있으면 버튼 없이 바로 보여준다
+  useEffect(() => {
+    if (activeView !== 'review' || !summaryKey || isGuest) return;
+    const cached = peekSummaryCache(summaryKey);
+    if (!cached) return;
+    const id = setTimeout(() => {
+      setSummaryAI(prev => (prev.key === summaryKey ? prev : { key: summaryKey, status: 'ok', ...cached }));
+    }, 0);
+    return () => clearTimeout(id);
+  }, [activeView, summaryKey, isGuest]);
+
+  // 기록 하나의 카테고리를 바꿔 저장한다 (체험이면 기기, 아니면 서버). 본문은 건드리지 않는다.
+  const writeMemoCategories = async (pairs) => {
+    if (pairs.length === 0) return;
+    const byId = new Map(pairs.map(([memo, name]) => [memo.id, name]));
+    setMemos(prev => prev.map(m => (byId.has(m.id) ? { ...m, category: byId.get(m.id) } : m)));
+    if (isGuest) {
+      saveGuestRows(loadGuestRows().map(r => (byId.has(r.id) ? { ...r, category: byId.get(r.id) } : r)));
+      return;
+    }
+    const results = await Promise.all(
+      pairs.map(([memo, name]) => supabase.from('memos').update({ category: name }).eq('id', memo.id))
+    );
+    results.forEach(({ error }) => { if (error) console.error('Error saving category:', error); });
+  };
+
+  // 사용자가 직접 고친 분류. 다음 AI 분류에 힌트로 들어간다.
+  const handleEditCategory = (memo, name) => {
+    const known = new Set([...reviewCategories, ...memos.map(m => m.category).filter(Boolean)]);
+    track('category_edited', {
+      had_category: Boolean(memo.category),
+      to_uncategorized: name === null,
+      is_new_name: name !== null && !known.has(name),
+      guest: isGuest,
+    });
+    writeMemoCategories([[memo, name]]);
+  };
+
+  const generateSummary = async () => {
+    if (!canGenerate || isGuest || summaryBusy) return;
+    const key = summaryKey;
+    const records = todayRecords;
+    const sorted = todayMemos;
+    const regenerate = summaryGeneratedRef.current.has(todayKey);
+    const facts = {
+      count: todayFacts.count,
+      spanMinutes: todayFacts.spanMinutes,
+      peakHour: todayFacts.peak?.hour ?? null,
+      streak: todayFacts.streak,
+      recordDays: todayFacts.recordDays,
+    };
+    setSummaryBusy(true);
+    setSummaryAI({ key, status: 'loading', data: null, mock: false });
+    try {
+      const { data, mock, fromCache } = await requestDaySummary({
+        dateKey: todayKey,
+        records,
+        facts,
+        fixedCategories: reviewCategories,
+        // 고정 세트가 없을 때만 힌트를 준다 (있으면 그 이름에만 매핑해야 한다)
+        knownCategories: reviewCategories.length ? [] : categoryHints(memos),
+      });
+      setSummaryAI({ key, status: 'ok', data, mock });
+      // 실제로 AI를 부른 경우에만 오늘 횟수를 깎는다 (캐시 히트·샘플은 비용이 없다)
+      if (!fromCache && !mock) {
+        const next = { [todayKey]: (summaryUses[todayKey] || 0) + 1 };
+        setSummaryUses(next);
+        try { localStorage.setItem(SUMMARY_USES_KEY, JSON.stringify(next)); } catch { /* 무시 */ }
+      }
+      // AI 분류를 기록에 붙인다. 이미 카테고리가 있는 기록(사용자가 고친 것 포함)은 건드리지 않는다.
+      const pairs = [];
+      for (const c of data.categories) {
+        for (const idx of c.recordIndexes) {
+          const memo = sorted[idx];
+          if (memo && !memo.category) pairs.push([memo, c.name]);
+        }
+      }
+      await writeMemoCategories(pairs);
+      summaryGeneratedRef.current.add(todayKey);
+      track('summary_generated', {
+        memo_count: records.length,
+        record_days: countRecordDays(memos),
+        hour: new Date().getHours(),
+        categories: data.categories.length,
+        classified: pairs.length,
+        unclassified: sorted.filter(m => !m.category).length - pairs.length,
+        has_flow: data.thoughtFlow.length > 0,
+        loops: data.loops.length,
+        energy_words: data.energyWords.up.length + data.energyWords.down.length,
+        fixed_set: reviewCategories.length > 0,
+        mock,
+        from_cache: fromCache,
+        regenerate,
+        uses_left: fromCache || mock ? summaryUsesLeft : summaryUsesLeft - 1,
+      });
+    } catch (e) {
+      console.error('오늘 회고 실패:', e);
+      setSummaryAI({ key, status: 'failed', data: null, mock: false });
+      track('Summary AI', { status: 'failed', memo_count: records.length });
+    } finally {
+      setSummaryBusy(false);
+    }
+  };
+
+  // 회고 탭에서 오늘의 모양을 실제로 본 시점 — 날짜별로 세션에 한 번
+  const handleSummaryViewed = useCallback((dayKey) => {
+    if (summaryViewedRef.current.has(dayKey)) return;
+    summaryViewedRef.current.add(dayKey);
+    track('summary_viewed', { guest: isGuest, day: dayKey, memo_count: todayMemos.length });
+  }, [isGuest, todayMemos.length]);
+
+  const handleWeekViewed = useCallback(() => {
+    if (weekViewedRef.current) return;
+    weekViewedRef.current = true;
+    track('Weekly Report Viewed', { guest: isGuest, active_days: weekFacts.activeDays, total: weekFacts.total });
+  }, [isGuest, weekFacts.activeDays, weekFacts.total]);
 
   // ── 채팅창 순서 옮기기 (꾹 눌러 드래그) ──────────────────────
   // 채팅은 시간순 정렬이라, 순서를 바꾼다 = 시각을 바꾼다.
@@ -2022,8 +2188,6 @@ function App() {
     paintHeaderDay(idx, 0);
   });
 
-  const monthlyData = buildMonthlyData(memos, habitKeywords);
-
   // 메모 내용/날짜에 적용되는 습관 키워드 찾기 (종료된 키워드는 종료일 이전 기록에만 적용)
   const habitMatchFor = (content, iso) => {
     const dateKey = format(new Date(iso), 'yyyy-MM-dd');
@@ -2609,6 +2773,7 @@ function App() {
       spans_to_next: mode === 'next',
     };
     setInputText('');
+    setPromptIdx(i => (i + 1) % INPUT_PROMPTS.length);
     // 여러 줄로 자라 있던 입력칸을 한 줄로 되돌린다
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
@@ -2652,7 +2817,13 @@ function App() {
     // 이벤트에 달면 로그인 여부와 상관없이 다 잡히고, guest 속성으로 나눠 볼 수 있다.
     // memos는 그 사람의 전체 기록이고 이 시점엔 아직 새 기록이 안 들어가 있다.
     const isFirstMemo = memos.length === 0;
+    // 요약 카드를 실제로 본 뒤에 남긴 기록인지. 카드가 다음 기록을 부르는지 보려는 값이다.
+    const afterSummary = summaryViewedRef.current.has(dateKeyOf(selectedDate));
+    if (afterSummary) {
+      track('record_created_after_summary', { guest: isGuest, memo_count_before: memos.length, source: extra?.source ?? 'direct' });
+    }
     track('Memo Created', {
+      after_summary: afterSummary,
       // 로그인 전 체험 중에 쓴 것인지. 체험만 하고 떠나는 비율을 보려면 필요하다
       guest: isGuest,
       is_first_memo: isFirstMemo,
@@ -2908,17 +3079,6 @@ function App() {
     setShowKeywordModal(false);
   };
 
-  // ── 달력 스크롤 핸들러 ──────────────────────────────────────────
-  const handleCalendarScroll = () => {
-    setIsCalendarScrolling(true);
-    if (calendarScrollTimeoutRef.current) {
-      clearTimeout(calendarScrollTimeoutRef.current);
-    }
-    calendarScrollTimeoutRef.current = setTimeout(() => {
-      setIsCalendarScrolling(false);
-    }, 200);
-  };
-
   // ── 전역 touchmove 리스너: 스크롤 중 모든 터치 상태 초기화 ──────────
   useEffect(() => {
     const clearTouchState = (e) => {
@@ -2932,14 +3092,6 @@ function App() {
       }
       // 포커스를 body로 강제 이동
       document.body.focus();
-
-      setIsCalendarScrolling(true);
-      if (calendarScrollTimeoutRef.current) {
-        clearTimeout(calendarScrollTimeoutRef.current);
-      }
-      calendarScrollTimeoutRef.current = setTimeout(() => {
-        setIsCalendarScrolling(false);
-      }, 200);
     };
 
     window.addEventListener('touchmove', clearTouchState, { passive: true });
@@ -3042,365 +3194,12 @@ function App() {
   };
 
   // ── 먼슬리 뷰 렌더 ───────────────────────────────────────────
-  const renderMonthlyView = () => {
-    const monthStart = startOfMonth(currentMonth);
-    const monthEnd = endOfMonth(monthStart);
-    const startDate = startOfWeek(monthStart);
-    const endDate = endOfWeek(monthEnd);
-    const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
-
-    const rows = [];
-    let days = [];
-    let day = startDate;
-
-    while (day <= endDate) {
-      for (let i = 0; i < 7; i++) {
-        const cloneDay = day;
-        const isCurrentMonth = isSameMonth(day, monthStart);
-        const isSelected = isSameDay(day, selectedDate);
-        const isDayToday = isToday(day);
-        const dateKey = format(day, 'yyyy-MM-dd');
-        const dayData = monthlyData[dateKey];
-
-        const createTouchHandler = () => {
-          let touchState = { startX: 0, startY: 0, isScrolling: false, target: null };
-          return {
-            onTouchStart: (e) => {
-              touchState.startX = e.touches[0].clientX;
-              touchState.startY = e.touches[0].clientY;
-              touchState.isScrolling = false;
-              touchState.target = e.currentTarget;
-            },
-            onTouchMove: (e) => {
-              const dx = Math.abs(e.touches[0].clientX - touchState.startX);
-              const dy = Math.abs(e.touches[0].clientY - touchState.startY);
-              if (dx > 5 || dy > 5) {
-                touchState.isScrolling = true;
-                if (touchState.target) {
-                  touchState.target.classList.add('touch-scroll-active');
-                  setTimeout(() => {
-                    if (touchState.target) {
-                      touchState.target.classList.remove('touch-scroll-active');
-                      touchState.target = null;
-                    }
-                  }, 0);
-                }
-              }
-            },
-            onTouchEnd: (e) => {
-              // goToDay를 써야 타임블럭이 깔아둔 창까지 그 날짜로 옮겨간다.
-              // setSelectedDate만 하면 화면이 보는 날짜와 창이 어긋나서,
-              // 타임라인으로 넘어가 살짝만 스크롤해도 창 안의 날짜로 튕긴다.
-              if (!touchState.isScrolling && isCurrentMonth) {
-                goToDay(cloneDay);
-              }
-            }
-          };
-        };
-
-        const handlers = createTouchHandler();
-
-        days.push(
-          <div
-            key={day.toISOString()}
-            className={`monthly-cell ${!isCurrentMonth ? 'monthly-cell-disabled' : ''} ${isDayToday ? 'monthly-cell-today' : ''} ${isSelected && isCurrentMonth ? 'monthly-cell-selected' : ''}`}
-            tabIndex={-1}
-            onClick={(e) => {
-              if (isCurrentMonth) {
-                goToDay(cloneDay);
-              }
-            }}
-            onTouchStart={handlers.onTouchStart}
-            onTouchMove={handlers.onTouchMove}
-            onTouchEnd={handlers.onTouchEnd}
-          >
-            <span className="monthly-cell-date">{format(day, 'd')}</span>
-            {isCurrentMonth && dayData && (
-              <div className="monthly-cell-data">
-                {dayData.habits.map(h => {
-                  const textColors = { purple: '#6b21a8', blue: '#1e40af', green: '#15803d', pink: '#be185d', orange: '#9a3412' };
-                  return (
-                    <span key={h.name} className="monthly-habit" style={{ backgroundColor: `var(--habit-${h.color})`, color: textColors[h.color] || '#000' }}>{h.name}</span>
-                  );
-                })}
-                {(dayData.income > 0 || dayData.expense > 0) && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', marginTop: 'auto' }}>
-                    {dayData.income > 0 && (
-                      <span className="monthly-income">+{dayData.income.toLocaleString()}</span>
-                    )}
-                    {dayData.expense > 0 && (
-                      <span className="monthly-expense">-{dayData.expense.toLocaleString()}</span>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-        day = addDays(day, 1);
-      }
-      rows.push(<div className="monthly-row" key={day.toISOString()}>{days}</div>);
-      days = [];
-    }
-
-    // 월간 합계
-    const monthKey = format(currentMonth, 'yyyy-MM');
-    let totalIncome = 0, totalExpense = 0;
-    Object.entries(monthlyData).forEach(([dateKey, data]) => {
-      if (dateKey.startsWith(monthKey)) {
-        totalIncome += data.income;
-        totalExpense += data.expense;
-      }
-    });
-
-    // mp-no-track = Mixpanel autocapture가 이 안의 클릭을 줍지 않는다 (먼슬리는 트래킹 안 함)
-    return (
-      <div className="monthly-view mp-no-track">
-        {/* 먼슬리 헤더 */}
-        <div className="monthly-nav">
-          <button className="cal-btn" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}><ChevronLeft size={20} /></button>
-          <span className="monthly-nav-title">{format(currentMonth, 'yyyy년 M월', { locale: ko })}</span>
-          <button className="cal-btn" onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}><ChevronRight size={20} /></button>
-        </div>
-
-        {/* 요일 헤더 */}
-        <div className="monthly-weekdays">
-          {weekDays.map(w => <div key={w} className="monthly-weekday">{w}</div>)}
-        </div>
-
-        {/* 달력 */}
-        <div className="monthly-grid">{rows}</div>
-
-        {/* 선택한 날짜의 기록 (하단 패널) */}
-        <div className="monthly-day-panel">
-          {/* 날짜는 왼쪽, 수입/지출은 같은 줄 오른쪽 */}
-          <div className="monthly-day-panel-head">
-            <span className="monthly-day-panel-title">{format(selectedDate, 'M월 d일 (E)', { locale: ko })}</span>
-            {(() => {
-              const d = monthlyData[format(selectedDate, 'yyyy-MM-dd')];
-              if (!d || (d.income <= 0 && d.expense <= 0)) return null;
-              return (
-                <span className="monthly-day-panel-money">
-                  {d.income > 0 && <span className="monthly-income">+{d.income.toLocaleString()}</span>}
-                  {d.expense > 0 && <span className="monthly-expense">-{d.expense.toLocaleString()}</span>}
-                </span>
-              );
-            })()}
-          </div>
-          {(() => {
-            const dateKey = format(selectedDate, 'yyyy-MM-dd');
-            const dayData = monthlyData[dateKey];
-            const textColors = { purple: '#6b21a8', blue: '#1e40af', green: '#15803d', pink: '#be185d', orange: '#9a3412' };
-            return (
-              <>
-                {dayData && dayData.habits.length > 0 && (
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
-                    {dayData.habits.map(h => (
-                      <span
-                        key={h.name}
-                        style={{
-                          backgroundColor: `var(--habit-${h.color})`,
-                          color: textColors[h.color] || '#000',
-                          padding: '3px 10px',
-                          borderRadius: '10px',
-                          fontSize: '0.75rem',
-                          fontWeight: '600'
-                        }}
-                      >
-                        {h.name}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {displayedMemos.length === 0 ? (
-                  <div style={{ textAlign: 'center', color: '#aaa', fontSize: '0.85rem', padding: '16px 0' }}>
-                    이 날짜에 기록된 내용이 없습니다.
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {displayedMemos.map(memo => {
-                      const habitMatch = (memo.color || 'default') === 'default' ? habitMatchFor(memo.content, memo.recordedAt) : null;
-                      const bg = habitMatch
-                        ? `var(--habit-${habitMatch.color})`
-                        : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#f9f9fb');
-                      return (
-                        <div
-                          key={memo.id}
-                          style={{ backgroundColor: bg, padding: '8px 12px', borderRadius: '8px', fontSize: '0.85rem', lineHeight: 1.4, cursor: 'pointer' }}
-                          onClick={() => openBlockEditor(memo)}
-                          title="기록 수정"
-                        >
-                          <span style={{ fontSize: '0.7rem', color: '#999', marginRight: '8px' }}>
-                            {format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}
-                          </span>
-                          {memo.content}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            );
-          })()}
-        </div>
-      </div>
-    );
-  };
-
   const dateFormatted = format(selectedDate, 'M월 d일 (E)', { locale: ko });
   const headerTitle = isToday(selectedDate) ? `${dateFormatted} - 오늘` : dateFormatted;
   // '오늘로' 버튼이 떠 있으면 토스트는 그 위로 올라간다 (겹치면 못 누른다)
   const todayFabVisible = activeView === 'timeline' && !isToday(selectedDate);
   const toastClass = `undo-toast${todayFabVisible ? ' undo-toast--above-fab' : ''}`;
   const memoGroups = groupMemosByHour(chatMemos);
-  const weekStart = startOfWeek(selectedDate);
-  const weekTitle = `${format(weekStart, 'M월 d일', { locale: ko })} ~ ${format(endOfWeek(selectedDate), 'M월 d일', { locale: ko })}`;
-
-  // ── 위클리 뷰 렌더 (한 주의 '모양'을 보는 곳) ────────────────
-  // 글자를 읽는 곳이 아니라 리듬을 보는 곳이다. 색 띠만 그리므로 하루 칸이 좁아도 되고,
-  // 7일 × 하루 전체가 스크롤 없이 한 화면에 들어간다. 내용이 궁금하면 탭해서 그 날로 간다.
-  const WEEKLY_GRID_MINUTES = 26 * 60; // 다음날 새벽 02:00까지
-
-  const renderWeeklyView = () => {
-    const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-
-    // 기록이 있는 시간대만 보여준다 (새벽 빈 구간을 매번 볼 이유가 없다)
-    let minPos = 7 * 60;
-    let maxPos = 23 * 60;
-    for (const m of memos) {
-      for (const day of days) {
-        const ds = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
-        const p = (new Date(m.recordedAt).getTime() - ds) / 60000;
-        if (p >= 0 && p < WEEKLY_GRID_MINUTES) {
-          minPos = Math.min(minPos, Math.floor(p / 60) * 60);
-          maxPos = Math.max(maxPos, Math.ceil(p / 60) * 60);
-        }
-      }
-    }
-    const rangeStart = Math.max(0, minPos - 60);
-    const rangeEnd = Math.min(WEEKLY_GRID_MINUTES, maxPos + 60);
-    const rangeMin = Math.max(60, rangeEnd - rangeStart);
-    const pct = (pos) => ((pos - rangeStart) / rangeMin) * 100;
-    // 눈금은 2시간마다 (칸이 좁아 매시간은 빽빽하다)
-    const labelHours = [];
-    for (let h = Math.ceil(rangeStart / 120) * 2; h * 60 <= rangeEnd; h += 2) labelHours.push(h);
-
-    // mp-no-track = Mixpanel autocapture가 이 안의 클릭을 줍지 않는다 (위클리는 트래킹 안 함)
-    return (
-      <div className="weekly-container mp-no-track">
-        <div className="weekly-board">
-          {/* 좌측 시간 눈금 */}
-          <div className="weekly-hours-col">
-            <div className="weekly-day-header weekly-corner" />
-            <div className="weekly-hours-track">
-              {labelHours.map(h => (
-                <div
-                  key={h}
-                  className="weekly-hour-label"
-                  style={{ top: `${pct(h * 60)}%`, opacity: h >= 24 ? 0.4 : undefined }}
-                >
-                  {(h % 24).toString().padStart(2, '0')}시
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {days.map(day => {
-            const isDayToday = isToday(day);
-            const dayStartTime = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
-            const posOf = (iso) => (new Date(iso).getTime() - dayStartTime) / 60000;
-            const nowInDay = (nowTime.getTime() - dayStartTime) / 60000;
-
-            // 해당 날짜 00:00 ~ 다음날 02:00 사이의 메모 (다음날 새벽은 흐리게)
-            const windowMemos = memos
-              .filter(m => { const p = posOf(m.recordedAt); return p >= 0 && p < WEEKLY_GRID_MINUTES; })
-              .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
-
-            // 스케줄 뷰와 똑같은 규칙으로 구간을 만든다
-            const blocks = buildDayBlocks(windowMemos, {
-              dayStartMs: dayStartTime,
-              nowMs: nowTime.getTime(),
-              gridMinutes: WEEKLY_GRID_MINUTES,
-              clampDawn: true, // 하루가 한 칸이라 새벽에서 끊어야 한다
-            });
-
-            // 겹치는 띠는 좌우로 나눈다 (글자가 없으므로 좁아도 읽힌다)
-            const ordered = [...blocks].sort((a, b) => a.startPos - b.startPos || a.endPos - b.endPos);
-            let group = [];
-            let groupEnd = -Infinity;
-            const closeGroup = () => {
-              if (!group.length) return;
-              const colEnds = [];
-              for (const s of group) {
-                let ci = colEnds.findIndex(end => end <= s.startPos);
-                if (ci === -1) { ci = colEnds.length; colEnds.push(s.endPos); }
-                else colEnds[ci] = s.endPos;
-                s.col = ci;
-              }
-              for (const s of group) s.colCount = colEnds.length;
-              group = [];
-            };
-            for (const s of ordered) {
-              if (s.startPos >= groupEnd) { closeGroup(); groupEnd = s.endPos; }
-              else groupEnd = Math.max(groupEnd, s.endPos);
-              group.push(s);
-            }
-            closeGroup();
-
-            return (
-              <div
-                key={day.toISOString()}
-                className={`weekly-day-col ${isDayToday ? 'weekly-day-today' : ''}`}
-                onClick={() => { goToDay(day); setActiveView('timeline'); setShowScheduleView(true); }}
-                title={`${format(day, 'M월 d일', { locale: ko })} 자세히 보기`}
-              >
-                <div className="weekly-day-header">
-                  <span className="weekly-day-date">{format(day, 'd')}</span>
-                  <span className="weekly-day-name">{format(day, 'E', { locale: ko })}</span>
-                </div>
-                <div className={`weekly-day-grid ${isDayToday ? 'weekly-day-grid-today' : ''}`}>
-                  {labelHours.map(h => (
-                    <div key={h} className="weekly-hour-line" style={{ top: `${pct(h * 60)}%` }} />
-                  ))}
-                  {isDayToday && nowInDay >= rangeStart && nowInDay <= rangeEnd && (
-                    <div className="weekly-now-line" style={{ top: `${pct(nowInDay)}%` }} />
-                  )}
-                  {blocks.map(b => {
-                    const memo = b.memo;
-                    const habitMatch = (memo.color || 'default') === 'default' ? habitMatchFor(memo.content, memo.recordedAt) : null;
-                    const bg = habitMatch
-                      ? `var(--habit-${habitMatch.color})`
-                      : (COLOR_PALETTE.find(c => c.id === (memo.color || 'default'))?.bg || '#ececf2');
-                    const border = habitMatch
-                      ? (HABIT_BORDER[habitMatch.color] || '#d8d8e4')
-                      : (COLOR_BORDER[memo.color || 'default'] || '#d8d8e4');
-                    const colCount = b.colCount || 1;
-                    const col = b.col || 0;
-                    return (
-                      <div
-                        key={memo.id}
-                        className="weekly-band"
-                        style={{
-                          top: `${pct(b.startPos)}%`,
-                          height: `${Math.max(0, pct(b.endPos) - pct(b.startPos))}%`,
-                          left: `${(col / colCount) * 100}%`,
-                          width: `calc(${100 / colCount}% - 1px)`,
-                          backgroundColor: bg,
-                          borderColor: border,
-                          opacity: b.isCarry ? 0.45 : 1,
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
   // ── 타임블럭 뷰 렌더 ──
   // 날짜별로 판을 새로 그리지 않고, 창에 잡힌 며칠을 하나의 시간 축에 이어서 그린다.
   // 그래서 23:50에 시작해 01:20에 끝난 기록이 자정에서 끊기지 않는다.
@@ -4035,18 +3834,27 @@ function App() {
       {/* Header */}
       {activeView !== 'settings' && (
         <header className="header">
-          {(activeView === 'timeline' || activeView === 'weekly') && (
+          {activeView === 'timeline' && (
             <button
               className="header-nav-btn"
-              onClick={() => goToDay(addDays(selectedDate, activeView === 'weekly' ? -7 : -1))}
-              title={activeView === 'weekly' ? '이전주' : '이전날'}
+              onClick={() => goToDay(addDays(selectedDate, -1))}
+              title="이전날"
             >
               <ChevronLeft size={20} />
             </button>
           )}
-          <div className="header-title-container" onClick={() => { setCurrentMonth(selectedDate); setShowCalendar(true); }}>
-            <Calendar size={20} className="header-icon" />
-            {activeView === 'timeline' && showScheduleView ? (
+          <div
+            className="header-title-container"
+            onClick={() => {
+              // 회고 탭은 늘 '오늘'이라 날짜를 고를 게 없다
+              if (activeView === 'review') return;
+              setCurrentMonth(selectedDate); setShowCalendar(true);
+            }}
+          >
+            {activeView === 'review' ? <Sparkles size={20} className="header-icon" /> : <Calendar size={20} className="header-icon" />}
+            {activeView === 'review' ? (
+              <h1>오늘의 회고</h1>
+            ) : activeView === 'timeline' && showScheduleView ? (
               /* 타임블럭은 스크롤로 자정을 넘나들므로 두 날짜가 겹치며 바뀐다.
                  흐리기(opacity)는 스크롤 핸들러가 DOM에 직접 쓴다 */
               <div className="header-date-stack" ref={headerStackRef}>
@@ -4063,11 +3871,7 @@ function App() {
                 ))}
               </div>
             ) : (
-              <h1>
-                {activeView === 'monthly' ? format(currentMonth, 'yyyy년 M월', { locale: ko })
-                  : activeView === 'weekly' ? weekTitle
-                  : headerTitle}
-              </h1>
+              <h1>{headerTitle}</h1>
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -4103,11 +3907,6 @@ function App() {
                 </button>
               </>
             )}
-            {activeView === 'weekly' && (
-              <button className="header-nav-btn" onClick={() => goToDay(addDays(selectedDate, 7))} title="다음주">
-                <ChevronRight size={20} />
-              </button>
-            )}
           </div>
         </header>
       )}
@@ -4124,6 +3923,14 @@ function App() {
           >
             오늘로
           </button>
+        )}
+        {/* 오늘의 모양 띠 — 오늘 채팅창에만. 채팅창 안에는 아무것도 얹지 않는다 */}
+        {activeView === 'timeline' && !showScheduleView && isToday(selectedDate) && todayFacts && (
+          <DayShapeStrip
+            facts={todayFacts}
+            now={nowTime}
+            onClick={() => { track('Day Strip Click', { memo_count: todayFacts.count }); setActiveView('review'); }}
+          />
         )}
         {activeView === 'timeline' ? (
           /* ── 타임라인 뷰 ── */
@@ -4197,19 +4004,29 @@ function App() {
             {chatMemos.length > 0 && <div className="timeline-bottom-space" aria-hidden="true" />}
           </div>
           )
-        ) : activeView === 'weekly' ? (
-          /* ── 위클리 뷰 ── */
-          renderWeeklyView()
-        ) : activeView === 'monthly' ? (
-          /* ── 먼슬리 뷰 ── */
-          <div
-            className="monthly-container"
-            ref={monthlyRef}
-            onScroll={handleCalendarScroll}
-            style={{ pointerEvents: isCalendarScrolling ? 'none' : 'auto' }}
-          >
-            {renderMonthlyView()}
-          </div>
+        ) : activeView === 'review' ? (
+          /* ── 회고 탭 ── */
+          <ReviewScreen
+            facts={todayFacts}
+            todayMemos={todayMemos}
+            week={weekFacts}
+            now={nowTime}
+            ai={summaryForScreen}
+            locked={isGuest}
+            busy={summaryBusy}
+            usesLeft={summaryUsesLeft}
+            fixedCategories={reviewCategories}
+            viewKey={todayKey}
+            onViewed={handleSummaryViewed}
+            onWeekViewed={handleWeekViewed}
+            onGenerate={generateSummary}
+            onEditCategory={handleEditCategory}
+            onGoTimeline={() => setActiveView('timeline')}
+            onLoginClick={() => {
+              track('Summary Login Click', { memo_count: todayFacts?.count ?? 0 });
+              handleGoogleSignIn();
+            }}
+          />
         ) : (
           /* ── 마이페이지 ── */
           <div style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f5f5f5' }}>
@@ -4497,7 +4314,7 @@ function App() {
             ref={inputRef}
             rows={1}
             className="input-field input-field--chat"
-            placeholder={IS_TOUCH_DEVICE ? '메모를 입력하세요...' : '메모를 입력하세요... (엔터로 저장)'}
+            placeholder={IS_TOUCH_DEVICE ? INPUT_PROMPTS[promptIdx] : `${INPUT_PROMPTS[promptIdx]} (엔터로 저장)`}
             value={inputText}
             onChange={e => {
               setInputText(e.target.value);
@@ -4544,24 +4361,12 @@ function App() {
           <Clock size={20} />
           <span>타임라인</span>
         </button>
-        {/* 위클리·먼슬리 탭은 autocapture에서도 빼둔다 (mp-no-track) */}
         <button
-          className={`tab-btn mp-no-track ${activeView === 'weekly' ? 'active' : ''}`}
-          onClick={() => setActiveView('weekly')}
+          className={`tab-btn ${activeView === 'review' ? 'active' : ''}`}
+          onClick={() => setActiveView('review')}
         >
-          <Calendar size={20} />
-          <span>위클리</span>
-        </button>
-        <button
-          className={`tab-btn mp-no-track ${activeView === 'monthly' ? 'active' : ''}`}
-          onClick={() => {
-            setActiveView('monthly');
-            setCurrentMonth(new Date());
-            setSelectedDate(new Date());
-          }}
-        >
-          <LayoutGrid size={20} />
-          <span>먼슬리</span>
+          <Sparkles size={20} />
+          <span>회고</span>
         </button>
         <button
           className={`tab-btn ${activeView === 'settings' ? 'active' : ''}`}
