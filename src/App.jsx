@@ -2797,6 +2797,8 @@ function App() {
     }
     track('Memo Created', {
       after_summary: afterSummary,
+      // 온보딩(투어)을 끝내거나 건너뛴 뒤에 쓴 기록인지 — "온보딩이 첫 기록을 늘리나"를 보는 축
+      onboarded: localStorage.getItem(ONBOARDING_KEY) === '1',
       // 로그인 전 체험 중에 쓴 것인지. 체험만 하고 떠나는 비율을 보려면 필요하다
       guest: isGuest,
       is_first_memo: isFirstMemo,
