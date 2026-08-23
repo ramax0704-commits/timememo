@@ -2972,7 +2972,7 @@ function App() {
     setActiveView('timeline');
     if (showScheduleView) toggleScheduleView();
     localStorage.setItem(ONBOARDING_KEY, '1');
-    track('Tour', { action, step: tour.step, guest: isGuest });
+    track('Tour', { action, step: TOUR_STEPS[tour.step]?.key, index: tour.step, guest: isGuest });
     // 바로 써볼 수 있게 입력창에 포커스 (터치 기기는 키보드가 튀어오르므로 제외)
     if (!IS_TOUCH_DEVICE) setTimeout(() => inputRef.current?.focus(), 50);
   };
@@ -3024,7 +3024,12 @@ function App() {
       actions: [{ at: 50, run: () => appContainerRef.current?.querySelector('.review-screen .reflection')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }],
     },
   ];
-  const tourNext = () => setTour(t => ({ ...t, step: Math.min(t.step + 1, TOUR_STEPS.length - 1) }));
+  // 어느 단계에서 멈추는지 보려고 단계 진입마다 남긴다 (step = 단계 이름)
+  const tourNext = () => setTour(t => {
+    const next = Math.min(t.step + 1, TOUR_STEPS.length - 1);
+    if (next !== t.step) track('Tour', { action: 'step', step: TOUR_STEPS[next]?.key, index: next, guest: isGuest });
+    return { ...t, step: next };
+  });
   // 투어의 '오늘 회고 만들기' — AI를 부르지 않고 잠깐 읽는 척한 뒤 예시를 보여준다
   const tourGenerate = () => {
     setTour(t => ({ ...t, aiStatus: 'loading' }));
