@@ -2946,9 +2946,9 @@ body.keyboard-open .input-toolbar { display: flex; }
 .header--week {
   flex-direction: column;
   align-items: stretch;
-  padding: 10px 12px 4px;
+  padding: 10px 12px 14px;
   gap: 4px;
-  /* 요일 띠 아래 회색 선은 없는 쪽이 깔끔하다 */
+  /* 요일 띠 아래 회색 선은 없는 쪽이 깔끔하다. 대신 아래 내용과는 여백으로 띄운다 */
   border-bottom: none;
 }
 .header-row {
