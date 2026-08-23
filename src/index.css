@@ -1933,110 +1933,6 @@ body.keyboard-open .input-toolbar { display: flex; }
   background-color: #f1f3f5;
 }
 
-/* ── 온보딩 ──────────────────────────────────────────────────── */
-/* 처음 온 사람에게 핵심 사용법을 카드로. 닫으면 다시 안 뜬다. */
-.onboarding-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(20, 20, 30, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 300;
-  padding: 24px;
-}
-
-.onboarding-card {
-  position: relative;
-  width: 100%;
-  max-width: 340px;
-  background: #ffffff;
-  border-radius: 20px;
-  padding: 40px 24px 24px;
-  text-align: center;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
-}
-
-.onboarding-skip {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  border: none;
-  background: none;
-  color: #a0a0ac;
-  font-size: 0.8rem;
-  font-family: inherit;
-  cursor: pointer;
-  padding: 6px;
-}
-
-.onboarding-emoji {
-  font-size: 3rem;
-  line-height: 1;
-  margin-bottom: 16px;
-}
-
-.onboarding-title {
-  font-size: 1.15rem;
-  font-weight: 700;
-  margin: 0 0 10px;
-  color: var(--text-main);
-}
-
-.onboarding-desc {
-  font-size: 0.875rem;
-  color: #666;
-  line-height: 1.65;
-  margin: 0 0 20px;
-  white-space: pre-line;
-  min-height: 92px; /* 카드 높이가 슬라이드마다 널뛰지 않게 */
-}
-
-.onboarding-dots {
-  display: flex;
-  gap: 6px;
-  justify-content: center;
-  margin-bottom: 18px;
-}
-.onboarding-dots span {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #e0e0e8;
-  transition: background 0.2s;
-}
-.onboarding-dots span.active { background: var(--primary-color); }
-
-.onboarding-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.onboarding-prev {
-  flex: 1;
-  padding: 12px;
-  border-radius: 12px;
-  border: none;
-  background: #f0f0f5;
-  color: #666;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.onboarding-next {
-  flex: 2;
-  padding: 12px;
-  border-radius: 12px;
-  border: none;
-  background: var(--primary-color);
-  color: #fff;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-.onboarding-next:active { background: var(--primary-hover); }
-
 /* ── 타임블럭 블록 꾹 눌러 이동 ──────────────────────────────── */
 /* 꾹 누르면 이동인데 글자 선택이 같이 뜨면 안 된다 */
 .schedule-block {
@@ -2703,3 +2599,119 @@ body.keyboard-open .input-toolbar { display: flex; }
 .seg-text { font-size: 0.8rem; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seg-more { color: var(--text-muted); }
 .day-summary-uses { font-size: 0.7rem; color: var(--text-muted); }
+
+/* ── 투어 (직접 눌러보는 온보딩) ─────────────────────────────── */
+/* 딤 없음. 네 장의 막은 터치만 막고 색은 없다. 누를 곳만 컬러 그림자로 빛난다. */
+.tour {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  overflow: hidden;
+  pointer-events: none;
+}
+.tour-block { position: absolute; pointer-events: auto; }
+.tour-spot {
+  position: absolute;
+  box-shadow: 0 0 0 3px rgba(74, 114, 255, 0.18), 0 6px 22px rgba(74, 114, 255, 0.45);
+  animation: tour-glow 1.6s ease-in-out infinite;
+  pointer-events: none;
+  transition: left 0.35s cubic-bezier(.2,.8,.2,1), top 0.35s cubic-bezier(.2,.8,.2,1), width 0.35s, height 0.35s;
+}
+@keyframes tour-glow {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(74, 114, 255, 0.18), 0 6px 22px rgba(74, 114, 255, 0.45); }
+  50%      { box-shadow: 0 0 0 6px rgba(74, 114, 255, 0.10), 0 10px 30px rgba(74, 114, 255, 0.65); }
+}
+/* 아주 옅은 딤 — 시선 둘 곳만 알려주는 정도. 스포트라이트의 큰 그림자라 대상 모양을 따라간다 */
+.tour-spot--dim { animation-name: tour-glow-dim; }
+@keyframes tour-glow-dim {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(74, 114, 255, 0.18), 0 6px 22px rgba(74, 114, 255, 0.45), 0 0 0 9999px rgba(20, 22, 34, 0.07); }
+  50%      { box-shadow: 0 0 0 6px rgba(74, 114, 255, 0.10), 0 10px 30px rgba(74, 114, 255, 0.65), 0 0 0 9999px rgba(20, 22, 34, 0.07); }
+}
+/* '짠' — 방금 생긴 블록을 튀어나오듯 강조 */
+.tour-spot--pop { animation: tour-pop 0.9s cubic-bezier(.2,.9,.3,1.4) 0.25s 1 both, tour-glow 1.6s ease-in-out 1.2s infinite; }
+@keyframes tour-pop {
+  0%   { transform: scale(0.85); opacity: 0; box-shadow: 0 0 0 3px rgba(74, 114, 255, 0.18), 0 6px 22px rgba(74, 114, 255, 0.45); }
+  60%  { transform: scale(1.06); opacity: 1; box-shadow: 0 0 0 8px rgba(74, 114, 255, 0.22), 0 14px 40px rgba(74, 114, 255, 0.7); }
+  100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 3px rgba(74, 114, 255, 0.18), 0 6px 22px rgba(74, 114, 255, 0.45); }
+}
+/* 손가락 포인터 — 누를 곳을 계속 가리킨다 (탭은 물결 반복, 끌기는 위로 올라가는 동작 반복) */
+.tour-pointer {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.92);
+  border: 2px solid var(--primary-color);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+  pointer-events: none;
+  transition: left 0.5s cubic-bezier(.2,.8,.2,1), top 0.5s cubic-bezier(.2,.8,.2,1);
+}
+.tour-pointer--tap { animation: tour-tap 1.4s ease-out 0.4s infinite; }
+@keyframes tour-tap {
+  0%   { transform: scale(1); box-shadow: 0 2px 10px rgba(0,0,0,0.25), 0 0 0 0 rgba(74,114,255,0.5); }
+  25%  { transform: scale(0.8); }
+  55%  { transform: scale(1); box-shadow: 0 2px 10px rgba(0,0,0,0.25), 0 0 0 18px rgba(74,114,255,0); }
+  100% { transform: scale(1); }
+}
+.tour-pointer--drag-up { animation: tour-drag-up 2.4s ease-in-out 0.4s infinite; }
+@keyframes tour-drag-up {
+  0%   { transform: translateY(0) scale(1); opacity: 1; }
+  15%  { transform: translateY(0) scale(0.8); }
+  60%  { transform: translateY(-64px) scale(0.8); opacity: 1; }
+  80%  { transform: translateY(-64px) scale(1); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 0; }
+}
+/* 말풍선 — 대상 바로 위/아래에 꼬리를 달고 붙는다 */
+.tour-bubble {
+  position: absolute;
+  padding: 12px 14px 10px;
+  background-color: #fff;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(20, 22, 34, 0.20), 0 0 0 1px rgba(20, 22, 34, 0.05);
+  pointer-events: auto;
+  animation: slideIn 0.25s ease-out;
+  transition: left 0.35s cubic-bezier(.2,.8,.2,1), top 0.35s, bottom 0.35s;
+}
+.tour-bubble::after {
+  content: '';
+  display: none;
+  position: absolute;
+  left: var(--tail-x, 50%);
+  width: 14px;
+  height: 14px;
+  background-color: #fff;
+  transform: translateX(-50%) rotate(45deg);
+  border-radius: 2px;
+}
+.tour-bubble--tail-down::after { display: block; bottom: -6px; box-shadow: 3px 3px 6px rgba(20, 22, 34, 0.08); }
+.tour-bubble--tail-up::after { display: block; top: -6px; box-shadow: -2px -2px 5px rgba(20, 22, 34, 0.06); }
+.tour-bubble p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text-main);
+  word-break: keep-all;
+}
+.tour-bubble-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  min-height: 18px;
+}
+.tour-dots { display: flex; gap: 5px; }
+.tour-dots i { width: 6px; height: 6px; border-radius: 50%; background-color: #dfe2ec; display: block; }
+.tour-dots i.on { background-color: var(--primary-color); }
+.tour-bubble--final p { font-size: 0.9rem; }
+.tour-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 16px;
+  background-color: var(--primary-color);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tour-btn--small { padding: 6px 12px; font-size: 0.76rem; }

@@ -27,6 +27,7 @@ import {
 import { requestDaySummary, summaryCacheKey, peekSummaryCache } from './summaryAI';
 import ReviewScreen from './ReviewScreen';
 import DayShapeStrip from './DayShapeStrip';
+import TourOverlay from './TourOverlay';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
 function rowToMemo(row) {
@@ -505,32 +506,42 @@ const timeLabel12 = (str) => {
 // 처음 온 사람에게 핵심 사용법을 카드 몇 장으로. 닫으면 다시 안 뜨고,
 // 마이페이지 '사용법 다시 보기'로 언제든 다시 볼 수 있다.
 const ONBOARDING_KEY = 'timememo-onboarding-done';
-const ONBOARDING_SLIDES = [
-  {
-    emoji: '💬',
-    title: '채팅하듯 기록해요',
-    desc: '생각날 때 한 줄 적어 보내면\n지금 시각과 함께 남아요.\n하루가 대화처럼 쌓입니다.',
-  },
-  {
-    emoji: '⏱️',
-    title: '걸린 시간도 남겨요',
-    desc: '기록을 탭하면 시작~종료 시간을 정할 수 있어요.\n우측 상단 격자 버튼을 누르면\n하루가 시간표(타임블럭)로 보여요.',
-  },
-  {
-    emoji: '👆',
-    title: '제스처로 빠르게',
-    desc: '기록을 왼쪽으로 밀면 삭제,\n꾹 누른 채 위아래로 끌면 순서를 옮겨요.\n전송 버튼을 누른 채 위/아래로 끌면\n이전 기록부터 · 다음 기록까지 이어서 저장돼요.',
-  },
-  {
-    emoji: '🗓️',
-    title: '할 일과 먼슬리',
-    desc: '할 일을 적어뒀다가 끝나면 기록으로 옮기고,\n먼슬리에서 습관 키워드와 가계부를\n한눈에 볼 수 있어요.',
-  },
-];
 
-// 사용 후기·의견·문의 입력칸. 로그인 화면(비로그인)과 마이페이지(로그인) 공용.
-// feedback 테이블에 저장되고, 읽기 정책이 없어 앱에서는 아무도 못 읽는다 —
-// 내용은 Supabase 대시보드에서만 본다. Mixpanel에는 원칙대로 길이만 보낸다.
+// ── 투어(움직이는 온보딩)용 샘플 데이터 ─────────────────────────
+// 실제 앱 위에서 포인터가 탭하고 끌고 글자를 치는 걸 보여준다. 이 기록들은 저장되지 않는다.
+const TOUR_TYPED = '점심 먹고 산책. 햇빛 좋았다';
+function makeTourMemos(now) {
+  const at = (h, m) => new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).toISOString();
+  const mk = (id, recordedAt, content, category) => ({
+    id: `tour-${id}`, content, color: 'default', recordedAt, category,
+    spansToNext: false, spansFromPrev: false, backMinutes: 0, endMinutes: 0,
+  });
+  return [
+    mk(1, at(8, 40), '아침 스트레칭하고 커피. 오늘은 좀 여유롭게 시작', '휴식'),
+    mk(2, at(9, 30), '카페에서 기획서 초안 작성. 집중 잘 됨', '기획업무'),
+    mk(3, at(10, 20), '팀 채팅 확인하고 답장', '기획업무'),
+    mk(4, at(11, 10), '기획서 1차 완료, 팀에 공유. 드디어 끝', '기획업무'),
+  ];
+}
+// 투어에서 '이어서' 쓴 기록이 놓이는 시각 (시간표에서 이 블록을 강조하려고 selector로 쓴다)
+const TOUR_TYPED_HM = [11, 50];
+// 투어에서 보여주는 회고 예시 (AI를 부르지 않는다 — 비용도, 기다림도 없어야 한다)
+const TOUR_AI = {
+  status: 'ok', mock: false, stale: false,
+  data: {
+    categories: [],
+    headline: '여유롭게 시작해서 "드디어 끝"까지',
+    narrative: '"여유롭게 시작"한 아침이 그대로 오전 집중으로 이어졌어요. 기획서를 넘기고 "드디어 끝"이라고 쓴 뒤, 산책과 햇빛이 바로 따라왔고요. 끝낸 뒤에 쉬는 순서가 오늘 안에 그대로 있었어요.',
+    thoughtFlow: [
+      { stage: '시작', text: '"오늘은 좀 여유롭게 시작"' },
+      { stage: '전환', text: '기획서를 끝내고 나서 몸을 움직이는 쪽으로' },
+      { stage: '결론', text: '"햇빛 좋았다" — 끝낸 뒤의 산책' },
+    ],
+    loops: [{ from: '기획서 초안 집중', to: '1차 완료, 팀 공유' }],
+    energyWords: { up: ['여유롭게', '집중 잘 됨', '드디어 끝', '햇빛 좋았다'], down: [] },
+    keywords: ['마무리', '회복', '몰입'],
+  },
+};
 function FeedbackCard({ user }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -597,43 +608,6 @@ function FeedbackCard({ user }) {
   );
 }
 
-function OnboardingOverlay({ onClose }) {
-  const [idx, setIdx] = useState(0);
-  const last = idx === ONBOARDING_SLIDES.length - 1;
-  const slide = ONBOARDING_SLIDES[idx];
-
-  const close = (action) => {
-    localStorage.setItem(ONBOARDING_KEY, '1');
-    track('Onboarding', { action, slide: idx });
-    onClose();
-  };
-
-  return (
-    <div className="onboarding-overlay">
-      <div className="onboarding-card">
-        <button type="button" className="onboarding-skip" onClick={() => close('skipped')}>건너뛰기</button>
-        <div className="onboarding-emoji" aria-hidden="true">{slide.emoji}</div>
-        <h2 className="onboarding-title">{slide.title}</h2>
-        <p className="onboarding-desc">{slide.desc}</p>
-        <div className="onboarding-dots" aria-hidden="true">
-          {ONBOARDING_SLIDES.map((_, i) => <span key={i} className={i === idx ? 'active' : ''} />)}
-        </div>
-        <div className="onboarding-actions">
-          {idx > 0 && (
-            <button type="button" className="onboarding-prev" onClick={() => setIdx(i => i - 1)}>이전</button>
-          )}
-          <button
-            type="button"
-            className="onboarding-next"
-            onClick={() => (last ? close('completed') : setIdx(i => i + 1))}
-          >
-            {last ? '시작하기' : '다음'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── 블록 구간 계산 (타임블럭 뷰와 위클리 뷰가 함께 쓴다) ──
 // 기본은 30분짜리 짧은 블록. 자동으로 이어 붙이면 실제보다 오래 한 것처럼 보여
@@ -884,7 +858,10 @@ function App() {
   // 시간 휠이 지금 어느 칸(시작/종료)을 고치고 있는지
   const [openTimeWheel, setOpenTimeWheel] = useState(null); // 'start' | 'end' | null
   // 온보딩 (첫 방문 안내)
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  // 투어(움직이는 온보딩). active 동안 memos는 샘플로 바뀌고 끝나면 원래대로 돌아온다.
+  const [tour, setTour] = useState({ active: false, step: 0, aiStatus: 'idle' });
+  const tourBackupRef = useRef(null);
+  const appContainerRef = useRef(null);
   // 꾹 눌러 순서 옮기기 (채팅창)
   const [draggingMemoId, setDraggingMemoId] = useState(null);
   const [reorderDrop, setReorderDrop] = useState(null); // 이 기록 앞에 놓는다 (id) | 'end' | null
@@ -924,17 +901,6 @@ function App() {
   const inputRef = useRef(null);
   const scrollPositionRef = useRef(null);
 
-  // ── 온보딩: 처음 온 사람(체험, 기록 0)에게 한 번만 ───────────
-  // 기존 계정 사용자에게는 자동으로 띄우지 않는다 — 마이페이지에서 다시 볼 수 있다.
-  useEffect(() => {
-    if (authLoading) return;
-    if (localStorage.getItem(ONBOARDING_KEY) === '1') return;
-    if (!currentUser && memos.length === 0) {
-      setShowOnboarding(true);
-      track('Onboarding', { action: 'shown' });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading]);
 
   // ── 순서 옮기는 동안 화면 스크롤을 멈춘다 ────────────────────
   // touch-action은 제스처 시작 시점에 정해져 도중에 못 바꾸므로,
@@ -1807,7 +1773,7 @@ function App() {
   // 기기에서는 못 본다. 홈 화면 앱에는 '홈 화면에 추가' 안내만 뺀다(이미 했으니).
   const inStandaloneApp = isStandaloneApp();
   const showSaveNotice =
-    isGuest && memos.length >= SAVE_NOTICE_AFTER && !saveNoticeDismissed;
+    isGuest && memos.length >= SAVE_NOTICE_AFTER && !saveNoticeDismissed && !tour.active;
 
   // 안내가 실제로 눈에 띈 순간을 한 번만 남긴다.
   // (이 안내가 로그인으로 이어지는지 봐야 붙여둘 값어치가 있는지 알 수 있다)
@@ -2749,6 +2715,8 @@ function App() {
   const handleAddMemo = async (e, mode = 'single') => {
     e?.preventDefault();
     if (!inputText.trim()) return;
+    // 투어 중에는 저장하지 않는다 — 샘플 위에 얹어 보여주기만
+    if (tour.active) { addTourMemo(mode); return; }
     const now = new Date();
     // 보고 있는 날짜에 기록한다: 다른 날짜 페이지에서 쓰면 '그 날짜 + 지금 시각'.
     // (과거 날짜로 일부러 옮겨 와서 쓰는 데는 이유가 있다 — 오늘로 끌고 가지 않는다)
@@ -2972,6 +2940,131 @@ function App() {
     if (dy >= SEND_DRAG_THRESHOLD) return 'next';
     return 'single';
   };
+
+  // ── 투어 (움직이는 온보딩) ───────────────────────────────────
+  // 슬라이드 대신 실제 화면에서 보여준다: 기록 3개 → 타임라인 탭 두 번(시간표↔채팅) →
+  // 입력창에 글자가 써지고 → 보내기 버튼을 위로 끌어 저장 → 회고 탭에서 회고를 본다.
+  // 화면 전환·입력은 여기서 App 함수로 직접 수행하고, 포인터·말풍선은 TourOverlay가 그린다.
+  const startTour = (source) => {
+    if (tour.active) return;
+    tourBackupRef.current = { memos, inputText };
+    const now = new Date();
+    setSelectedDate(now);
+    setActiveView('timeline');
+    if (showScheduleView) toggleScheduleView();
+    setInputText('');
+    setMemos(makeTourMemos(now));
+    setTour({ active: true, step: 0, aiStatus: 'idle' });
+    track('Tour', { action: 'started', source, guest: isGuest });
+  };
+  const endTour = (action) => {
+    const backup = tourBackupRef.current;
+    tourBackupRef.current = null;
+    setTour({ active: false, step: 0, aiStatus: 'idle' });
+    setSendMode(null);
+    setMemos(backup?.memos ?? []);
+    setInputText(backup?.inputText ?? '');
+    setActiveView('timeline');
+    if (showScheduleView) toggleScheduleView();
+    localStorage.setItem(ONBOARDING_KEY, '1');
+    track('Tour', { action, step: tour.step, guest: isGuest });
+    // 바로 써볼 수 있게 입력창에 포커스 (터치 기기는 키보드가 튀어오르므로 제외)
+    if (!IS_TOUCH_DEVICE) setTimeout(() => inputRef.current?.focus(), 50);
+  };
+  // 사용자가 직접 누르며 진행한다. advance: 'button'(다음 버튼) | 'tap-target'(밝혀진 곳을 탭) |
+  // 'auto'(타이핑 같은 모션이 끝나면 자동) | 'send'(보내기를 실제로 눌러 저장하면)
+  const tourTypedIso = new Date(nowTime.getFullYear(), nowTime.getMonth(), nowTime.getDate(), TOUR_TYPED_HM[0], TOUR_TYPED_HM[1]).toISOString();
+  const TOUR_STEPS = [
+    {
+      key: 'type', target: '.input-area', place: 'above', pointer: null, advance: 'auto',
+      caption: '지금 한 일을 한 줄로 적어요. 예시를 대신 적어볼게요.',
+      actions: TOUR_TYPED.split('').map((_, i) => ({ at: 700 + i * 80, run: () => setInputText(TOUR_TYPED.slice(0, i + 1)) })),
+      // 다 적히고 나서 잠시 쉬었다가 넘어간다 (바로 넘어가면 따라가기 벅차다)
+      autoAfter: 700 + TOUR_TYPED.length * 80 + 2600,
+    },
+    {
+      // 말풍선은 버튼 위에 뜨는 '이전 기록부터 / 단일 / 다음 기록까지' 힌트를 가리지 않게 더 위로 올린다
+      key: 'drag-send', target: '.send-btn', place: 'above', offset: 74, pointer: 'drag-up', advance: 'send',
+      caption: '보내기 버튼을 꾹 누른 채 위로 올려보세요. 이전 기록부터 이어서 저장할 수 있어요.',
+    },
+    {
+      key: 'tab-schedule', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', pointer: 'tap', advance: 'tap-target',
+      caption: '타임라인 탭을 눌러보세요.',
+    },
+    {
+      // 시간표 화면을 깨끗하게 보여주되, 방금 이어서 쓴 블록만 '짠' 하고 강조한다
+      key: 'schedule-look', target: `.schedule-block[data-at="${tourTypedIso}"]`, place: 'above', pointer: null,
+      advance: 'button', free: true, effect: 'pop',
+      caption: '방금 이어서 쓴 기록이 앞 기록 아래 한 덩어리로 붙었어요. 하루가 이렇게 시간 위에 놓여요.',
+    },
+    {
+      key: 'tab-review', target: '.bottom-tab-bar .tab-btn:nth-child(2)', place: 'above', pointer: 'tap', advance: 'tap-target',
+      caption: '이번엔 회고 탭을 눌러보세요.',
+    },
+    {
+      key: 'review-top', target: '.review-screen .shape', place: 'below', pointer: null, advance: 'button', free: true,
+      caption: '오늘 기록한 시간과 하루의 리듬이 한눈에 보여요.',
+      actions: [{ at: 50, run: () => { const el = appContainerRef.current?.querySelector('.review-screen'); if (el) el.scrollTop = 0; } }],
+    },
+    {
+      // 회고 만들기 버튼을 직접 누르게 한다 (결과를 바로 보여주지 않는다)
+      key: 'review-btn', target: '.review-screen .day-summary--ai-gate .day-summary-btn', place: 'above', pointer: 'tap', advance: 'wait',
+      caption: '오늘 회고 만들기를 눌러보세요. 회고는 구글 계정을 연동하면 쓸 수 있어요.',
+      actions: [{ at: 50, run: () => appContainerRef.current?.querySelector('.review-screen .day-summary--ai-gate')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }],
+    },
+    {
+      key: 'review-ai', target: null, place: 'bottom', pointer: null, advance: 'button', free: true, final: true,
+      caption: 'AI가 오늘 남긴 말에서 하루를 읽어줬어요. 이제 직접 써볼까요?',
+      actions: [{ at: 50, run: () => appContainerRef.current?.querySelector('.review-screen .reflection')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }],
+    },
+  ];
+  const tourNext = () => setTour(t => ({ ...t, step: Math.min(t.step + 1, TOUR_STEPS.length - 1) }));
+  // 투어의 '오늘 회고 만들기' — AI를 부르지 않고 잠깐 읽는 척한 뒤 예시를 보여준다
+  const tourGenerate = () => {
+    setTour(t => ({ ...t, aiStatus: 'loading' }));
+    setTimeout(() => setTour(t => ({ ...t, aiStatus: 'ok', step: Math.min(t.step + 1, TOUR_STEPS.length - 1) })), 1400);
+    track('Tour', { action: 'generate', guest: isGuest });
+  };
+  const tourAI = tour.aiStatus === 'ok' ? TOUR_AI : tour.aiStatus === 'loading' ? { status: 'loading' } : { status: 'idle' };
+  // 밝혀진 곳을 눌렀다 — 앱이 먼저 반응하도록 잠깐 뒤에 넘어간다
+  const handleTourTargetTap = () => setTimeout(tourNext, 350);
+  // 투어 중 보내기: 저장하지 않고 샘플 기록들 뒤(11:50)에 붙인다. 위로 끌었으면 '이전 기록부터'로.
+  const addTourMemo = (mode) => {
+    if (!inputText.trim()) return;
+    const now = new Date();
+    const at = new Date(now.getFullYear(), now.getMonth(), now.getDate(), TOUR_TYPED_HM[0], TOUR_TYPED_HM[1]);
+    setMemos(prev => [...prev.filter(m => m.id !== 'tour-typed'), {
+      id: 'tour-typed', content: inputText.trim(), color: 'default', recordedAt: at.toISOString(), category: '휴식',
+      spansToNext: mode === 'next', spansFromPrev: mode === 'prev', backMinutes: 0, endMinutes: 0,
+    }]);
+    setInputText('');
+    if (inputRef.current) inputRef.current.style.height = 'auto';
+    track('Tour', { action: 'sent', gesture: mode, guest: isGuest });
+    if (TOUR_STEPS[tour.step]?.advance === 'send') setTimeout(tourNext, 400);
+  };
+  useEffect(() => {
+    if (!tour.active) return;
+    const def = TOUR_STEPS[tour.step];
+    if (!def) return;
+    const timers = (def.actions ?? []).map(a => setTimeout(a.run, a.at));
+    if (def.advance === 'auto' && def.autoAfter) timers.push(setTimeout(tourNext, def.autoAfter));
+    return () => timers.forEach(clearTimeout);
+    // TOUR_STEPS는 렌더마다 새로 만들어지지만 내용은 같다 — step이 바뀔 때만 타이머를 다시 건다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tour.active, tour.step]);
+
+  // ── 온보딩(투어): 처음 온 사람(체험, 기록 0)에게 한 번만 ─────
+  // 기존 계정 사용자에게는 자동으로 띄우지 않는다 — 마이페이지에서 다시 볼 수 있다.
+  useEffect(() => {
+    if (authLoading) return;
+    if (localStorage.getItem(ONBOARDING_KEY) === '1') return;
+    if (!currentUser && memos.length === 0) {
+      const id = setTimeout(() => startTour('first_visit'), 400);
+      return () => clearTimeout(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading]);
+
 
   const onSendPointerDown = (e) => {
     if (!inputText.trim()) return;
@@ -3292,7 +3385,12 @@ function App() {
     // 이런 묶음은 옆으로 나란히 두고 각자 제 시각 자리에 놓는다.
     // 순간 기록만 몰린 묶음은 기존대로 세로로 쌓는다(칸을 나누면 글이 안 읽힌다).
     for (const c of clusters) {
-      c.useColumns = c.items.length >= 2 && c.items.some(s => !s.isCompact);
+      // 예외: '이전 기록부터 이어서' 쓴 구간은 앞 기록 바로 아래 이어붙인다 (옆으로 나누지 않는다).
+      // 11:10 '회의 끝' 다음에 11:10→11:50 '점심'이 오면 두 블록이 위아래로 붙어야 이어 쓴 느낌이 난다.
+      const onlyContinuations = c.items
+        .filter(s => !s.isCompact)
+        .every(s => s.memo.spansFromPrev && !(s.memo.backMinutes > 0));
+      c.useColumns = c.items.length >= 2 && c.items.some(s => !s.isCompact) && !onlyContinuations;
     }
 
     // 3) 쌓는 데 필요한 높이가 실제 시간 길이보다 크면 그만큼 구간을 늘린다.
@@ -3819,7 +3917,7 @@ function App() {
 
   // ── 메인 화면 ────────────────────────────────────────────────
   return (
-    <div className="app-container">
+    <div className="app-container" ref={appContainerRef}>
       {/* 기록을 계정으로 옮기는 동안에만 띄운다.
           체험 중 로그인 유도 배너는 지금 단계에서 필요 없어 뺐다 —
           하단 탭의 '로그인'과 기록이 없을 때의 안내로 충분하다. */}
@@ -4011,15 +4109,15 @@ function App() {
             todayMemos={todayMemos}
             week={weekFacts}
             now={nowTime}
-            ai={summaryForScreen}
-            locked={isGuest}
-            busy={summaryBusy}
-            usesLeft={summaryUsesLeft}
+            ai={tour.active ? tourAI : summaryForScreen}
+            locked={isGuest && !tour.active}
+            busy={tour.active ? tour.aiStatus === 'loading' : summaryBusy}
+            usesLeft={tour.active ? SUMMARY_DAILY_LIMIT : summaryUsesLeft}
             fixedCategories={reviewCategories}
             viewKey={todayKey}
             onViewed={handleSummaryViewed}
             onWeekViewed={handleWeekViewed}
-            onGenerate={generateSummary}
+            onGenerate={tour.active ? tourGenerate : generateSummary}
             onEditCategory={handleEditCategory}
             onGoTimeline={() => setActiveView('timeline')}
             onLoginClick={() => {
@@ -4140,7 +4238,7 @@ function App() {
                 <button
                   className="btn-cancel"
                   style={{ width: '100%' }}
-                  onClick={() => { setShowOnboarding(true); track('Onboarding', { action: 'reopened' }); }}
+                  onClick={() => startTour('mypage')}
                 >
                   사용법 다시 보기
                 </button>
@@ -4857,7 +4955,17 @@ function App() {
       )}
 
       {/* 온보딩 — 처음 온 사람에게 한 번, 마이페이지에서 다시 보기 가능 */}
-      {showOnboarding && <OnboardingOverlay onClose={() => setShowOnboarding(false)} />}
+      {tour.active && TOUR_STEPS[tour.step] && (
+        <TourOverlay
+          step={TOUR_STEPS[tour.step]}
+          index={tour.step}
+          total={TOUR_STEPS.length}
+          containerRef={appContainerRef}
+          onTargetTap={handleTourTargetTap}
+          onNext={tourNext}
+          onFinish={() => endTour('completed')}
+        />
+      )}
 
     </div>
   );
