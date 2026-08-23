@@ -1409,7 +1409,7 @@ function App() {
   const todayFacts = todayMemos.length > 0 ? buildDayFacts(todayMemos, memos, reviewDayEnd, { past: !reviewIsToday }) : null;
   const weekFacts = buildWeekFacts(memos, nowTime);
   const todayRecords = todayFacts ? toSummaryRecords(todayMemos) : null;
-  const summaryKey = todayRecords ? summaryCacheKey(reviewKey, todayRecords, reviewCategories) : null;
+  const summaryKey = todayRecords ? summaryCacheKey(reviewKey, todayRecords) : null;
   const summaryUsesLeft = Math.max(0, SUMMARY_DAILY_LIMIT - (summaryUses[todayKey] || 0));
   const canGenerate = Boolean(summaryKey) && todayMemos.length >= SUMMARY_MIN_RECORDS && summaryUsesLeft > 0;
   const pickReviewDay = (day) => {

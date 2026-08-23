@@ -16,10 +16,24 @@ function hash(str) {
   return (h >>> 0).toString(36);
 }
 
-// 같은 입력이면 다시 부르지 않는다. 기록을 고치거나 추가하면, 고정 세트가 바뀌면 키가 바뀐다.
-export function summaryCacheKey(dateKey, records, fixedCategories = []) {
-  const body = records.map(r => `${r.time}|${r.text}`).join('\n') + '\n#' + fixedCategories.join(',');
+// 같은 입력이면 다시 부르지 않는다. 기록을 고치거나 추가하면 키가 바뀐다.
+// 고정 카테고리 세트는 키에 넣지 않는다 — 회고를 만든 직후 세트가 정해지면서 키가 바뀌어
+// 방금 만든 결과가 사라져 보이는 사고가 있었다 (8/25). 세트가 바뀌어도 만든 회고는 그대로 보여야 한다.
+export function summaryCacheKey(dateKey, records) {
+  const body = records.map(r => `${r.time}|${r.text}`).join('\n');
   return `${dateKey}|${records.length}|${hash(body)}`;
+}
+
+// 예전 방식(키 끝에 고정 세트가 붙던 때)으로 저장된 것도 찾는다: 같은 날짜·같은 기록 수 중 가장 최근 것
+function findCached(key) {
+  const cache = readCache();
+  if (cache[key]?.data) return cache[key];
+  const prefix = key.split('|').slice(0, 2).join('|') + '|';
+  let best = null;
+  for (const [k, v] of Object.entries(cache)) {
+    if (k.startsWith(prefix) && v?.data && (!best || v.at > best.at)) best = v;
+  }
+  return best;
 }
 
 function readCache() {
@@ -46,7 +60,7 @@ function writeCache(key, value) {
 
 // 앱을 다시 열었을 때 이미 만들어 둔 회고가 있으면 네트워크 없이 바로 보여준다
 export function peekSummaryCache(key) {
-  const cached = key ? readCache()[key] : null;
+  const cached = key ? findCached(key) : null;
   return cached?.data ? { data: cached.data, mock: Boolean(cached.mock) } : null;
 }
 
@@ -85,8 +99,8 @@ export function normalizeSummary(obj, recordCount) {
 
 // records: [{ time, text }] 시간순 / facts: 계산값 / fixedCategories: 고정 세트 / knownCategories: 힌트
 export async function requestDaySummary({ dateKey, records, facts, fixedCategories = [], knownCategories = [], signal }) {
-  const key = summaryCacheKey(dateKey, records, fixedCategories);
-  const cached = readCache()[key];
+  const key = summaryCacheKey(dateKey, records);
+  const cached = findCached(key);
   if (cached?.data) return { data: cached.data, mock: Boolean(cached.mock), fromCache: true };
 
   let payload;
