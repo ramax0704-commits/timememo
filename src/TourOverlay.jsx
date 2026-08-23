@@ -28,7 +28,7 @@ function rectIn(container, el) {
   return { left: r.left - c.left, top: r.top - c.top, width: r.width, height: r.height, radius };
 }
 
-export default function TourOverlay({ step, index, containerRef, onTargetTap, onNext, onFinish }) {
+export default function TourOverlay({ step, index, containerRef, onTargetTap, onNext, onFinish, onSkip }) {
   const [rect, setRect] = useState(null);
 
   // 대상 요소의 자리를 잰다. 화면이 바뀐 직후(탭 전환·스크롤)에도 맞도록 잠깐 뒤 몇 번 더 잰다.
@@ -104,10 +104,16 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
   // 대상이 있는 단계인데 아직 자리를 못 쟀거나(스크롤 중) 자리 잡히기 전이면 아무것도 보여주지 않는다.
   // (기본 자리에 먼저 떴다가 옮겨가면 "엉뚱한 데로 갔다 온다"로 보인다)
   const ready = !step.target || (rect && rect.settled);
+  // 언제든 그만둘 수 있는 X. 어느 단계에서 나갔는지는 endTour('skipped')가 step과 함께 남긴다.
+  const skipBtn = onSkip && !step.final && (
+    <button type="button" className="tour-skip" onClick={onSkip} aria-label="안내 건너뛰기">✕</button>
+  );
+
   if (!ready) {
     return (
       <div className="tour" aria-live="polite">
         {!step.free && <div className="tour-block" style={{ left: 0, top: 0, width: W, height: H }} />}
+        {skipBtn}
       </div>
     );
   }
@@ -115,6 +121,7 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
   return (
     <div className="tour" aria-live="polite">
       {blocks.map((b, i) => <div key={i} className="tour-block" style={b} />)}
+      {skipBtn}
       {spot && (
         <div
           key={`spot-${index}`}

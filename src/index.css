@@ -2252,6 +2252,7 @@ body.keyboard-open .input-toolbar { display: flex; }
 .review-screen {
   flex: 1;
   overflow-y: auto;
+  touch-action: pan-y; /* 가로 손짓은 날짜 전환에 쓴다 */
   padding: 16px 16px 24px;
   display: flex;
   flex-direction: column;
@@ -2854,8 +2855,6 @@ body.keyboard-open .input-toolbar { display: flex; }
   border-top: 1px dashed var(--border-color);
 }
 .timeline-day-divider span { flex-shrink: 0; }
-/* 회고 탭은 헤더가 없어졌으므로 상태바 자리를 직접 비운다 */
-.review-screen { padding-top: max(env(safe-area-inset-top), 16px); }
 /* 오늘의 모양 맨 위 날짜 */
 .shape-date {
   font-size: 0.78rem;
@@ -2941,4 +2940,80 @@ body.keyboard-open .input-toolbar { display: flex; }
 .consent-close {
   display: block; width: 100%; margin-top: 8px; padding: 10px;
   background: none; border: none; color: #999; font-size: 0.85rem; cursor: pointer;
+}
+
+/* ── 헤더 v2: 날짜 한 줄 + 요일 띠 ───────────────────────────── */
+.header--week {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 10px 12px 4px;
+  gap: 4px;
+  /* 요일 띠 아래 회색 선은 없는 쪽이 깔끔하다 */
+  border-bottom: none;
+}
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+}
+.header--week h1 {
+  font-size: 1.05rem;
+  font-weight: 500;
+}
+.header--week .header-title-container { padding: 4px 6px; }
+.header-actions { display: flex; align-items: center; gap: 2px; }
+.week-strip {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.week-day {
+  background: none;
+  border: none;
+  padding: 2px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  color: var(--text-main);
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.week-day:disabled { opacity: 0.3; cursor: default; }
+.week-day-name { font-size: 0.72rem; color: var(--text-muted); }
+.week-day-num {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+}
+.week-day--on .week-day-num { background-color: #e6ebff; color: var(--primary-color); font-weight: 600; }
+.week-day--today:not(.week-day--on) .week-day-num { color: var(--primary-color); }
+.week-day-dot { width: 4px; height: 4px; border-radius: 50%; background: transparent; }
+.week-day-dot--on { background-color: #c5cdf5; }
+
+/* 투어 건너뛰기 X */
+.tour-skip {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 8px);
+  right: 10px;
+  z-index: 6;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+  color: #666;
+  font-size: 0.95rem;
+  cursor: pointer;
+  pointer-events: auto;
 }

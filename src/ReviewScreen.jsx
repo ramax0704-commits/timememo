@@ -10,10 +10,10 @@
 //   로그인해야 만들 수 있고, 실패하면 2·3만 빠지고 1·4는 그대로다.
 // [이번 주]
 //   최근 7일. 전부 계산값 — 총 기록 시간, 기록한 날, 리듬 곡선, 날짜별 기록 수, 카테고리 분포.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Sparkles, Lock, Inbox, RefreshCw, X, Plus, Flame, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Sparkles, Lock, Inbox, RefreshCw, X, Plus, Flame } from 'lucide-react';
 import {
   SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, WEEKLY_DAYS, UNCATEGORIZED, groupByCategory, formatMinutes,
 } from './daySummary';
@@ -480,7 +480,7 @@ function WeekView({ week, onViewed }) {
 
 // ── 화면 ──────────────────────────────────────────────────────
 export default function ReviewScreen({
-  facts, todayMemos, dayLabel, dateLabel, isToday = true, onPrevDay, onNextDay, week, now, ai, locked, busy, usesLeft, fixedCategories,
+  facts, todayMemos, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, busy, usesLeft, fixedCategories,
   onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline, onEditCategory,
 }) {
   const [mode, setMode] = useState('today'); // 'today' | 'week'
@@ -493,8 +493,20 @@ export default function ReviewScreen({
   const hasCategories = todayMemos.some(m => m.category);
   const aiOk = ai?.status === 'ok' && ai.data;
 
+  // 좌우로 밀면 날짜가 바뀐다 (타임라인 채팅창과 같은 손짓). 세로 스크롤과 헷갈리지 않게
+  // 가로로 충분히(50px↑), 세로보다 확실히 더 움직였을 때만.
+  const swipeRef = useRef(null);
+  const onPointerDown = (e) => { if (e.pointerType === 'mouse' && e.button !== 0) return; swipeRef.current = { x: e.clientX, y: e.clientY }; };
+  const onPointerUp = (e) => {
+    const d = swipeRef.current; swipeRef.current = null;
+    if (!d || mode !== 'today' || !onSwipeDay) return;
+    const dx = e.clientX - d.x, dy = e.clientY - d.y;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    onSwipeDay(dx < 0 ? 1 : -1); // 왼쪽으로 밀면 다음 날
+  };
+
   return (
-    <div className="review-screen">
+    <div className="review-screen" onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={() => { swipeRef.current = null; }}>
       <div className="review-seg" role="tablist">
         <button type="button" role="tab" aria-selected={mode === 'today'} className={`review-seg-btn${mode === 'today' ? ' review-seg-btn--on' : ''}`} onClick={() => setMode('today')}>오늘</button>
         <button type="button" role="tab" aria-selected={mode === 'week'} className={`review-seg-btn${mode === 'week' ? ' review-seg-btn--on' : ''}`} onClick={() => setMode('week')}>이번 주</button>
@@ -504,18 +516,6 @@ export default function ReviewScreen({
         <WeekView week={week} onViewed={onWeekViewed} />
       ) : (
         <>
-          {/* 날짜 이동 — 지난 날의 회고도 본다. 오늘이 끝이라 다음은 오늘에서 막힌다 */}
-          {dateLabel && (
-            <div className="review-date-nav">
-              <button type="button" className="review-date-btn" onClick={onPrevDay} aria-label="이전 날">
-                <ChevronLeft size={18} />
-              </button>
-              <span className="review-date-label">{dateLabel}</span>
-              <button type="button" className="review-date-btn" onClick={onNextDay} disabled={isToday} aria-label="다음 날">
-                <ChevronRight size={18} />
-              </button>
-            </div>
-          )}
           {!facts ? (
             <div className="review-empty">
               <Inbox size={44} strokeWidth={1} />

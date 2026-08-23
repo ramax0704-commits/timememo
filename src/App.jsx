@@ -16,7 +16,7 @@ import {
   parse
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Send, Calendar, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft, Palette, HelpCircle, MessageSquare, Sparkles } from 'lucide-react';
+import { Send, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft, Palette, HelpCircle, MessageSquare, Sparkles } from 'lucide-react';
 import { supabase, setRememberMe, getRememberMe } from './supabase';
 import { track, identifyUser, resetUser, markFirstMemo } from './analytics';
 import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
@@ -611,6 +611,50 @@ function FeedbackCard({ user }) {
   );
 }
 
+
+// ── 요일 띠 (헤더) ───────────────────────────────────────────
+// 고른 날이 든 한 주(일~토)를 보여주고, 누르면 그 날로. 좌우로 밀면 한 주씩 넘어간다.
+// maxDate가 있으면 그 뒤 날짜는 누를 수 없다 (회고는 오늘까지). marked = 기록 있는 날 점.
+function WeekStrip({ selected, onPick, maxDate, marked }) {
+  const start = startOfWeek(selected, { weekStartsOn: 0 });
+  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const maxKey = maxDate ? dateKeyOf(maxDate) : null;
+  const dragRef = useRef(null);
+  const swipedRef = useRef(false);
+  const onDown = (e) => { dragRef.current = { x: e.clientX, y: e.clientY }; swipedRef.current = false; };
+  const onUp = (e) => {
+    const d = dragRef.current; dragRef.current = null;
+    if (!d) return;
+    const dx = e.clientX - d.x, dy = e.clientY - d.y;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    swipedRef.current = true;
+    let next = addDays(selected, dx < 0 ? 7 : -7);
+    if (maxKey && dateKeyOf(next) > maxKey) next = maxDate;
+    if (dateKeyOf(next) !== dateKeyOf(selected)) onPick(next);
+  };
+  return (
+    <div className="week-strip" onPointerDown={onDown} onPointerUp={onUp} onPointerCancel={() => { dragRef.current = null; }}>
+      {days.map(day => {
+        const key = dateKeyOf(day);
+        const disabled = Boolean(maxKey && key > maxKey);
+        const on = isSameDay(day, selected);
+        return (
+          <button
+            key={key}
+            type="button"
+            className={`week-day${on ? ' week-day--on' : ''}${isToday(day) ? ' week-day--today' : ''}`}
+            disabled={disabled}
+            onClick={() => { if (!swipedRef.current) onPick(day); }}
+          >
+            <span className="week-day-name">{format(day, 'E', { locale: ko })}</span>
+            <span className="week-day-num">{format(day, 'd')}</span>
+            <span className={`week-day-dot${marked?.has(key) ? ' week-day-dot--on' : ''}`} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 // ── 받은 의견 (관리자 전용) ─────────────────────────────────
 // 서버의 admin_list_feedback()가 호출자 이메일을 확인하므로, 여기서의 이메일 비교는
@@ -1321,21 +1365,17 @@ function App() {
   // 채팅창은 고른 날짜 하루만 보여준다. 헤더 날짜와 화면 내용이 어긋나면 안 된다.
   const chatMemos = [...displayedMemos, ...lateNightMemos];
   // 하루의 경계(새벽 2시)를 채팅창에 한 줄로 표시한다. 경계 앞뒤에 기록이 다 있을 때만.
-  //  - 이 날짜 02:00: 위쪽 0~2시 기록은 전날 회고에 들어간다 → "여기부터 이 날의 하루"
-  //  - 다음날 00:00: 아래쪽 새벽 기록은 이 날 회고에 들어간다 → "다음날 새벽 · 이 날의 하루에 포함"
+  // 이 날짜 02:00: 위쪽 0~2시 기록은 전날 회고에 들어간다 → "여기부터 이 날의 하루"
+  // (전날 페이지 아래에 얹히는 다음날 새벽 기록은 구분선 없이 흐리게만 보인다)
   const chatDividers = (() => {
     const map = new Map();
     const sorted = [...chatMemos].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
     const dawnEndMs = selectedDayStartMs + DAY_START_MIN * 60000;
-    const nextDayMs = selectedDayStartMs + DAY_MINUTES * 60000;
     const dayText = format(selectedDate, 'M월 d일');
     let prev = null;
     for (const m of sorted) {
       const t = new Date(m.recordedAt).getTime();
-      if (prev != null) {
-        if (prev < dawnEndMs && t >= dawnEndMs) map.set(m.id, `여기부터 ${dayText}의 하루`);
-        if (prev < nextDayMs && t >= nextDayMs) map.set(m.id, `다음날 새벽 · ${dayText}의 하루에 포함`);
-      }
+      if (prev != null && prev < dawnEndMs && t >= dawnEndMs) map.set(m.id, `여기부터 ${dayText}의 하루`);
       prev = t;
     }
     return map;
@@ -1362,9 +1402,6 @@ function App() {
   // (그런 기록이 없으면 달력 날짜와 같으니 따로 말할 게 없다)
   const hasDawnTail = todayMemos.some(m => !isSameDay(new Date(m.recordedAt), reviewDay));
   const todayLabel = hasDawnTail ? `${format(reviewDay, 'M월 d일 (E)', { locale: ko })} · 새벽 2시까지` : null;
-  const reviewDateLabel = reviewIsToday
-    ? `${format(reviewDay, 'M월 d일 (E)', { locale: ko })} · 오늘`
-    : format(reviewDay, 'M월 d일 (E)', { locale: ko });
   // 지난 날은 그 하루의 끝(다음날 01:59)을 '지금'으로 삼아 마지막 기록의 길이를 잰다
   const reviewDayEnd = reviewIsToday
     ? nowTime
@@ -1375,11 +1412,26 @@ function App() {
   const summaryKey = todayRecords ? summaryCacheKey(reviewKey, todayRecords, reviewCategories) : null;
   const summaryUsesLeft = Math.max(0, SUMMARY_DAILY_LIMIT - (summaryUses[todayKey] || 0));
   const canGenerate = Boolean(summaryKey) && todayMemos.length >= SUMMARY_MIN_RECORDS && summaryUsesLeft > 0;
-  const goReviewDay = (delta) => {
-    const next = addDays(reviewDay, delta);
-    if (dateKeyOf(next) > todayKey) return;
-    setReviewDayPick(dateKeyOf(next) === todayKey ? null : next);
+  const pickReviewDay = (day) => {
+    if (dateKeyOf(day) > todayKey) return;
+    setReviewDayPick(dateKeyOf(day) === todayKey ? null : day);
   };
+  // 헤더가 보여주는 날짜: 회고 탭은 보고 있는 회고일, 나머지는 타임라인 날짜
+  const headerDate = activeView === 'review' ? reviewDay : selectedDate;
+  // 자정을 넘기면 '오늘'을 보고 있던 타임라인은 새 오늘로 따라간다 (앱을 켜둔 채 날이 바뀌는 경우).
+  // 일부러 지난 날짜를 보고 있었으면 그대로 둔다.
+  const lastTodayKeyRef = useRef(todayKey);
+  useEffect(() => {
+    const prevKey = lastTodayKeyRef.current;
+    if (prevKey === todayKey) return;
+    lastTodayKeyRef.current = todayKey;
+    if (dateKeyOf(selectedDate) === prevKey) {
+      const id = setTimeout(() => setSelectedDate(new Date(nowTime.getFullYear(), nowTime.getMonth(), nowTime.getDate())), 0);
+      return () => clearTimeout(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayKey]);
+  const memoDayKeys = new Set(memos.map(m => dateKeyOf(new Date(m.recordedAt))));
 
   // 고정 세트 저장. 로그인이면 settings, 체험이면 기기.
   const saveReviewCategories = useCallback(async (list) => {
@@ -3497,8 +3549,6 @@ function App() {
   };
 
   // ── 먼슬리 뷰 렌더 ───────────────────────────────────────────
-  const dateFormatted = format(selectedDate, 'M월 d일 (E)', { locale: ko });
-  const headerTitle = isToday(selectedDate) ? `${dateFormatted} - 오늘` : dateFormatted;
   // '오늘로' 버튼이 떠 있으면 토스트는 그 위로 올라간다 (겹치면 못 누른다)
   const todayFabVisible = activeView === 'timeline' && !isToday(selectedDate);
   const toastClass = `undo-toast${todayFabVisible ? ' undo-toast--above-fab' : ''}`;
@@ -4150,52 +4200,37 @@ function App() {
           써두신 기록을 계정으로 옮기는 중이에요…
         </div>
       )}
-      {/* Header */}
-      {activeView !== 'settings' && activeView !== 'review' && (
-        <header className="header">
-          {activeView === 'timeline' && (
-            <button
-              className="header-nav-btn"
-              onClick={() => goToDay(addDays(selectedDate, -1))}
-              title="이전날"
+      {/* Header — 날짜 한 줄 + 요일 띠. 타임라인과 회고가 같은 모양을 쓴다 */}
+      {activeView !== 'settings' && (
+        <header className="header header--week">
+          <div className="header-row">
+            <div
+              className="header-title-container"
+              onClick={() => {
+                if (activeView !== 'timeline') return;
+                setCurrentMonth(selectedDate); setShowCalendar(true);
+              }}
             >
-              <ChevronLeft size={20} />
-            </button>
-          )}
-          <div
-            className="header-title-container"
-            onClick={() => {
-              // 회고 탭은 늘 '오늘'이라 날짜를 고를 게 없다
-              if (activeView === 'review') return;
-              setCurrentMonth(selectedDate); setShowCalendar(true);
-            }}
-          >
-            {activeView === 'review' ? <Sparkles size={20} className="header-icon" /> : <Calendar size={20} className="header-icon" />}
-            {activeView === 'review' ? (
-              <h1>오늘의 회고</h1>
-            ) : activeView === 'timeline' && showScheduleView ? (
-              /* 타임블럭은 스크롤로 자정을 넘나들므로 두 날짜가 겹치며 바뀐다.
-                 흐리기(opacity)는 스크롤 핸들러가 DOM에 직접 쓴다 */
-              <div className="header-date-stack" ref={headerStackRef}>
-                {windowDays.map((day, i) => (
-                  <h1
-                    key={i}
-                    data-day-label={i}
-                    style={{ opacity: isSameDay(day, selectedDate) ? 1 : 0 }}
-                  >
-                    {isToday(day)
-                      ? `${format(day, 'M월 d일 (E)', { locale: ko })} - 오늘`
-                      : format(day, 'M월 d일 (E)', { locale: ko })}
-                  </h1>
-                ))}
-              </div>
-            ) : (
-              <h1>{headerTitle}</h1>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {activeView === 'timeline' && showScheduleView ? (
+                /* 타임블럭은 스크롤로 자정을 넘나들므로 두 날짜가 겹치며 바뀐다.
+                   흐리기(opacity)는 스크롤 핸들러가 DOM에 직접 쓴다 */
+                <div className="header-date-stack" ref={headerStackRef}>
+                  {windowDays.map((day, i) => (
+                    <h1
+                      key={i}
+                      data-day-label={i}
+                      style={{ opacity: isSameDay(day, selectedDate) ? 1 : 0 }}
+                    >
+                      {format(day, 'M월 d일 (E)', { locale: ko })}
+                    </h1>
+                  ))}
+                </div>
+              ) : (
+                <h1>{format(headerDate, 'M월 d일 (E)', { locale: ko })}</h1>
+              )}
+            </div>
             {activeView === 'timeline' && (
-              <>
+              <div className="header-actions">
                 <button
                   className={`header-nav-btn ${showTodoSheet ? 'active' : ''}`}
                   // 할 일은 체험 범위 밖이다. 눌리면 막지 말고 로그인으로 안내한다
@@ -4221,12 +4256,15 @@ function App() {
                 >
                   <LayoutGrid size={20} />
                 </button>
-                <button className="header-nav-btn" onClick={() => goToDay(addDays(selectedDate, 1))} title="다음날">
-                  <ChevronRight size={20} />
-                </button>
-              </>
+              </div>
             )}
           </div>
+          <WeekStrip
+            selected={headerDate}
+            onPick={activeView === 'review' ? pickReviewDay : goToDay}
+            maxDate={activeView === 'review' ? todayReviewDate : null}
+            marked={memoDayKeys}
+          />
         </header>
       )}
 
@@ -4332,10 +4370,8 @@ function App() {
             facts={todayFacts}
             todayMemos={todayMemos}
             dayLabel={todayLabel}
-            dateLabel={reviewDateLabel}
             isToday={reviewIsToday}
-            onPrevDay={() => goReviewDay(-1)}
-            onNextDay={() => goReviewDay(1)}
+            onSwipeDay={(delta) => pickReviewDay(addDays(reviewDay, delta))}
             week={weekFacts}
             now={nowTime}
             ai={tour.active ? tourAI : summaryForScreen}
@@ -5193,6 +5229,7 @@ function App() {
           onTargetTap={handleTourTargetTap}
           onNext={tourNext}
           onFinish={() => endTour('completed')}
+          onSkip={() => endTour('skipped')}
         />
       )}
 
