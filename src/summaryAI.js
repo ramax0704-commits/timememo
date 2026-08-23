@@ -90,12 +90,17 @@ export async function requestDaySummary({ dateKey, records, facts, fixedCategori
   if (cached?.data) return { data: cached.data, mock: Boolean(cached.mock), fromCache: true };
 
   let payload;
+  // 응답이 영영 안 오는 경우(모바일에서 백그라운드로 갔다 오거나 서버가 멈췄을 때)에 대비해
+  // 50초가 지나면 끊고 실패로 돌린다. 화면이 "읽는 중"에 갇히면 안 된다.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 50000);
+  if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
   try {
     const res = await fetch('/api/summarize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ date: dateKey, records, facts, fixedCategories, knownCategories }),
-      signal,
+      signal: ctrl.signal,
     });
     if (res.status === 429) {
       // 서비스 전체 하루 상한. 이건 샘플로 대신하지 않는다 — 돈을 안 쓰려고 막은 것이다.
@@ -105,8 +110,10 @@ export async function requestDaySummary({ dateKey, records, facts, fixedCategori
     }
     if (!res.ok) throw new Error(`summarize ${res.status}`);
     payload = await res.json();
+    clearTimeout(timer);
   } catch (e) {
     if (signal?.aborted || e.code === 'daily-cap') throw e;
+    if (e.name === 'AbortError') throw new Error('summarize timeout');
     // 로컬 개발(vite dev)에는 /api가 없다. 화면을 확인할 수 있게 샘플로 대신한다.
     // 배포 환경에서는 그대로 실패시킨다 — 샘플이 실제 회고인 척 보이면 안 된다.
     if (!import.meta.env.DEV) throw e;

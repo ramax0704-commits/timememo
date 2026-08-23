@@ -1,8 +1,19 @@
 {
   "rewrites": [
-    { "source": "/((?!api/|privacy).*)", "destination": "/index.html" }
+    {
+      "source": "/((?!api/|privacy).*)",
+      "destination": "/index.html"
+    }
   ],
   "crons": [
-    { "path": "/api/keepalive", "schedule": "0 3 * * *" }
-  ]
+    {
+      "path": "/api/keepalive",
+      "schedule": "0 3 * * *"
+    }
+  ],
+  "functions": {
+    "api/summarize.js": {
+      "maxDuration": 60
+    }
+  }
 }

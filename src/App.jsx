@@ -1496,7 +1496,8 @@ function App() {
       recordDays: todayFacts.recordDays,
     };
     setSummaryBusy(true);
-    setSummaryAI({ key, status: 'loading', data: null, mock: false });
+    setSummaryAI({ key, status: 'loading', data: null, mock: false, startedAt: Date.now() });
+    const startedAt = Date.now();
     try {
       const { data, mock, fromCache } = await requestDaySummary({
         dateKey: reviewKey,
@@ -1538,12 +1539,13 @@ function App() {
         from_cache: fromCache,
         regenerate,
         uses_left: fromCache || mock ? summaryUsesLeft : summaryUsesLeft - 1,
+        duration_ms: Date.now() - startedAt,
       });
     } catch (e) {
       console.error('오늘 회고 실패:', e);
       const capped = e?.code === 'daily-cap';
       setSummaryAI({ key, status: capped ? 'capped' : 'failed', data: null, mock: false });
-      track('Summary AI', { status: capped ? 'capped' : 'failed', memo_count: records.length });
+      track('Summary AI', { status: capped ? 'capped' : 'failed', memo_count: records.length, error: String(e?.message || e).slice(0, 80), duration_ms: Date.now() - startedAt });
     } finally {
       setSummaryBusy(false);
     }

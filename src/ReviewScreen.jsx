@@ -316,6 +316,22 @@ function ReflectionBlock({ data, mock, stale, busy, usesLeft, onGenerate }) {
 }
 
 // ── AI 만들기 전/중/실패 상태 ─────────────────────────────────
+// 기다리는 동안 얼마나 걸리는지 알려준다. 기록이 많으면 20~30초도 걸리는데,
+// 아무 말 없이 돌기만 하면 멈춘 줄 안다. 50초가 지나면 앱이 스스로 끊고 '다시 시도'를 보여준다.
+function LoadingHint({ startedAt }) {
+  const [sec, setSec] = useState(0);
+  useEffect(() => {
+    if (!startedAt) return;
+    const id = setInterval(() => setSec(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  return (
+    <p className="day-summary-muted" style={{ fontSize: '0.75rem', marginTop: '4px' }}>
+      {sec < 25 ? '보통 10~20초 걸려요' : '기록이 많은 날은 조금 더 걸려요'}{sec > 0 ? ` · ${sec}초` : ''}
+    </p>
+  );
+}
+
 function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginClick }) {
   if (locked) {
     return (
@@ -333,6 +349,7 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
       <section className="day-summary day-summary--ai-gate" aria-live="polite">
         <div className="day-summary-ai-title"><Sparkles size={13} /> 오늘의 회고</div>
         <p className="day-summary-muted day-summary-loading-text">오늘 남긴 말들을 읽는 중…</p>
+        <LoadingHint startedAt={ai.startedAt} />
       </section>
     );
   }
