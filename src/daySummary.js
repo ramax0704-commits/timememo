@@ -15,7 +15,7 @@ export const FIXED_CATEGORY_COUNT = 5;
 // 분류 안 된 기록을 묶는 이름. 숨기지 않고 같이 보여준다.
 export const UNCATEGORIZED = '미분류';
 // 하루에 AI 회고를 만들 수 있는 횟수 (첫 생성 + 다시 만들기 포함). 호출마다 비용이 나간다.
-export const SUMMARY_DAILY_LIMIT = 3;
+export const SUMMARY_DAILY_LIMIT = 2;
 // 한 기록의 활동 시간 상한. 기록과 다음 기록 사이를 그 활동 시간으로 치되, 잠들거나 앱을 닫은
 // 긴 공백이 통째로 한 활동에 붙지 않게 자른다.
 export const ACTIVITY_CAP_MIN = 180;

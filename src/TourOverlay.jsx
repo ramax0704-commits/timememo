@@ -12,7 +12,8 @@
 //     free?: boolean (아무것도 막지 않음), offset?: number (말풍선을 더 띄울 px), effect?: 'pop', final?: boolean
 //     advance 'wait' = 투어 밖(앱 동작)이 단계를 넘긴다
 //   }
-//   index/total, containerRef(.app-container), onTargetTap, onNext, onFinish
+//   index(포인터 애니메이션 리셋용), containerRef(.app-container), onTargetTap, onNext, onFinish
+//   settleMs?: 이 시간 전에 잰 자리는 쓰지 않는다 (스크롤이 끝난 뒤에 포인터를 보여준다)
 import { useEffect, useLayoutEffect, useState } from 'react';
 
 const BUBBLE_MAX_W = 320;
@@ -27,17 +28,21 @@ function rectIn(container, el) {
   return { left: r.left - c.left, top: r.top - c.top, width: r.width, height: r.height, radius };
 }
 
-export default function TourOverlay({ step, index, total, containerRef, onTargetTap, onNext, onFinish }) {
+export default function TourOverlay({ step, index, containerRef, onTargetTap, onNext, onFinish }) {
   const [rect, setRect] = useState(null);
 
   // 대상 요소의 자리를 잰다. 화면이 바뀐 직후(탭 전환·스크롤)에도 맞도록 잠깐 뒤 몇 번 더 잰다.
+  // settleMs가 있는 단계는 그 시간이 지나기 전 값은 '아직 자리 잡는 중'으로 표시해 포인터를 숨긴다.
   useLayoutEffect(() => {
+    const startedAt = Date.now();
+    const settle = step.settleMs ?? 0;
     const measure = () => {
       const el = step.target ? containerRef.current?.querySelector(step.target) : null;
-      setRect(rectIn(containerRef.current, el));
+      const r = rectIn(containerRef.current, el);
+      setRect(r ? { ...r, settled: Date.now() - startedAt >= settle } : null);
     };
     measure();
-    const timers = [200, 600, 1200].map(ms => setTimeout(measure, ms));
+    const timers = [200, 600, 1200, settle + 60].map(ms => setTimeout(measure, ms));
     window.addEventListener('resize', measure);
     return () => { timers.forEach(clearTimeout); window.removeEventListener('resize', measure); };
   }, [step, containerRef]);
@@ -57,7 +62,7 @@ export default function TourOverlay({ step, index, total, containerRef, onTarget
   const W = containerRef.current?.clientWidth ?? 0;
   const H = containerRef.current?.clientHeight ?? 0;
   const pad = 4;
-  const spot = rect
+  const spot = rect && rect.settled
     ? { left: rect.left - pad, top: rect.top - pad, width: rect.width + pad * 2, height: rect.height + pad * 2, radius: rect.radius + pad }
     : null;
   const pointerStyle = spot ? { left: spot.left + spot.width / 2, top: spot.top + spot.height / 2 } : null;
@@ -96,6 +101,17 @@ export default function TourOverlay({ step, index, total, containerRef, onTarget
     bubbleStyle = { left: (W - bubbleW) / 2, width: bubbleW, bottom: 96 };
   }
 
+  // 대상이 있는 단계인데 아직 자리를 못 쟀거나(스크롤 중) 자리 잡히기 전이면 아무것도 보여주지 않는다.
+  // (기본 자리에 먼저 떴다가 옮겨가면 "엉뚱한 데로 갔다 온다"로 보인다)
+  const ready = !step.target || (rect && rect.settled);
+  if (!ready) {
+    return (
+      <div className="tour" aria-live="polite">
+        {!step.free && <div className="tour-block" style={{ left: 0, top: 0, width: W, height: H }} />}
+      </div>
+    );
+  }
+
   return (
     <div className="tour" aria-live="polite">
       {blocks.map((b, i) => <div key={i} className="tour-block" style={b} />)}
@@ -116,16 +132,15 @@ export default function TourOverlay({ step, index, total, containerRef, onTarget
         style={{ ...bubbleStyle, '--tail-x': `${tailX}px` }}
       >
         <p>{step.caption}</p>
-        <div className="tour-bubble-foot">
-          <span className="tour-dots" aria-label={`${index + 1} / ${total}`}>
-            {Array.from({ length: total }, (_, i) => <i key={i} className={i === index ? 'on' : ''} />)}
-          </span>
-          {step.final ? (
-            <button type="button" className="tour-btn" onClick={onFinish}>직접 써볼게요</button>
-          ) : step.advance === 'button' ? (
-            <button type="button" className="tour-btn tour-btn--small" onClick={onNext}>다음</button>
-          ) : null}
-        </div>
+        {(step.final || step.advance === 'button') && (
+          <div className="tour-bubble-foot">
+            {step.final ? (
+              <button type="button" className="tour-btn" onClick={onFinish}>직접 써볼게요</button>
+            ) : (
+              <button type="button" className="tour-btn tour-btn--small" onClick={onNext}>다음</button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

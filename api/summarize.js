@@ -22,7 +22,36 @@ import { mockDaySummary } from '../src/summaryMock.js';
 
 // 새 의존성을 안 쓰기로 해서 공식 SDK(@anthropic-ai/sdk) 대신 fetch로 직접 부른다.
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-opus-5';
+// 모델은 환경변수로 바꿀 수 있다 (Vercel → SUMMARIZE_MODEL). 기본은 Sonnet 5 (8/24 비교: Opus와 근소한 차이, 비용 ~20% 절감).
+// 품질을 올리려면 'claude-opus-5', 더 줄이려면 'claude-haiku-4-5'(지어내는 문장이 늘어 비추).
+const MODEL = process.env.SUMMARIZE_MODEL || 'claude-sonnet-5';
+// 프리뷰(비프로덕션)에서만: 요청에 model을 실어 보내면 그 모델로 돌린다 — 모델 비교용.
+// 프로덕션은 누구나 부를 수 있는 주소라 요청으로 모델을 고르게 두면 안 된다.
+const IS_PROD = process.env.VERCEL_ENV === 'production';
+// 하루에 서비스 전체가 부를 수 있는 횟수. 사용자가 갑자기 늘어도 요금이 폭주하지 않게 하는 안전핀.
+// Vercel 환경변수 SUMMARIZE_DAILY_CAP 으로 조정. (Sonnet 5 기준 1회 ≈ 25원 → 60회 ≈ 1,500원/일)
+const DAILY_CAP = Number(process.env.SUMMARIZE_DAILY_CAP) || 60;
+
+// Supabase의 bump_ai_usage()로 오늘 호출 수를 1 올리고 현재 값을 받는다.
+// 세지 못하면(네트워크·미적용) 막지 않고 통과시킨다 — 카운터 장애로 회고가 죽으면 안 된다.
+async function bumpDailyUsage() {
+  const url = process.env.VITE_SUPABASE_URL;
+  const key = process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  try {
+    const r = await fetch(`${url}/rest/v1/rpc/bump_ai_usage`, {
+      method: 'POST',
+      headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (!r.ok) { console.error('bump_ai_usage failed', r.status); return null; }
+    const n = await r.json();
+    return typeof n === 'number' ? n : null;
+  } catch (e) {
+    console.error('bump_ai_usage error', e);
+    return null;
+  }
+}
 
 const OUTPUT_SCHEMA = {
   type: 'object',
@@ -175,10 +204,22 @@ export default async function handler(req, res) {
     .slice(0, 8)
     .map(k => ({ name: k.name.trim().slice(0, 12), examples: strs(k.examples, 3, 40) }));
 
+  const model = (!IS_PROD && typeof body?.model === 'string' && /^claude-[a-z0-9.-]+$/.test(body.model)) ? body.model : MODEL;
+  // Haiku 4.5는 effort 옵션을 받지 않는다
+  const supportsEffort = !/haiku/.test(model);
+  const debugUsage = Boolean(process.env.SUMMARIZE_DEBUG_USAGE) || (!IS_PROD && body?.debug === true);
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     // 키가 없으면 샘플. 화면 쪽은 mock 표시를 보고 '샘플' 배지를 단다.
     return res.status(200).json({ ...mockDaySummary(records, { fixedCategories, facts }), mock: true });
+  }
+
+  // 전체 상한 — 실제로 AI를 부르는 경우에만 센다 (샘플은 공짜)
+  const used = await bumpDailyUsage();
+  if (used !== null && used > DAILY_CAP) {
+    console.warn('daily cap reached', used, DAILY_CAP);
+    return res.status(429).json({ error: 'daily-cap', used, cap: DAILY_CAP });
   }
 
   const lines = records.map((r, i) => `[${i}] ${r.time} ${r.text.replace(/\s*\n\s*/g, ' / ')}`).join('\n');
@@ -207,13 +248,15 @@ export default async function handler(req, res) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         max_tokens: 2000,
-        system: SYSTEM_PROMPT,
+        // 시스템 프롬프트는 매 호출 똑같다 → 프롬프트 캐싱. 5분 안에 다른 호출이 오면 이 부분 입력료가 1/10.
+        // (캐시는 1,024토큰 이상인 접두부만 저장되므로 프롬프트를 줄이면 오히려 캐시가 안 걸릴 수 있다)
+        system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: userMessage }],
         // 기록을 읽고 마음을 짚는 일이라 조금은 생각하게 둔다
         output_config: {
-          effort: 'medium',
+          ...(supportsEffort ? { effort: 'medium' } : {}),
           format: { type: 'json_schema', schema: OUTPUT_SCHEMA },
         },
       }),
@@ -232,6 +275,8 @@ export default async function handler(req, res) {
     const text = (msg.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
     const data = normalizeResult(safeJson(text), records.length);
     if (!data) return res.status(502).json({ error: 'schema-mismatch' });
+    // 개발·비교용: 토큰 사용량은 브라우저에 보낼 필요가 없으니 평소엔 빼고, 환경변수로 켤 때만 붙인다
+    if (debugUsage) data._usage = { model: msg.model, ...msg.usage };
     return res.status(200).json(data);
   } catch (e) {
     console.error('summarize failed', e);

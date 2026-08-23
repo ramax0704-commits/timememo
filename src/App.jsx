@@ -28,6 +28,7 @@ import { requestDaySummary, summaryCacheKey, peekSummaryCache } from './summaryA
 import ReviewScreen from './ReviewScreen';
 import DayShapeStrip from './DayShapeStrip';
 import TourOverlay from './TourOverlay';
+import Splash from './Splash';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
 function rowToMemo(row) {
@@ -506,6 +507,8 @@ const timeLabel12 = (str) => {
 // 처음 온 사람에게 핵심 사용법을 카드 몇 장으로. 닫으면 다시 안 뜨고,
 // 마이페이지 '사용법 다시 보기'로 언제든 다시 볼 수 있다.
 const ONBOARDING_KEY = 'timememo-onboarding-done';
+// 스플래시(첫 화면)에서 '구글로 시작' 또는 '로그인 없이'를 고른 적이 있는지
+const SPLASH_KEY = 'timememo-splash-done';
 
 // ── 투어(움직이는 온보딩)용 샘플 데이터 ─────────────────────────
 // 실제 앱 위에서 포인터가 탭하고 끌고 글자를 치는 걸 보여준다. 이 기록들은 저장되지 않는다.
@@ -860,6 +863,7 @@ function App() {
   // 온보딩 (첫 방문 안내)
   // 투어(움직이는 온보딩). active 동안 memos는 샘플로 바뀌고 끝나면 원래대로 돌아온다.
   const [tour, setTour] = useState({ active: false, step: 0, aiStatus: 'idle' });
+  const [showSplash, setShowSplash] = useState(false);
   const tourBackupRef = useRef(null);
   const appContainerRef = useRef(null);
   // 꾹 눌러 순서 옮기기 (채팅창)
@@ -1360,8 +1364,9 @@ function App() {
       });
     } catch (e) {
       console.error('오늘 회고 실패:', e);
-      setSummaryAI({ key, status: 'failed', data: null, mock: false });
-      track('Summary AI', { status: 'failed', memo_count: records.length });
+      const capped = e?.code === 'daily-cap';
+      setSummaryAI({ key, status: capped ? 'capped' : 'failed', data: null, mock: false });
+      track('Summary AI', { status: capped ? 'capped' : 'failed', memo_count: records.length });
     } finally {
       setSummaryBusy(false);
     }
@@ -2993,7 +2998,7 @@ function App() {
     },
     {
       // 시간표 화면을 깨끗하게 보여주되, 방금 이어서 쓴 블록만 '짠' 하고 강조한다
-      key: 'schedule-look', target: `.schedule-block[data-at="${tourTypedIso}"]`, place: 'above', pointer: null,
+      key: 'schedule-look', target: `.schedule-block[data-at="${tourTypedIso}"]`, place: 'below', pointer: null,
       advance: 'button', free: true, effect: 'pop',
       caption: '방금 이어서 쓴 기록이 앞 기록 아래 한 덩어리로 붙었어요. 하루가 이렇게 시간 위에 놓여요.',
     },
@@ -3008,9 +3013,10 @@ function App() {
     },
     {
       // 회고 만들기 버튼을 직접 누르게 한다 (결과를 바로 보여주지 않는다)
-      key: 'review-btn', target: '.review-screen .day-summary--ai-gate .day-summary-btn', place: 'above', pointer: 'tap', advance: 'wait',
+      // 스크롤이 끝난 뒤에 포인터를 보여준다 — 스크롤 중 자리를 재면 포인터가 엉뚱한 곳(탭바)을 거쳐 온다
+      key: 'review-btn', target: '.review-screen .day-summary--ai-gate .day-summary-btn', place: 'above', pointer: 'tap', advance: 'wait', settleMs: 450,
       caption: '오늘 회고 만들기를 눌러보세요. 회고는 구글 계정을 연동하면 쓸 수 있어요.',
-      actions: [{ at: 50, run: () => appContainerRef.current?.querySelector('.review-screen .day-summary--ai-gate')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }],
+      actions: [{ at: 0, run: () => appContainerRef.current?.querySelector('.review-screen .day-summary--ai-gate')?.scrollIntoView({ behavior: 'auto', block: 'center' }) }],
     },
     {
       key: 'review-ai', target: null, place: 'bottom', pointer: null, advance: 'button', free: true, final: true,
@@ -3058,8 +3064,14 @@ function App() {
   useEffect(() => {
     if (authLoading) return;
     if (localStorage.getItem(ONBOARDING_KEY) === '1') return;
-    if (!currentUser && memos.length === 0) {
-      const id = setTimeout(() => startTour('first_visit'), 400);
+    const splashDone = localStorage.getItem(SPLASH_KEY) === '1';
+    // 처음 온 사람: 스플래시부터. 스플래시에서 고른 뒤(로그인 없이 / 구글 로그인 후 돌아옴) 투어.
+    if (!currentUser && memos.length === 0 && !splashDone) {
+      const id = setTimeout(() => { setShowSplash(true); track('Splash', { action: 'shown' }); }, 0);
+      return () => clearTimeout(id);
+    }
+    if (splashDone && memos.length === 0) {
+      const id = setTimeout(() => startTour(currentUser ? 'after_login' : 'first_visit'), 400);
       return () => clearTimeout(id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4955,11 +4967,25 @@ function App() {
       )}
 
       {/* 온보딩 — 처음 온 사람에게 한 번, 마이페이지에서 다시 보기 가능 */}
+      {showSplash && (
+        <Splash
+          onGoogle={() => {
+            localStorage.setItem(SPLASH_KEY, '1');
+            track('Splash', { action: 'google' });
+            handleGoogleSignIn();
+          }}
+          onGuest={() => {
+            localStorage.setItem(SPLASH_KEY, '1');
+            track('Splash', { action: 'guest' });
+            setShowSplash(false);
+            startTour('splash_guest');
+          }}
+        />
+      )}
       {tour.active && TOUR_STEPS[tour.step] && (
         <TourOverlay
           step={TOUR_STEPS[tour.step]}
           index={tour.step}
-          total={TOUR_STEPS.length}
           containerRef={appContainerRef}
           onTargetTap={handleTourTargetTap}
           onNext={tourNext}

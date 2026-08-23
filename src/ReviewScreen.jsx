@@ -334,7 +334,9 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
   return (
     <section className="day-summary day-summary--ai-gate">
       <div className="day-summary-ai-title"><Sparkles size={13} /> 오늘의 회고</div>
-      {ai?.status === 'failed' ? (
+      {ai?.status === 'capped' ? (
+        <p className="day-summary-muted">오늘은 회고를 만들 수 있는 전체 사용량이 다 찼어요. 내일 다시 열려요.</p>
+      ) : ai?.status === 'failed' ? (
         <p className="day-summary-muted">지금은 만들 수 없어요. 잠시 후 다시 시도해 주세요.</p>
       ) : exhausted ? (
         <p className="day-summary-muted">오늘 만들 수 있는 횟수({SUMMARY_DAILY_LIMIT}회)를 다 썼어요. 내일 다시 만들 수 있어요.</p>
@@ -345,7 +347,7 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
       ) : (
         <p className="day-summary-muted">오늘 남긴 말 {recordCount}개에서 사고의 흐름과 에너지를 읽어, 어떤 하루였는지 비춰드려요.</p>
       )}
-      <button type="button" className="day-summary-btn" onClick={onGenerate} disabled={short || busy || exhausted}>
+      <button type="button" className="day-summary-btn" onClick={onGenerate} disabled={short || busy || exhausted || ai?.status === 'capped'}>
         {ai?.status === 'failed' ? '다시 시도' : '오늘 회고 만들기'}
       </button>
       {!short && !exhausted && ai?.status !== 'failed' && (

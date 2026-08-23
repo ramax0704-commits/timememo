@@ -97,10 +97,16 @@ export async function requestDaySummary({ dateKey, records, facts, fixedCategori
       body: JSON.stringify({ date: dateKey, records, facts, fixedCategories, knownCategories }),
       signal,
     });
+    if (res.status === 429) {
+      // 서비스 전체 하루 상한. 이건 샘플로 대신하지 않는다 — 돈을 안 쓰려고 막은 것이다.
+      const err = new Error('daily-cap');
+      err.code = 'daily-cap';
+      throw err;
+    }
     if (!res.ok) throw new Error(`summarize ${res.status}`);
     payload = await res.json();
   } catch (e) {
-    if (signal?.aborted) throw e;
+    if (signal?.aborted || e.code === 'daily-cap') throw e;
     // 로컬 개발(vite dev)에는 /api가 없다. 화면을 확인할 수 있게 샘플로 대신한다.
     // 배포 환경에서는 그대로 실패시킨다 — 샘플이 실제 회고인 척 보이면 안 된다.
     if (!import.meta.env.DEV) throw e;
