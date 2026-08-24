@@ -2557,7 +2557,56 @@ body.keyboard-open .input-toolbar { display: flex; }
 .seg-text { font-size: 0.8rem; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seg-more { color: var(--text-muted); }
 .seg-keywords { display: flex; flex-wrap: wrap; gap: 4px; }
+/* 회고 생성 후 그 시간대의 '상태' — 키워드 칩보다 문장답게 */
+.seg-state { font-size: 0.84rem; font-weight: 600; color: var(--text-main); word-break: keep-all; }
 .day-summary-uses { font-size: 0.7rem; color: var(--text-muted); }
+
+/* ── 오늘의 토끼 ─────────────────────────────────────────────── */
+.rabbit-card {
+  gap: 6px;
+  background: linear-gradient(160deg, #f7f9ff 0%, #ffffff 55%);
+  border: 1px solid #dfe6ff;
+}
+.rabbit-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--primary-color);
+}
+.rabbit-name {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+}
+.rabbit-desc {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  font-weight: 600;
+  color: var(--text-main);
+  word-break: keep-all;
+}
+.rabbit-reason {
+  margin: 2px 0 0;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--text-main);
+  word-break: keep-all;
+  /* 인용 느낌의 왼쪽 선 — 오늘 기록에서 나온 근거임을 보여준다 */
+  padding-left: 10px;
+  border-left: 3px solid #c7d3ff;
+}
+.rabbit-trivia {
+  margin: 6px 0 0;
+  padding-top: 8px;
+  border-top: 1px dashed #e4e8f4;
+  font-size: 0.76rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+  word-break: keep-all;
+}
 
 /* ── 이번 주 습관 트래킹 ─────────────────────────────────────── */
 .habit-week { display: flex; flex-direction: column; gap: 2px; }

@@ -64,6 +64,38 @@ export function mockDaySummary(records, { fixedCategories = [], facts = {} } = {
   if (facts.streak >= 2) parts.push(`${facts.streak}일째 이어서 남기고 있어요.`);
   if (parts.length < 3) parts.push('짧은 기록이라도 하루의 모양은 남았어요.');
 
+  // 토끼 샘플: 단서 몇 개로 대충 고른다 (실제 매칭은 AI가 한다)
+  const rabbit = /회의|미팅|마감|바쁘|정신없|늦/.test(all) ? { type: 'clock', reason: '일정에 쫓기듯 움직인 흔적이 많았어요.' }
+    : /쉬|침대|낮잠|휴식|넷플릭스|유튜브/.test(all) ? { type: 'lop', reason: '쉼에 무게가 실린 하루였어요.' }
+      : /운동|산책|러닝|헬스|수영/.test(all) ? { type: 'hare', reason: '몸을 움직인 기록이 도드라졌어요.' }
+        : /친구|만나|모임|회식|통화/.test(all) ? { type: 'burrow', reason: '사람과 어울린 기록이 하루의 중심에 있었어요.' }
+          : { type: 'moon', reason: '담담하게 할 일을 이어간 하루였어요.' };
+
+  // 시간대별 상태 샘플: 그 시간대 기록에 활력·소모 단어가 있는지만 본다
+  const segOf = (time) => {
+    const h = Number(time.slice(0, 2));
+    if (h < 2) return '밤';
+    if (h < 5) return '새벽';
+    if (h < 12) return '오전';
+    if (h < 14) return '점심';
+    if (h < 18) return '오후';
+    return '저녁';
+  };
+  const segTexts = new Map();
+  records.forEach(r => {
+    const s = segOf(r.time);
+    segTexts.set(s, (segTexts.get(s) || '') + ' ' + r.text);
+  });
+  const segmentStates = ['새벽', '오전', '점심', '오후', '저녁', '밤']
+    .filter(s => segTexts.has(s))
+    .map(s => {
+      const t = segTexts.get(s);
+      const state = DOWN_WORDS.some(w => t.includes(w)) ? '기운이 조금 처졌어요'
+        : UP_WORDS.some(w => t.includes(w)) ? '기운이 올라와 있었어요'
+          : '담담하게 흘러갔어요';
+      return { segment: s, state };
+    });
+
   return {
     categories,
     headline,
@@ -72,5 +104,7 @@ export function mockDaySummary(records, { fixedCategories = [], facts = {} } = {
     loops: [],
     energyWords: { up, down },
     keywords,
+    rabbit,
+    segmentStates,
   };
 }

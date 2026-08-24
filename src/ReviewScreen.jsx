@@ -18,6 +18,7 @@ import {
   SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, WEEKLY_DAYS, UNCATEGORIZED, groupByCategory, formatMinutes,
   extractKeywords,
 } from './daySummary';
+import { rabbitById } from './rabbits';
 
 const hourLabel = (h) => `${String(h).padStart(2, '0')}시`;
 
@@ -193,12 +194,29 @@ function CategoryBlock({ memos, durations, fixedCategories, onEdit, mock }) {
   );
 }
 
-// ── 시간대별 흐름 (AI 없음) ───────────────────────────────────
+// ── 오늘의 토끼 (AI 회고의 대표 결과) ─────────────────────────
+// 숫자 대신, 오늘 기록에서 읽힌 상태·감정을 토끼 아키타입으로 비춰준다.
+function RabbitBlock({ rabbit }) {
+  const info = rabbitById(rabbit?.type);
+  if (!info) return null;
+  return (
+    <section className="day-summary rabbit-card" aria-label="오늘의 토끼">
+      <span className="rabbit-label">오늘의 토끼</span>
+      <h2 className="rabbit-name">{info.name}</h2>
+      <p className="rabbit-desc">{info.desc}</p>
+      {rabbit.reason && <p className="rabbit-reason">{rabbit.reason}</p>}
+      <p className="rabbit-trivia">{info.trivia}</p>
+    </section>
+  );
+}
+
+// ── 시간대별 흐름 ─────────────────────────────────────────────
 // 기록이 있는 시간대만 보여준다 — 아직 오지 않았거나 비어 있는 칸을 미리 늘어놓지 않는다.
-// 원문 대신 키워드로 보여준다. 원문 그대로면 타임라인과 다를 게 없다.
-function SegmentBlock({ segments }) {
+// 회고를 만들면 그 시간대의 '상태'(AI)가 보이고, 만들기 전에는 키워드가 자리를 지킨다.
+function SegmentBlock({ segments, states }) {
   const filled = segments.filter(seg => seg.count > 0);
   if (filled.length === 0) return null;
+  const stateOf = (label) => states?.find(s => s.segment === label)?.state ?? null;
   return (
     <section className="day-summary" aria-label="시간대별 흐름">
       <header className="day-summary-head">
@@ -206,21 +224,27 @@ function SegmentBlock({ segments }) {
         <span className="day-summary-count">기록 시각 기준</span>
       </header>
       <div className="seg-list">
-        {filled.map(seg => (
-          <div key={seg.key} className={`seg-row seg-row--${seg.state}`}>
-            <div className="seg-head">
-              <span className="seg-label">{seg.label}</span>
-              <span className="seg-range">{String(seg.from % 24).padStart(2, '0')}–{String(seg.to % 24).padStart(2, '0')}시</span>
-              {seg.state === 'now' && <span className="seg-now">진행 중</span>}
+        {filled.map(seg => {
+          const state = stateOf(seg.label);
+          return (
+            <div key={seg.key} className={`seg-row seg-row--${seg.state}`}>
+              <div className="seg-head">
+                <span className="seg-label">{seg.label}</span>
+                <span className="seg-range">{String(seg.from % 24).padStart(2, '0')}–{String(seg.to % 24).padStart(2, '0')}시</span>
+                {seg.state === 'now' && <span className="seg-now">진행 중</span>}
+              </div>
+              <div className="seg-body">
+                {state ? (
+                  <span className="seg-state">{state}</span>
+                ) : (
+                  <span className="day-summary-keywords seg-keywords">
+                    {extractKeywords(seg.items).map(w => <span key={w} className="day-summary-chip">{w}</span>)}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="seg-body">
-              {seg.topCategory && <span className="seg-cat">{seg.topCategory}</span>}
-              <span className="day-summary-keywords seg-keywords">
-                {extractKeywords(seg.items).map(w => <span key={w} className="day-summary-chip">{w}</span>)}
-              </span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -385,26 +409,16 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
 // 여러 시각에 흩어져 있을 때도 '무게중심'이 보이기 때문이다.
 const peakHourFromCurve = (curve) => (curve?.peakMinute != null ? Math.floor(((curve.peakMinute + (curve.offsetMin ?? 0)) % 1440) / 60) : null);
 
+// 기록 수·총 시간·연속 일수 같은 숫자는 하루를 이해하는 데 도움이 안 돼 뺐다.
+// 리듬 곡선만 남긴다 — 하루가 어느 쪽에 실려 있었는지는 숫자가 아니라 모양으로 보인다.
 function ShapeBlock({ facts, now, dayLabel }) {
   const peakHour = peakHourFromCurve(facts.curve);
   const peakLabel = peakHour != null ? `${hourLabel(peakHour)}쯤 가장 많이` : null;
   return (
-    <section className="day-summary shape" aria-label="오늘의 모양">
-      {dayLabel && <div className="shape-date">{dayLabel}</div>}
-      <div className="shape-top">
-        <div className="shape-main">
-          <span className="day-summary-stat-label">총 기록 시간</span>
-          <span className="shape-big">{facts.spanMinutes > 0 ? formatMinutes(facts.spanMinutes) : '—'}</span>
-        </div>
-        {facts.streak > 0 && (
-          <span className="streak-badge"><Flame size={13} /> {facts.streak}일 연속</span>
-        )}
-      </div>
-      <div className="shape-sub">
-        기록 <strong>{facts.count}회</strong>
-        {facts.activityCount > 0 && <> · 활동 <strong>{facts.activityCount}개</strong></>}
-        {peakHour != null && <> · 몰린 시간 <strong>{hourLabel(peakHour)}</strong></>}
-      </div>
+    <section className="day-summary shape" aria-label="하루 리듬">
+      <header className="day-summary-head">
+        <span className="day-summary-title">{dayLabel || '하루 리듬'}</span>
+      </header>
       <DayCurve curve={facts.curve} now={now} peakLabel={peakLabel} />
     </section>
   );
@@ -579,10 +593,13 @@ export default function ReviewScreen({
             </div>
           ) : (
             <>
+          {/* 오늘의 토끼 — 회고를 만들면 맨 위에 결과로 뜬다 */}
+          {aiOk && !locked && ai.data.rabbit && <RabbitBlock rabbit={ai.data.rabbit} />}
+
           <ShapeBlock facts={facts} now={isToday ? now : null} dayLabel={dayLabel} />
 
-          {/* 시간대별 흐름 — AI 없이, 하루 중간에도 볼 수 있는 칸 */}
-          <SegmentBlock segments={facts.segments} />
+          {/* 시간대별 흐름 — 회고 생성 전엔 키워드, 생성 후엔 그 시간대의 상태 */}
+          <SegmentBlock segments={facts.segments} states={aiOk && !locked ? ai.data.segmentStates : null} />
 
           {/* 오늘의 회고 (AI) / 만들기 버튼 */}
           {aiOk && !locked ? (

@@ -19,6 +19,7 @@
 // 키 발급: https://console.anthropic.com → API Keys. Vercel 프로젝트 환경변수에
 // ANTHROPIC_API_KEY 로 넣고 다시 배포하면 그때부터 실제 회고가 나간다.
 import { mockDaySummary } from '../src/summaryMock.js';
+import { RABBITS, RABBIT_IDS } from '../src/rabbits.js';
 
 // 새 의존성을 안 쓰기로 해서 공식 SDK(@anthropic-ai/sdk) 대신 fetch로 직접 부른다.
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
@@ -108,8 +109,31 @@ const OUTPUT_SCHEMA = {
       additionalProperties: false,
     },
     keywords: { type: 'array', items: { type: 'string' }, description: '오늘을 점화한 의미 단어 2~4개. 1~3자 명사.' },
+    rabbit: {
+      type: 'object',
+      description: '오늘과 가장 닮은 토끼 하나. 활동보다 상태·감정 근거를 우선한다.',
+      properties: {
+        type: { type: 'string', enum: RABBIT_IDS },
+        reason: { type: 'string', description: '왜 이 토끼인지, 오늘 기록의 표현을 인용해 1~2문장. 각 문장 45자 이내.' },
+      },
+      required: ['type', 'reason'],
+      additionalProperties: false,
+    },
+    segmentStates: {
+      type: 'array',
+      description: '기록이 있는 시간대마다 그때의 상태를 한 구절로. 활동 나열이 아니라 상태·기분.',
+      items: {
+        type: 'object',
+        properties: {
+          segment: { type: 'string', enum: ['새벽', '오전', '점심', '오후', '저녁', '밤'] },
+          state: { type: 'string', description: '그 시간대의 상태 한 구절, 6~20자. 예: "집중이 붙었어요", "지쳐서 늘어졌어요"' },
+        },
+        required: ['segment', 'state'],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ['categories', 'headline', 'narrative', 'thoughtFlow', 'loops', 'energyWords', 'keywords'],
+  required: ['categories', 'headline', 'narrative', 'thoughtFlow', 'loops', 'energyWords', 'keywords', 'rabbit', 'segmentStates'],
   additionalProperties: false,
 };
 
@@ -124,6 +148,9 @@ D. thoughtFlow — 기록에 생각·판단·결심이 드러날 때만, 시작�
 E. loops — "A가 B로 이어졌다"가 기록에서 실제로 읽힐 때만 (시도→결과, 자각→행동, 욕구→자제). 없으면 빈 배열.
 F. energyWords — 기록에 실제로 쓰인 단어 중 활력이 느껴지는 것(up)과 소모가 느껴지는 것(down)을 원문 그대로 뽑는다. 없으면 빈 배열.
 G. keywords — 오늘을 점화한 의미 단어 2~4개 (예: 회복, 정리, 꾸준함). 1~3자 명사.
+H. rabbit — 아래 8가지 토끼 중 오늘과 가장 닮은 하나를 고른다. 기준이 팽팽하면 활동보다 상태·감정 쪽 근거를 우선한다. reason에는 오늘 기록의 표현을 인용해 왜 이 토끼인지 적는다:
+${RABBITS.map(r => `- ${r.id} (${r.name}): ${r.criteria}`).join('\n')}
+I. segmentStates — 기록이 있는 시간대(새벽 02~05시, 오전 05~12시, 점심 12~14시, 오후 14~18시, 저녁 18~24시, 밤 00~02시)마다 그때의 '상태'를 한 구절로 적는다. 무엇을 했는지가 아니라 어떤 상태였는지다 (예: "시동을 거는 중", "집중이 붙었어요", "지쳐서 늘어졌어요"). 기록에서 상태가 읽히지 않으면 활동의 결을 담담히 옮긴다. 기록이 없는 시간대는 넣지 않는다.
 
 지켜야 할 것:
 1. 기록 내용을 시간순으로 나열하지 않는다. 사용자는 이미 봤다.
@@ -184,7 +211,16 @@ export function normalizeResult(obj, recordCount) {
     down: strs(obj.energyWords?.down, 6, 16),
   };
   const keywords = strs(obj.keywords, 4, 8);
-  return { categories, headline, narrative, thoughtFlow, loops, energyWords, keywords };
+  const rabbit = obj.rabbit && RABBIT_IDS.includes(obj.rabbit.type) && typeof obj.rabbit.reason === 'string' && obj.rabbit.reason.trim()
+    ? { type: obj.rabbit.type, reason: obj.rabbit.reason.trim().slice(0, 160) }
+    : null;
+  const SEGMENT_NAMES = ['새벽', '오전', '점심', '오후', '저녁', '밤'];
+  const segSeen = new Set();
+  const segmentStates = (Array.isArray(obj.segmentStates) ? obj.segmentStates : [])
+    .filter(s => s && SEGMENT_NAMES.includes(s.segment) && typeof s.state === 'string' && s.state.trim() && !segSeen.has(s.segment) && segSeen.add(s.segment))
+    .map(s => ({ segment: s.segment, state: s.state.trim().slice(0, 40) }))
+    .slice(0, 6);
+  return { categories, headline, narrative, thoughtFlow, loops, energyWords, keywords, rabbit, segmentStates };
 }
 
 export default async function handler(req, res) {

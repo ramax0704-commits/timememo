@@ -6,6 +6,7 @@
 //
 // 실패하면 throw 한다. 호출하는 쪽(App)은 블록 2·3만 숨기고 블록 1·4는 그대로 둔다.
 import { mockDaySummary } from './summaryMock.js';
+import { RABBIT_IDS } from './rabbits.js';
 
 const CACHE_KEY = 'timememo-day-summary-cache';
 const CACHE_MAX = 12;
@@ -94,7 +95,16 @@ export function normalizeSummary(obj, recordCount) {
     .slice(0, 4);
   const energyWords = { up: strs(obj.energyWords?.up, 6, 16), down: strs(obj.energyWords?.down, 6, 16) };
   const keywords = strs(obj.keywords, 4, 8);
-  return { categories, headline, narrative, thoughtFlow, loops, energyWords, keywords };
+  const rabbit = obj.rabbit && RABBIT_IDS.includes(obj.rabbit.type) && typeof obj.rabbit.reason === 'string' && obj.rabbit.reason.trim()
+    ? { type: obj.rabbit.type, reason: obj.rabbit.reason.trim().slice(0, 160) }
+    : null;
+  const SEGMENT_NAMES = ['새벽', '오전', '점심', '오후', '저녁', '밤'];
+  const segSeen = new Set();
+  const segmentStates = (Array.isArray(obj.segmentStates) ? obj.segmentStates : [])
+    .filter(s => s && SEGMENT_NAMES.includes(s.segment) && typeof s.state === 'string' && s.state.trim() && !segSeen.has(s.segment) && segSeen.add(s.segment))
+    .map(s => ({ segment: s.segment, state: s.state.trim().slice(0, 40) }))
+    .slice(0, 6);
+  return { categories, headline, narrative, thoughtFlow, loops, energyWords, keywords, rabbit, segmentStates };
 }
 
 // records: [{ time, text }] 시간순 / facts: 계산값 / fixedCategories: 고정 세트 / knownCategories: 힌트

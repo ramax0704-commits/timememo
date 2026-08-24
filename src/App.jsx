@@ -598,6 +598,11 @@ const TOUR_AI = {
     loops: [{ from: '기획서 초안 집중', to: '1차 완료, 팀 공유' }],
     energyWords: { up: ['여유롭게', '집중 잘 됨', '드디어 끝', '햇빛 좋았다'], down: [] },
     keywords: ['마무리', '회복', '몰입'],
+    rabbit: { type: 'moon', reason: '"드디어 끝"까지, 절구를 찧듯 묵묵히 과업을 끝낸 하루였어요.' },
+    segmentStates: [
+      { segment: '오전', state: '집중이 붙어 있었어요' },
+      { segment: '저녁', state: '끝내고 한숨 돌렸어요' },
+    ],
   },
 };
 function FeedbackCard({ user }) {
@@ -1660,6 +1665,9 @@ function App() {
         has_flow: data.thoughtFlow.length > 0,
         loops: data.loops.length,
         energy_words: data.energyWords.up.length + data.energyWords.down.length,
+        // 어떤 토끼가 얼마나 나오는지 — 매칭 분포가 한쪽으로 쏠리면 기준을 손봐야 한다
+        rabbit: data.rabbit?.type ?? null,
+        segment_states: data.segmentStates?.length ?? 0,
         fixed_set: reviewCategories.length > 0,
         mock,
         from_cache: fromCache,
