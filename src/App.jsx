@@ -2469,6 +2469,17 @@ function App() {
         return;
       }
     }
+    // 채팅창에서 오늘을 보는 기본 자리는 맨 아래(최신 기록) — 메신저와 같다.
+    // 오늘의 첫 기록으로 잡으면 돌아올 때마다 최신까지 다시 내려야 한다 (8/25).
+    if (!showScheduleView && isToday(selectedDate)) {
+      const spacer = el.querySelector('.timeline-bottom-space');
+      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - (spacer?.offsetHeight ?? 0) + 28);
+      autoScrollRef.current = { view: showScheduleView, top: el.scrollTop };
+      scrollDayRef.current = idx;
+      lastScrollTopRef.current = el.scrollTop;
+      paintHeaderDay(idx, 0);
+      return;
+    }
     const nowLine = isToday(selectedDate) ? el.querySelector('.schedule-now-line') : null;
     const target = nowLine || el.querySelector(`[data-day-index="${idx}"]`);
     if (!target) return;
