@@ -30,6 +30,8 @@ function rectIn(container, el) {
 
 export default function TourOverlay({ step, index, containerRef, onTargetTap, onNext, onFinish, onSkip }) {
   const [rect, setRect] = useState(null);
+  // pointerTarget: 구멍(target)과 별개로 포인터 애니메이션만 앉힐 요소 (예: 입력 영역은 열고 포인터는 보내기 버튼에)
+  const [pointerRect, setPointerRect] = useState(null);
 
   // 대상 요소의 자리를 잰다. 화면이 바뀐 직후(탭 전환·스크롤)에도 맞도록 잠깐 뒤 몇 번 더 잰다.
   // settleMs가 있는 단계는 그 시간이 지나기 전 값은 '아직 자리 잡는 중'으로 표시해 포인터를 숨긴다.
@@ -40,6 +42,8 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
       const el = step.target ? containerRef.current?.querySelector(step.target) : null;
       const r = rectIn(containerRef.current, el);
       setRect(r ? { ...r, settled: Date.now() - startedAt >= settle } : null);
+      const pel = step.pointerTarget ? containerRef.current?.querySelector(step.pointerTarget) : null;
+      setPointerRect(rectIn(containerRef.current, pel));
     };
     measure();
     const timers = [200, 600, 1200, settle + 60].map(ms => setTimeout(measure, ms));
@@ -65,7 +69,8 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
   const spot = rect && rect.settled
     ? { left: rect.left - pad, top: rect.top - pad, width: rect.width + pad * 2, height: rect.height + pad * 2, radius: rect.radius + pad }
     : null;
-  const pointerStyle = spot ? { left: spot.left + spot.width / 2, top: spot.top + spot.height / 2 } : null;
+  const pointerSpot = pointerRect ?? spot;
+  const pointerStyle = pointerSpot ? { left: pointerSpot.left + pointerSpot.width / 2, top: pointerSpot.top + pointerSpot.height / 2 } : null;
 
   // 대상 말고는 못 누르게, 구멍 둘레를 네 장(투명)으로 막는다. free 단계는 아무것도 막지 않는다.
   const blocks = step.free

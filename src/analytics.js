@@ -37,6 +37,12 @@ if (analyticsEnabled) {
     // 로컬 개발 중일 때만 콘솔에 전송 내역을 찍어준다
     debug: import.meta.env.DEV,
   });
+  // 프리뷰(timememo-preview 등)에서 테스트한 이벤트가 실사용 지표에 섞이지 않게,
+  // 모든 이벤트에 환경을 달아 보낸다. 리포트에서 env ≠ preview로 거른다.
+  // (프리뷰에서도 전송은 한다 — 배포 전 계측 검증이 가능해야 하므로 끄지 않는다)
+  try {
+    mixpanel.register({ env: window.location.hostname === 'timememo-hazel.vercel.app' ? 'production' : 'preview' });
+  } catch { /* 무시 */ }
 }
 
 // 절대 보내지 않는 것: 메모 내용, 할 일 내용, 키워드 이름, 이메일.

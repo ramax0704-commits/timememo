@@ -137,6 +137,63 @@ function parseFinance(text) {
   return null;
 }
 
+// ── 입력 앞머리 시간 파싱 ─────────────────────────────────────
+// "11시 40분 밥 먹음" → 11:40 단일 기록 '밥 먹음'
+// "11:30~2:30 수영함" → 11:30부터 구간 기록 '수영함'
+// 시각은 글 맨 앞에 있을 때만 읽는다. 본문 속 숫자를 시각으로 오해하면 안 된다.
+const TIME_TOKEN = '(오전|오후)?\\s*(\\d{1,2})(?::(\\d{2})|시\\s*(?:(\\d{1,2})\\s*분?)?)';
+const RANGE_RE = new RegExp(`^${TIME_TOKEN}\\s*[~\\-]\\s*${TIME_TOKEN}\\s+([\\s\\S]+)$`);
+const SINGLE_RE = new RegExp(`^${TIME_TOKEN}\\s+([\\s\\S]+)$`);
+
+// 오전/오후 없이 적힌 1~12시는 하루에 두 번 있다. "지금보다 과거이면서 가장 가까운 쪽"으로
+// 읽는다 — 기록은 방금 한 일을 적는 것이기 때문이다. 둘 다 미래면 이른 쪽(오전)으로.
+function resolveClock(ampm, h, m, nowMin) {
+  if (ampm === '오전') return (h % 12) * 60 + m;
+  if (ampm === '오후') return ((h % 12) + 12) * 60 + m;
+  if (h > 12) return h * 60 + m; // 24시간 표기
+  const early = (h % 12) * 60 + m;
+  const late = early + 12 * 60;
+  if (late <= nowMin) return late;
+  if (early <= nowMin) return early;
+  return early;
+}
+
+function parseTimePrefix(text, now) {
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const readToken = (am, hh, colonMin, koMin) => {
+    const h = parseInt(hh, 10);
+    const m = parseInt(colonMin ?? koMin ?? '0', 10);
+    if (h > 24 || m > 59) return null;
+    return { am, h, m };
+  };
+
+  const r = text.match(RANGE_RE);
+  if (r) {
+    const a = readToken(r[1], r[2], r[3], r[4]);
+    const b = readToken(r[5], r[6], r[7], r[8]);
+    const content = r[9].trim();
+    if (a && b && content) {
+      const start = resolveClock(a.am, a.h, a.m, nowMin);
+      // 끝은 시작보다 뒤여야 한다. "11:30~2:30"의 2:30은 14:30이다.
+      let end = b.am ? resolveClock(b.am, b.h, b.m, nowMin) : (b.h > 12 ? b.h * 60 + b.m : (b.h % 12) * 60 + b.m);
+      while (end <= start) end += 12 * 60;
+      return { kind: 'range', startMin: start, durationMin: end - start, content };
+    }
+  }
+
+  const s = text.match(SINGLE_RE);
+  if (s) {
+    const a = readToken(s[1], s[2], s[3], s[4]);
+    const content = s[5].trim();
+    // "3시 반 먹음"처럼 분이 없어도 되지만, "1등 했다"류 오인을 막기 위해
+    // 시각 표기가 명확할 때만(오전/오후·콜론·'시') 시각으로 본다 — 정규식이 이미 보장한다.
+    if (a && content) {
+      return { kind: 'single', startMin: resolveClock(a.am, a.h, a.m, nowMin), content };
+    }
+  }
+  return null;
+}
+
 function formatMoney(n) {
   return n.toLocaleString('ko-KR') + '원';
 }
@@ -511,9 +568,10 @@ const ONBOARDING_KEY = 'timememo-onboarding-done';
 const SPLASH_KEY = 'timememo-splash-done';
 
 // ── 투어(움직이는 온보딩)용 샘플 데이터 ─────────────────────────
-// 실제 앱 위에서 포인터가 탭하고 끌고 글자를 치는 걸 보여준다. 이 기록들은 저장되지 않는다.
-const TOUR_TYPED = '점심 먹고 산책. 햇빛 좋았다';
-function makeTourMemos(now) {
+// 투어에서 사용자가 직접 쓴 기록 두 개에 더해, "하루가 쌓이면 이렇게 된다"를 보여주려고
+// 아침 기록 세 개를 뽕뽕뽕 얹는다. 이 샘플들은 저장되지 않고 투어가 끝나면 걷힌다.
+// (사용자가 쓴 진짜 기록은 그대로 남아 첫 기록이 된다)
+function makeTourSamples(now) {
   const at = (h, m) => new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).toISOString();
   const mk = (id, recordedAt, content, category) => ({
     id: `tour-${id}`, content, color: 'default', recordedAt, category,
@@ -522,12 +580,9 @@ function makeTourMemos(now) {
   return [
     mk(1, at(8, 40), '아침 스트레칭하고 커피. 오늘은 좀 여유롭게 시작', '휴식'),
     mk(2, at(9, 30), '카페에서 기획서 초안 작성. 집중 잘 됨', '기획업무'),
-    mk(3, at(10, 20), '팀 채팅 확인하고 답장', '기획업무'),
-    mk(4, at(11, 10), '기획서 1차 완료, 팀에 공유. 드디어 끝', '기획업무'),
+    mk(3, at(11, 10), '기획서 1차 완료, 팀에 공유. 드디어 끝', '기획업무'),
   ];
 }
-// 투어에서 '이어서' 쓴 기록이 놓이는 시각 (시간표에서 이 블록을 강조하려고 selector로 쓴다)
-const TOUR_TYPED_HM = [11, 50];
 // 투어에서 보여주는 회고 예시 (AI를 부르지 않는다 — 비용도, 기다림도 없어야 한다)
 const TOUR_AI = {
   status: 'ok', mock: false, stale: false,
@@ -1001,9 +1056,9 @@ function App() {
   const [openTimeWheel, setOpenTimeWheel] = useState(null); // 'start' | 'end' | null
   // 온보딩 (첫 방문 안내)
   // 투어(움직이는 온보딩). active 동안 memos는 샘플로 바뀌고 끝나면 원래대로 돌아온다.
-  const [tour, setTour] = useState({ active: false, step: 0, aiStatus: 'idle' });
+  // contIso: 투어 중 '이어서'로 저장한 진짜 기록의 시각 — 시간표에서 그 블록을 강조할 때 쓴다
+  const [tour, setTour] = useState({ active: false, step: 0, aiStatus: 'idle', contIso: null });
   const [showSplash, setShowSplash] = useState(false);
-  const tourBackupRef = useRef(null);
   const appContainerRef = useRef(null);
   // 꾹 눌러 순서 옮기기 (채팅창)
   const [draggingMemoId, setDraggingMemoId] = useState(null);
@@ -1034,6 +1089,8 @@ function App() {
   const [reviewToast, setReviewToast] = useState(null); // { timer }
   useEffect(() => {
     if (activeView !== 'timeline') return;
+    // 투어 중에는 샘플로 개수가 차므로 여기서 세지 않는다 — 투어가 제 토스트를 따로 띄운다
+    if (tour.active) return;
     // 새벽 2시 규칙과 같은 기준으로 '지금 채우고 있는 하루'의 기록을 센다
     const key = reviewKeyOf(new Date());
     const count = memos.filter(m => reviewKeyOf(new Date(m.recordedAt)) === key).length;
@@ -2980,15 +3037,21 @@ function App() {
   const handleAddMemo = async (e, mode = 'single') => {
     e?.preventDefault();
     if (!inputText.trim()) return;
-    // 투어 중에는 저장하지 않는다 — 샘플 위에 얹어 보여주기만
-    if (tour.active) { addTourMemo(mode); return; }
+    // 투어 중에도 진짜로 저장한다 — 온보딩에서 쓴 것이 곧 첫 기록이다
     const now = new Date();
+    // 글 앞머리에 시각을 적으면 그 시각의 기록으로 남긴다.
+    // "11시 40분 밥 먹음" → 11:40 단일, "11:30~2:30 수영함" → 구간.
+    const timed = parseTimePrefix(inputText.trim(), now);
     // 보고 있는 날짜에 기록한다: 다른 날짜 페이지에서 쓰면 '그 날짜 + 지금 시각'.
     // (과거 날짜로 일부러 옮겨 와서 쓰는 데는 이유가 있다 — 오늘로 끌고 가지 않는다)
     // 예외: 자정~새벽 2시에 어제 페이지에서 쓰는 건 아직 '그 밤'을 쓰는 것이라
     // 실제 시각(오늘 새벽)으로 남긴다. 어제 화면에도 새벽 기록으로 이어 보인다.
     let recordAt = now;
-    if (!isSameDay(selectedDate, now)) {
+    if (timed) {
+      // 시각을 직접 적었으면 보고 있는 날짜의 그 시각으로. (새벽 예외보다 명시가 우선)
+      recordAt = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+      recordAt.setMinutes(timed.startMin);
+    } else if (!isSameDay(selectedDate, now)) {
       const sameNightDawn = now.getHours() < 2 && isSameDay(selectedDate, addDays(now, -1));
       if (!sameNightDawn) {
         recordAt = new Date(
@@ -2999,11 +3062,13 @@ function App() {
     }
     const newMemoData = {
       user_id: currentUser?.id,
-      content: inputText,
+      content: timed ? timed.content : inputText,
       color: selectedColor,
       recorded_at: recordAt.toISOString(),
-      spans_from_prev: mode === 'prev',
-      spans_to_next: mode === 'next',
+      spans_from_prev: !timed && mode === 'prev',
+      spans_to_next: !timed && mode === 'next',
+      // 구간으로 적었으면 끝 시각을 직접 정한 것과 같다
+      end_minutes: timed?.kind === 'range' ? timed.durationMin : 0,
     };
     setInputText('');
     setPromptIdx(i => (i + 1) % INPUT_PROMPTS.length);
@@ -3020,7 +3085,12 @@ function App() {
       trackMemoCreated(row.content, {
         source: 'direct',
         gesture: mode === 'prev' ? 'from_prev' : mode === 'next' ? 'to_next' : 'single',
+        // 앞머리에 시각을 적어 남긴 기록인지 (none | single | range)
+        time_prefix: timed?.kind ?? 'none',
+        // "온보딩 진입 시 실제로 입력했는지"를 보는 축
+        during_onboarding: tour.active,
       });
+      if (tour.active) afterTourSend(memo, mode);
       return;
     }
 
@@ -3034,10 +3104,13 @@ function App() {
       source: 'direct',
       // 짧게 탭 / 위로 끌기 / 아래로 끌기 — 제스처가 실제로 쓰이는지 보려는 값
       gesture: mode === 'prev' ? 'from_prev' : mode === 'next' ? 'to_next' : 'single',
+      time_prefix: timed?.kind ?? 'none',
+      during_onboarding: tour.active,
     });
     // 바로 화면에 반영 (실시간 이벤트가 오면 중복은 무시됨)
     const memo = rowToMemo(data);
     setMemos(prev => prev.some(m => m.id === memo.id) ? prev : [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
+    if (tour.active) afterTourSend(memo, mode);
   };
 
   // 기록 하나가 만들어질 때 보내는 공통 이벤트.
@@ -3209,28 +3282,39 @@ function App() {
   };
 
   // ── 투어 (움직이는 온보딩) ───────────────────────────────────
-  // 슬라이드 대신 실제 화면에서 보여준다: 기록 3개 → 타임라인 탭 두 번(시간표↔채팅) →
-  // 입력창에 글자가 써지고 → 보내기 버튼을 위로 끌어 저장 → 회고 탭에서 회고를 본다.
-  // 화면 전환·입력은 여기서 App 함수로 직접 수행하고, 포인터·말풍선은 TourOverlay가 그린다.
+  // 사용자의 '진짜 입력'으로 진행한다: 첫 기록을 직접 쓰고 → 이어서(위로 끌어) 하나 더 쓰고 →
+  // 시간표에서 이어진 블록을 확인 → 샘플 3개가 얹혀 하루가 차면 → 회고 토스트 → 회고 탭 → AI 회고.
+  // 여기서 쓴 두 기록은 진짜로 저장되어 첫 기록이 되고, 샘플만 끝나면 걷힌다.
   const startTour = (source) => {
     if (tour.active) return;
-    tourBackupRef.current = { memos, inputText };
     const now = new Date();
     setSelectedDate(now);
     setActiveView('timeline');
     if (showScheduleView) toggleScheduleView();
-    setInputText('');
-    setMemos(makeTourMemos(now));
-    setTour({ active: true, step: 0, aiStatus: 'idle' });
+    // 첫 기록은 '지금'이 아니라 몇 시간 전 일이어야 한다. 그래야 두 번째 기록(이어서, 지금까지)이
+    // 그 뒤에 자연스럽게 쌓인다 — 지금 일을 먼저 쓰면 과거 기록이 위로 끼어들며 앞뒤가 꼬인다.
+    // 3시간 전 시각을 입력창에 미리 적어두고, 사용자는 그 뒤에 텍스트만 잇는다.
+    let prefillAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() - 3, 0);
+    if (prefillAt.getDate() !== now.getDate()) prefillAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0); // 새벽엔 자정으로
+    const h = prefillAt.getHours();
+    const prefillLabel = `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}시`;
+    setInputText(`${prefillLabel} `);
+    setTour({ active: true, step: 0, aiStatus: 'idle', contIso: null, prefillLabel });
     track('Tour', { action: 'started', source, guest: isGuest });
+    // 커서를 미리 적힌 시각 뒤에 (터치 기기는 키보드가 튀므로 제외)
+    if (!IS_TOUCH_DEVICE) setTimeout(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    }, 400);
   };
   const endTour = (action) => {
-    const backup = tourBackupRef.current;
-    tourBackupRef.current = null;
-    setTour({ active: false, step: 0, aiStatus: 'idle' });
+    setTour({ active: false, step: 0, aiStatus: 'idle', contIso: null });
     setSendMode(null);
-    setMemos(backup?.memos ?? []);
-    setInputText(backup?.inputText ?? '');
+    setInputText(''); // 미리 적어둔 시각이 남아 있으면 지운다
+    // 샘플만 걷어낸다 — 사용자가 투어에서 직접 쓴 기록은 그대로 남아 첫 기록이 된다
+    setMemos(prev => prev.filter(m => !String(m.id).startsWith('tour-')));
     setActiveView('timeline');
     if (showScheduleView) toggleScheduleView();
     localStorage.setItem(ONBOARDING_KEY, '1');
@@ -3238,35 +3322,51 @@ function App() {
     // 바로 써볼 수 있게 입력창에 포커스 (터치 기기는 키보드가 튀어오르므로 제외)
     if (!IS_TOUCH_DEVICE) setTimeout(() => inputRef.current?.focus(), 50);
   };
+  // 샘플 기록을 하나씩 얹는다 (상태에만 — 저장소에는 안 쓴다)
+  const addTourSample = (idx) => {
+    const sample = makeTourSamples(new Date())[idx];
+    if (!sample) return;
+    setMemos(prev => prev.some(m => m.id === sample.id)
+      ? prev
+      : [...prev, sample].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
+  };
   // 사용자가 직접 누르며 진행한다. advance: 'button'(다음 버튼) | 'tap-target'(밝혀진 곳을 탭) |
-  // 'auto'(타이핑 같은 모션이 끝나면 자동) | 'send'(보내기를 실제로 눌러 저장하면)
-  const tourTypedIso = new Date(nowTime.getFullYear(), nowTime.getMonth(), nowTime.getDate(), TOUR_TYPED_HM[0], TOUR_TYPED_HM[1]).toISOString();
+  // 'auto'(정해진 시간 뒤 자동) | 'send'(실제로 기록을 저장하면) | 'wait'(앱 동작이 넘긴다)
   const TOUR_STEPS = [
     {
-      key: 'type', target: '.input-area', place: 'above', pointer: null, advance: 'auto',
-      caption: '지금 한 일을 한 줄로 적어요. 예시를 대신 적어볼게요.',
-      actions: TOUR_TYPED.split('').map((_, i) => ({ at: 700 + i * 80, run: () => setInputText(TOUR_TYPED.slice(0, i + 1)) })),
-      // 다 적히고 나서 잠시 쉬었다가 넘어간다 (바로 넘어가면 따라가기 벅차다)
-      autoAfter: 700 + TOUR_TYPED.length * 80 + 2600,
+      key: 'type', target: '.input-area', place: 'above', pointer: null, advance: 'send',
+      caption: `${tour.prefillLabel ?? '조금 전'}쯤엔 뭘 하고 있었나요? 적어둔 시간 뒤에 이어서 쓰고 보내보세요. 그 시각의 기록이 됩니다.`,
     },
     {
+      // 이번엔 직접 적어야 하므로 입력 영역 전체를 열어두고, 드래그 포인터만 보내기 버튼 위에 앉힌다.
       // 말풍선은 버튼 위에 뜨는 '이전 기록부터 / 단일 / 다음 기록까지' 힌트를 가리지 않게 더 위로 올린다
-      key: 'drag-send', target: '.send-btn', place: 'above', offset: 74, pointer: 'drag-up', advance: 'send',
-      caption: '보내기 버튼을 꾹 누른 채 위로 올려보세요. 이전 기록부터 이어서 저장할 수 있어요.',
+      key: 'cont', target: '.input-area', pointerTarget: '.send-btn', place: 'above', offset: 74, pointer: 'drag-up', advance: 'send',
+      caption: '그다음부터 지금까지는 뭘 했나요? 적은 다음, 보내기를 꾹 누른 채 위로 올려보세요. 앞 기록부터 지금까지 이어진 시간으로 저장돼요.',
     },
     {
       key: 'tab-schedule', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', pointer: 'tap', advance: 'tap-target',
       caption: '타임라인 탭을 눌러보세요.',
     },
     {
-      // 시간표 화면을 깨끗하게 보여주되, 방금 이어서 쓴 블록만 '짠' 하고 강조한다
-      key: 'schedule-look', target: `.schedule-block[data-at="${tourTypedIso}"]`, place: 'below', pointer: null,
+      // 시간표 화면을 깨끗하게 보여주되, 방금 이어서 쓴 진짜 블록만 '짠' 하고 강조한다
+      key: 'schedule-look', target: tour.contIso ? `.schedule-block[data-at="${tour.contIso}"]` : '.schedule-block', place: 'below', pointer: null,
       advance: 'button', free: true, effect: 'pop',
-      caption: '방금 이어서 쓴 기록이 앞 기록 아래 한 덩어리로 붙었어요. 하루가 이렇게 시간 위에 놓여요.',
+      caption: '방금 이어서 쓴 기록이 앞 기록과 한 덩어리로 붙었어요. 하루가 이렇게 시간 위에 놓여요.',
     },
     {
-      key: 'tab-review', target: '.bottom-tab-bar .tab-btn:nth-child(2)', place: 'above', pointer: 'tap', advance: 'tap-target',
-      caption: '이번엔 회고 탭을 눌러보세요.',
+      // 채팅으로 돌아와 샘플 기록이 뽕뽕뽕 얹힌다 — 하루가 차면 무엇이 생기는지 보여주기 위해
+      key: 'samples', target: null, place: 'bottom', pointer: null, advance: 'auto', autoAfter: 2600, free: true,
+      caption: '이렇게 하루를 몇 줄씩 남기면…',
+      actions: [
+        { at: 0, run: () => { if (showScheduleView) toggleScheduleView(); } },
+        { at: 500, run: () => addTourSample(0) },
+        { at: 1000, run: () => addTourSample(1) },
+        { at: 1500, run: () => addTourSample(2) },
+      ],
+    },
+    {
+      key: 'review-toast', target: '.tour-toast', place: 'above', pointer: 'tap', advance: 'wait',
+      caption: '기록이 쌓이면 회고가 열려요. 보기를 눌러보세요.',
     },
     {
       key: 'review-top', target: '.review-screen .shape', place: 'below', pointer: null, advance: 'button', free: true,
@@ -3301,19 +3401,14 @@ function App() {
   const tourAI = tour.aiStatus === 'ok' ? TOUR_AI : tour.aiStatus === 'loading' ? { status: 'loading' } : { status: 'idle' };
   // 밝혀진 곳을 눌렀다 — 앱이 먼저 반응하도록 잠깐 뒤에 넘어간다
   const handleTourTargetTap = () => setTimeout(tourNext, 350);
-  // 투어 중 보내기: 저장하지 않고 샘플 기록들 뒤(11:50)에 붙인다. 위로 끌었으면 '이전 기록부터'로.
-  const addTourMemo = (mode) => {
-    if (!inputText.trim()) return;
-    const now = new Date();
-    const at = new Date(now.getFullYear(), now.getMonth(), now.getDate(), TOUR_TYPED_HM[0], TOUR_TYPED_HM[1]);
-    setMemos(prev => [...prev.filter(m => m.id !== 'tour-typed'), {
-      id: 'tour-typed', content: inputText.trim(), color: 'default', recordedAt: at.toISOString(), category: '휴식',
-      spansToNext: mode === 'next', spansFromPrev: mode === 'prev', backMinutes: 0, endMinutes: 0,
-    }]);
-    setInputText('');
-    if (inputRef.current) inputRef.current.style.height = 'auto';
+  // 투어 중 실제 저장이 일어난 뒤 호출된다 (handleAddMemo에서).
+  // 'cont' 단계의 기록이면 그 시각을 담아둔다 — 시간표에서 그 블록을 강조해야 하므로.
+  const afterTourSend = (memo, mode) => {
     track('Tour', { action: 'sent', gesture: mode, guest: isGuest });
-    if (TOUR_STEPS[tour.step]?.advance === 'send') setTimeout(tourNext, 400);
+    const def = TOUR_STEPS[tour.step];
+    if (def?.advance !== 'send') return;
+    if (def.key === 'cont') setTour(t => ({ ...t, contIso: memo.recordedAt }));
+    setTimeout(tourNext, 400);
   };
   useEffect(() => {
     if (!tour.active) return;
@@ -3326,19 +3421,21 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tour.active, tour.step]);
 
-  // ── 온보딩(투어): 처음 온 사람(체험, 기록 0)에게 한 번만 ─────
-  // 기존 계정 사용자에게는 자동으로 띄우지 않는다 — 마이페이지에서 다시 볼 수 있다.
+  // ── 온보딩: 스플래시 → 투어(진짜 입력) ───────────────────────
+  // 처음 온 사람: 스플래시가 끝나면 바로 투어가 시작된다. 투어의 첫 단계가
+  // "지금 한 일을 적어보세요"이고, 거기 쓴 것이 진짜 첫 기록으로 저장된다.
+  // 투어를 건너뛰거나 끝내면(ONBOARDING_KEY) 다시 자동으로 뜨지 않는다.
   useEffect(() => {
     if (authLoading) return;
     if (localStorage.getItem(ONBOARDING_KEY) === '1') return;
     const splashDone = localStorage.getItem(SPLASH_KEY) === '1';
-    // 처음 온 사람: 스플래시부터. 스플래시에서 고른 뒤(로그인 없이 / 구글 로그인 후 돌아옴) 투어.
     if (!currentUser && memos.length === 0 && !splashDone) {
       const id = setTimeout(() => { setShowSplash(true); track('Splash', { action: 'shown' }); }, 0);
       return () => clearTimeout(id);
     }
-    if (splashDone && memos.length === 0) {
-      const id = setTimeout(() => startTour(currentUser ? 'after_login' : 'first_visit'), 400);
+    // 스플래시는 봤는데 투어를 못 끝내고 나간 사람(기록 0): 다시 오면 투어부터
+    if (splashDone && !currentUser && memos.length === 0) {
+      const id = setTimeout(() => startTour('revisit'), 400);
       return () => clearTimeout(id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4584,6 +4681,18 @@ function App() {
             <button className="undo-btn" onClick={openReviewFromToast}>보기</button>
           </div>
         )}
+        {/* 투어의 회고 토스트 — 기록이 쌓이면 이 토스트가 뜬다는 걸 그대로 보여주고, 눌러야 넘어간다 */}
+        {tour.active && TOUR_STEPS[tour.step]?.key === 'review-toast' && (
+          <div className="undo-toast tour-toast">
+            <span>오늘의 회고를 확인해보세요</span>
+            <button
+              className="undo-btn"
+              onClick={() => { setActiveView('review'); setTimeout(tourNext, 350); }}
+            >
+              보기
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 키보드가 올라와 있을 때만 뜨는 툴바.
@@ -4675,7 +4784,10 @@ function App() {
             ref={inputRef}
             rows={1}
             className="input-field input-field--chat"
-            placeholder={IS_TOUCH_DEVICE ? INPUT_PROMPTS[promptIdx] : `${INPUT_PROMPTS[promptIdx]} (엔터로 저장)`}
+            // 첫 기록 전에는 온보딩 문구로 — 여기 적는 것이 곧 첫 기록이다
+            placeholder={memos.length === 0
+              ? '지금 한 일을 적어보세요'
+              : (IS_TOUCH_DEVICE ? INPUT_PROMPTS[promptIdx] : `${INPUT_PROMPTS[promptIdx]} (엔터로 저장)`)}
             value={inputText}
             onChange={e => {
               setInputText(e.target.value);
@@ -5219,19 +5331,15 @@ function App() {
       {showConsent && (
         <ConsentSheet onAgree={agreeAndSignIn} onClose={() => { track('Consent', { action: 'closed' }); setShowConsent(false); }} />
       )}
-      {/* 온보딩 — 처음 온 사람에게 한 번, 마이페이지에서 다시 보기 가능 */}
+      {/* 스플래시 — 처음 온 사람에게 브랜드 한 번만 보여주고 바로 투어로. */}
       {showSplash && (
         <Splash
-          onGoogle={() => {
+          onDone={() => {
             localStorage.setItem(SPLASH_KEY, '1');
-            track('Splash', { action: 'google' });
-            requestGoogleSignIn();
-          }}
-          onGuest={() => {
-            localStorage.setItem(SPLASH_KEY, '1');
-            track('Splash', { action: 'guest' });
+            track('Splash', { action: 'entered' });
             setShowSplash(false);
-            startTour('splash_guest');
+            // 홈에 들어서자마자 투어 시작 — 첫 단계가 "지금 한 일을 적어보세요"다
+            startTour('splash');
           }}
         />
       )}
