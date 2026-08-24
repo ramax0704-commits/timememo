@@ -24,7 +24,7 @@ import {
   SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, dateKeyOf, reviewKeyOf,
   buildDayFacts, buildWeekFacts, toSummaryRecords, countRecordDays,
 } from './daySummary';
-import { requestDaySummary, summaryCacheKey, peekSummaryCache } from './summaryAI';
+import { requestDaySummary, summaryCacheKey, peekSummaryCache, collectCachedRabbits } from './summaryAI';
 import ReviewScreen from './ReviewScreen';
 import TourOverlay from './TourOverlay';
 import Splash from './Splash';
@@ -830,6 +830,17 @@ const REVIEW_TOAST_PREFIX = 'timememo-review-toast-';
 // 오늘 AI 회고를 몇 번 만들었는지 ({ 'yyyy-MM-dd': n }). 호출마다 비용이 나가므로 하루 횟수를 막는다.
 // 기기 로컬이라 완벽한 잠금은 아니다 — 진짜 결제 연동을 하면 서버에서 세야 한다.
 const SUMMARY_USES_KEY = 'timememo-summary-uses';
+// 날짜별 '오늘의 토끼' ({ 'yyyy-MM-dd': rabbitId }). 먼슬리 뷰가 이걸로 한 달을 그린다.
+// 기기에 항상 저장하고, 로그인이면 day_rabbits 테이블에도 얹는다 (기기 간 동기화).
+const DAY_RABBITS_KEY = 'timememo-day-rabbits';
+function readDayRabbits() {
+  try {
+    const obj = JSON.parse(localStorage.getItem(DAY_RABBITS_KEY) || '{}');
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch {
+    return {};
+  }
+}
 function readSummaryUses() {
   try {
     const obj = JSON.parse(localStorage.getItem(SUMMARY_USES_KEY) || '{}');
@@ -997,6 +1008,8 @@ function App() {
   // key = 날짜 + 당일 기록 내용의 해시. 기록이 늘거나 바뀌면 키가 달라져 '이후 기록이 추가됨'을 안다.
   const [summaryAI, setSummaryAI] = useState({ key: null, status: 'idle', data: null, mock: false });
   const [summaryBusy, setSummaryBusy] = useState(false);
+  // 날짜별 토끼: 기기 저장분 + 회고 캐시에 남은 것(백필)을 합쳐서 시작한다
+  const [dayRabbits, setDayRabbits] = useState(() => ({ ...collectCachedRabbits(), ...readDayRabbits() }));
   const weekViewedRef = useRef(false);
   const [summaryUses, setSummaryUses] = useState(readSummaryUses);
   const [reviewDayPick, setReviewDayPick] = useState(null); // 회고 탭에서 고른 날 (null=오늘)
@@ -1549,6 +1562,37 @@ function App() {
   }, [activeView, summaryKey, isGuest]);
 
   // 기록 하나의 카테고리를 바꿔 저장한다 (체험이면 기기, 아니면 서버). 본문은 건드리지 않는다.
+  // 그날의 토끼를 저장한다. 기기에 먼저, 로그인이면 서버에도.
+  const saveDayRabbit = (dayKey, type) => {
+    setDayRabbits(prev => {
+      if (prev[dayKey] === type) return prev;
+      const next = { ...prev, [dayKey]: type };
+      try { localStorage.setItem(DAY_RABBITS_KEY, JSON.stringify(next)); } catch { /* 무시 */ }
+      return next;
+    });
+    if (currentUser) {
+      supabase.from('day_rabbits')
+        .upsert({ user_id: currentUser.id, day: dayKey, rabbit: type, updated_at: new Date().toISOString() })
+        .then(({ error }) => { if (error) console.error('Error saving day rabbit:', error); });
+    }
+  };
+
+  // 로그인하면 서버에 쌓인 날짜별 토끼를 내려받아 합친다 (다른 기기에서 만든 것 포함)
+  useEffect(() => {
+    if (!userId) return;
+    let alive = true;
+    supabase.from('day_rabbits').select('day, rabbit').limit(500).then(({ data, error }) => {
+      if (!alive || error || !Array.isArray(data)) return;
+      setDayRabbits(prev => {
+        const next = { ...prev };
+        for (const r of data) if (r?.day && typeof r.rabbit === 'string') next[r.day] = r.rabbit;
+        try { localStorage.setItem(DAY_RABBITS_KEY, JSON.stringify(next)); } catch { /* 무시 */ }
+        return next;
+      });
+    });
+    return () => { alive = false; };
+  }, [userId]);
+
   const generateSummary = async () => {
     if (!canGenerate || isGuest || summaryBusy) return;
     const key = summaryKey;
@@ -1577,6 +1621,8 @@ function App() {
         setSummaryUses(next);
         try { localStorage.setItem(SUMMARY_USES_KEY, JSON.stringify(next)); } catch { /* 무시 */ }
       }
+      // 그날의 토끼를 먼슬리에 쌓는다 (샘플은 제외)
+      if (!mock && data.rabbit?.type) saveDayRabbit(reviewKey, data.rabbit.type);
       summaryGeneratedRef.current.add(reviewKey);
       track('summary_generated', {
         memo_count: records.length,
@@ -4408,6 +4454,8 @@ function App() {
             busy={tour.active ? tour.aiStatus === 'loading' : summaryBusy}
             usesLeft={tour.active ? SUMMARY_DAILY_LIMIT : summaryUsesLeft}
             habitKeywords={habitKeywords}
+            dayRabbits={dayRabbits}
+            onPickDay={pickReviewDay}
             viewKey={reviewKey}
             onViewed={handleSummaryViewed}
             onWeekViewed={handleWeekViewed}

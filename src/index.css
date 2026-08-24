@@ -2562,6 +2562,53 @@ body.keyboard-open .input-toolbar { display: flex; }
 .seg-state { font-size: 0.84rem; font-weight: 600; color: var(--text-main); word-break: keep-all; }
 .day-summary-uses { font-size: 0.7rem; color: var(--text-muted); }
 
+/* ── 먼슬리 토끼 ─────────────────────────────────────────────── */
+.monthly-head { display: flex; align-items: center; gap: 6px; }
+.monthly-head .day-summary-count { margin-left: auto; }
+.monthly-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.monthly-nav:disabled { opacity: 0.3; cursor: default; }
+.monthly-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.monthly-dow { text-align: center; font-size: 0.66rem; color: var(--text-muted); padding: 2px 0; }
+.monthly-cell {
+  position: relative;
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 10px;
+  background-color: #f4f5f9;
+  overflow: hidden;
+  padding: 0;
+  cursor: pointer;
+}
+.monthly-cell:disabled { cursor: default; }
+.monthly-daynum {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  z-index: 2;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* 사진 위 날짜 숫자는 흰 글씨 + 그림자로 띄운다 */
+.monthly-cell--filled .monthly-daynum { color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65); }
+.monthly-rabbit { width: 100%; height: 100%; object-fit: cover; display: block; }
+
 /* ── 오늘의 토끼 (회고 카드의 머리) ──────────────────────────── */
 .rabbit-hero {
   display: flex;

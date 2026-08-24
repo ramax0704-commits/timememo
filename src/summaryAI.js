@@ -59,6 +59,18 @@ function writeCache(key, value) {
   }
 }
 
+// 캐시에 남아 있는 날짜별 토끼를 긁어모은다 (먼슬리 뷰 백필용).
+// 캐시 키는 '날짜|개수|해시' 꼴이라 앞부분이 곧 날짜다. 샘플(mock)은 제외.
+export function collectCachedRabbits() {
+  const out = {};
+  for (const [k, v] of Object.entries(readCache())) {
+    const day = k.split('|')[0];
+    const type = v?.data?.rabbit?.type;
+    if (day && type && !v.mock) out[day] = type;
+  }
+  return out;
+}
+
 // 앱을 다시 열었을 때 이미 만들어 둔 회고가 있으면 네트워크 없이 바로 보여준다
 export function peekSummaryCache(key) {
   const cached = key ? findCached(key) : null;

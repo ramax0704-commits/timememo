@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Lock, Inbox, RefreshCw, Check } from 'lucide-react';
+import { Lock, Inbox, RefreshCw, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, WEEKLY_DAYS,
 } from './daySummary';
@@ -333,6 +333,58 @@ function HabitWeek({ week, habitKeywords }) {
   );
 }
 
+// ── 먼슬리 토끼 ───────────────────────────────────────────────
+// 그날그날의 토끼가 달력에 쌓인다 — 한 달이 어떤 날들로 채워졌는지 사진으로 한눈에.
+// 회고를 만든 날만 채워지고, 채워진 칸을 탭하면 그날의 회고로 간다.
+function MonthlyRabbits({ dayRabbits, onPickDay }) {
+  const now = new Date();
+  const [month, setMonth] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
+  const isCurrentMonth = month.getFullYear() === now.getFullYear() && month.getMonth() === now.getMonth();
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const firstDow = month.getDay();
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const keyOf = (d) => `${month.getFullYear()}-${pad2(month.getMonth() + 1)}-${pad2(d)}`;
+  const cells = [...Array(firstDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  const filled = cells.filter(d => d && dayRabbits[keyOf(d)]).length;
+
+  return (
+    <section className="day-summary" aria-label="먼슬리 토끼">
+      <header className="day-summary-head monthly-head">
+        <button type="button" className="monthly-nav" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="지난달">
+          <ChevronLeft size={16} />
+        </button>
+        <span className="day-summary-title">{format(month, 'yyyy년 M월', { locale: ko })}</span>
+        <button type="button" className="monthly-nav" disabled={isCurrentMonth} onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="다음달">
+          <ChevronRight size={16} />
+        </button>
+        <span className="day-summary-count">토끼 {filled}일</span>
+      </header>
+      <div className="monthly-grid">
+        {['일', '월', '화', '수', '목', '금', '토'].map(w => <span key={w} className="monthly-dow">{w}</span>)}
+        {cells.map((d, i) => {
+          if (d === null) return <span key={`e${i}`} />;
+          const info = rabbitById(dayRabbits[keyOf(d)]);
+          return (
+            <button
+              key={d}
+              type="button"
+              className={`monthly-cell${info ? ' monthly-cell--filled' : ''}`}
+              disabled={!info}
+              onClick={() => onPickDay?.(new Date(month.getFullYear(), month.getMonth(), d))}
+              aria-label={info ? `${d}일 ${info.name}` : `${d}일`}
+              title={info?.name}
+            >
+              <span className="monthly-daynum">{d}</span>
+              {info?.image && <img className="monthly-rabbit" src={info.image} alt="" loading="lazy" />}
+            </button>
+          );
+        })}
+      </div>
+      <p className="day-summary-muted">회고를 만든 날에 그날의 토끼가 채워져요. 채워진 날을 탭하면 그날의 회고로 가요.</p>
+    </section>
+  );
+}
+
 // ── 이번 주 ──────────────────────────────────────────────────
 function WeekView({ week, habitKeywords, onViewed }) {
   useEffect(() => { onViewed?.(); }, [onViewed]);
@@ -373,9 +425,9 @@ function WeekView({ week, habitKeywords, onViewed }) {
 // ── 화면 ──────────────────────────────────────────────────────
 export default function ReviewScreen({
   facts, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, busy, usesLeft,
-  habitKeywords, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline,
+  habitKeywords, dayRabbits, onPickDay, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline,
 }) {
-  const [mode, setMode] = useState('today'); // 'today' | 'week'
+  const [mode, setMode] = useState('today'); // 'today' | 'week' | 'monthly'
 
   // 탭에 들어와 오늘의 모양을 실제로 본 시점 (기록이 있을 때만 의미가 있다)
   useEffect(() => {
@@ -401,9 +453,15 @@ export default function ReviewScreen({
       <div className="review-seg" role="tablist">
         <button type="button" role="tab" aria-selected={mode === 'today'} className={`review-seg-btn${mode === 'today' ? ' review-seg-btn--on' : ''}`} onClick={() => setMode('today')}>오늘</button>
         <button type="button" role="tab" aria-selected={mode === 'week'} className={`review-seg-btn${mode === 'week' ? ' review-seg-btn--on' : ''}`} onClick={() => setMode('week')}>이번 주</button>
+        <button type="button" role="tab" aria-selected={mode === 'monthly'} className={`review-seg-btn${mode === 'monthly' ? ' review-seg-btn--on' : ''}`} onClick={() => setMode('monthly')}>먼슬리</button>
       </div>
 
-      {mode === 'week' ? (
+      {mode === 'monthly' ? (
+        <MonthlyRabbits
+          dayRabbits={dayRabbits}
+          onPickDay={(d) => { onPickDay?.(d); setMode('today'); }}
+        />
+      ) : mode === 'week' ? (
         <WeekView week={week} habitKeywords={habitKeywords} onViewed={onWeekViewed} />
       ) : (
         <>
