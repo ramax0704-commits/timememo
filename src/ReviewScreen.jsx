@@ -13,9 +13,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Sparkles, Lock, Inbox, RefreshCw, X, Plus, Flame } from 'lucide-react';
+import { Sparkles, Lock, Inbox, RefreshCw, X, Plus, Flame, Check } from 'lucide-react';
 import {
   SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, WEEKLY_DAYS, UNCATEGORIZED, groupByCategory, formatMinutes,
+  extractKeywords,
 } from './daySummary';
 
 const hourLabel = (h) => `${String(h).padStart(2, '0')}시`;
@@ -193,9 +194,11 @@ function CategoryBlock({ memos, durations, fixedCategories, onEdit, mock }) {
 }
 
 // ── 시간대별 흐름 (AI 없음) ───────────────────────────────────
-// 오전·점심·오후·저녁으로 나눈 간단 리포트. 지금 시간대는 '진행 중', 아직 안 온 칸은 흐리게.
-// 하루가 끝나기 전에도 "오전은 이렇게 지나갔다"를 볼 수 있게 하는 칸이다.
+// 기록이 있는 시간대만 보여준다 — 아직 오지 않았거나 비어 있는 칸을 미리 늘어놓지 않는다.
+// 원문 대신 키워드로 보여준다. 원문 그대로면 타임라인과 다를 게 없다.
 function SegmentBlock({ segments }) {
+  const filled = segments.filter(seg => seg.count > 0);
+  if (filled.length === 0) return null;
   return (
     <section className="day-summary" aria-label="시간대별 흐름">
       <header className="day-summary-head">
@@ -203,23 +206,19 @@ function SegmentBlock({ segments }) {
         <span className="day-summary-count">기록 시각 기준</span>
       </header>
       <div className="seg-list">
-        {segments.map(seg => (
+        {filled.map(seg => (
           <div key={seg.key} className={`seg-row seg-row--${seg.state}`}>
             <div className="seg-head">
               <span className="seg-label">{seg.label}</span>
               <span className="seg-range">{String(seg.from % 24).padStart(2, '0')}–{String(seg.to % 24).padStart(2, '0')}시</span>
               {seg.state === 'now' && <span className="seg-now">진행 중</span>}
-              <span className="seg-count">{seg.count > 0 ? `${seg.count}개` : (seg.state === 'later' ? '' : '기록 없음')}</span>
             </div>
-            {seg.count > 0 && (
-              <div className="seg-body">
-                {seg.topCategory && <span className="seg-cat">{seg.topCategory}</span>}
-                <span className="seg-text">
-                  {seg.items[0].content}
-                  {seg.count > 1 && <span className="seg-more"> 외 {seg.count - 1}개</span>}
-                </span>
-              </div>
-            )}
+            <div className="seg-body">
+              {seg.topCategory && <span className="seg-cat">{seg.topCategory}</span>}
+              <span className="day-summary-keywords seg-keywords">
+                {extractKeywords(seg.items).map(w => <span key={w} className="day-summary-chip">{w}</span>)}
+              </span>
+            </div>
           </div>
         ))}
       </div>
@@ -411,8 +410,51 @@ function ShapeBlock({ facts, now, dayLabel }) {
   );
 }
 
+// ── 이번 주 습관 트래킹 ───────────────────────────────────────
+// 등록한 습관 키워드가 들어간 기록이 그날 있으면 체크. 기록하는 행동만으로
+// 습관이 주 단위로 쌓여 보인다. (키워드 등록은 마이페이지 > 먼슬리 습관 키워드)
+function HabitWeek({ week, habitKeywords }) {
+  const active = (habitKeywords || []).filter(k => k?.name && !k.endedAt);
+  return (
+    <section className="day-summary" aria-label="이번 주 습관">
+      <header className="day-summary-head">
+        <span className="day-summary-title">이번 주 습관</span>
+        <span className="day-summary-count">키워드가 든 기록 기준</span>
+      </header>
+      {active.length === 0 ? (
+        <p className="day-summary-muted">
+          마이페이지에서 습관 키워드를 등록해 보세요. 그 단어가 들어간 기록을 남긴 날마다 여기에 체크돼요.
+        </p>
+      ) : (
+        <div className="habit-week">
+          <div className="habit-week-row habit-week-row--head" aria-hidden="true">
+            <span className="habit-week-name" />
+            {week.days.map(d => <span key={d.key} className="habit-week-day">{format(d.date, 'E', { locale: ko })}</span>)}
+          </div>
+          {active.map(k => (
+            <div key={k.name} className="habit-week-row">
+              <span className="habit-week-name">
+                <span className="habit-week-dot" style={{ backgroundColor: `var(--habit-${k.color})` }} />
+                {k.name}
+              </span>
+              {week.days.map(d => {
+                const done = d.items.some(m => m.content.includes(k.name));
+                return (
+                  <span key={d.key} className={`habit-week-cell${done ? ' habit-week-cell--on' : ''}`} aria-label={done ? '함' : '안 함'}>
+                    <Check size={14} strokeWidth={3} />
+                  </span>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── 이번 주 ──────────────────────────────────────────────────
-function WeekView({ week, onViewed }) {
+function WeekView({ week, habitKeywords, onViewed }) {
   useEffect(() => { onViewed?.(); }, [onViewed]);
   const cats = week.categories;
   const catTotal = cats.reduce((s, g) => s + g.minutes, 0) || 1;
@@ -425,8 +467,8 @@ function WeekView({ week, onViewed }) {
       <section className="day-summary shape" aria-label="이번 주 기록">
         <div className="shape-top">
           <div className="shape-main">
-            <span className="day-summary-stat-label">최근 7일 총 기록 시간</span>
-            <span className="shape-big">{week.totalSpanMinutes > 0 ? formatMinutes(week.totalSpanMinutes) : '—'}</span>
+            <span className="day-summary-stat-label">최근 7일 활동 시간</span>
+            <span className="shape-big">{week.totalActivityMinutes > 0 ? formatMinutes(week.totalActivityMinutes) : '—'}</span>
           </div>
           {week.streak > 0 && (
             <span className="streak-badge"><Flame size={13} /> {week.streak}일 연속</span>
@@ -437,6 +479,8 @@ function WeekView({ week, onViewed }) {
           {peakHour != null && <> · 몰린 시간 <strong>{hourLabel(peakHour)}</strong></>}
         </div>
         <DayCurve curve={week.curve} now={null} peakLabel={peakLabel} />
+        {/* 이 막대가 뭘 세는지 그래프만 봐서는 안 보였다 — 제목을 붙인다 */}
+        <div className="week-bars-caption">날짜별 기록 수</div>
         <div className="week-bars" role="img" aria-label="날짜별 기록 수">
           {week.days.map(d => (
             <div key={d.key} className="week-bar-slot">
@@ -452,6 +496,8 @@ function WeekView({ week, onViewed }) {
           ))}
         </div>
       </section>
+
+      <HabitWeek week={week} habitKeywords={habitKeywords} />
 
       <section className="day-summary" aria-label="이번 주 시간 배분">
         <header className="day-summary-head">
@@ -481,7 +527,7 @@ function WeekView({ week, onViewed }) {
 // ── 화면 ──────────────────────────────────────────────────────
 export default function ReviewScreen({
   facts, todayMemos, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, busy, usesLeft, fixedCategories,
-  onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline, onEditCategory,
+  habitKeywords, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline, onEditCategory,
 }) {
   const [mode, setMode] = useState('today'); // 'today' | 'week'
 
@@ -513,7 +559,7 @@ export default function ReviewScreen({
       </div>
 
       {mode === 'week' ? (
-        <WeekView week={week} onViewed={onWeekViewed} />
+        <WeekView week={week} habitKeywords={habitKeywords} onViewed={onWeekViewed} />
       ) : (
         <>
           {!facts ? (

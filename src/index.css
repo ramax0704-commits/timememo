@@ -2283,52 +2283,6 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 .review-empty .day-summary-btn { align-self: center; }
 
-/* ── 채팅창 위 '오늘의 모양' 띠 ──────────────────────────────── */
-.day-strip {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 8px 10px 0;
-  padding: 8px 12px;
-  border: 1px solid #e8e8f0;
-  border-radius: 12px;
-  background-color: var(--memo-bg);
-  text-align: left;
-  cursor: pointer;
-  font-family: inherit;
-}
-.day-strip:active { background-color: #f0f1f6; }
-.day-strip-curve {
-  width: 72px;
-  height: 22px;
-  flex-shrink: 0;
-  overflow: visible;
-}
-.day-strip-curve-fill { fill: #4a72ff; fill-opacity: 0.12; }
-.day-strip-curve-line { fill: none; stroke: var(--primary-color); stroke-width: 1.6px; stroke-linecap: round; }
-.day-strip-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.day-strip-text strong {
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--text-main);
-}
-.day-strip-text span {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.day-strip-chevron { flex-shrink: 0; color: #b8bccb; }
-
 /* ── 회고 탭: 오늘/이번 주 전환 ───────────────────────────────── */
 .review-seg {
   display: flex;
@@ -2461,6 +2415,7 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 
 /* ── 이번 주: 날짜별 막대 ─────────────────────────────────────── */
+.week-bars-caption { margin-top: 4px; font-size: 0.72rem; font-weight: 600; color: var(--text-muted); }
 .week-bars { display: flex; gap: 6px; height: 86px; }
 .week-bar-slot { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .week-bar-count { height: 14px; font-size: 0.66rem; font-weight: 700; color: var(--text-muted); line-height: 14px; font-variant-numeric: tabular-nums; }
@@ -2599,7 +2554,31 @@ body.keyboard-open .input-toolbar { display: flex; }
 .seg-cat { flex-shrink: 0; font-size: 0.68rem; font-weight: 700; color: #8a5a00; background-color: #fff3d6; padding: 1px 6px; border-radius: 6px; }
 .seg-text { font-size: 0.8rem; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seg-more { color: var(--text-muted); }
+.seg-keywords { display: flex; flex-wrap: wrap; gap: 4px; }
 .day-summary-uses { font-size: 0.7rem; color: var(--text-muted); }
+
+/* ── 이번 주 습관 트래킹 ─────────────────────────────────────── */
+.habit-week { display: flex; flex-direction: column; gap: 2px; }
+.habit-week-row { display: flex; align-items: center; gap: 4px; padding: 5px 0; }
+.habit-week-row + .habit-week-row { border-top: 1px solid #f0f1f6; }
+.habit-week-row--head { padding: 0 0 2px; border-top: none; }
+.habit-week-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.habit-week-dot { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; }
+.habit-week-day { width: 26px; text-align: center; font-size: 0.68rem; color: var(--text-muted); }
+.habit-week-cell { width: 26px; display: flex; align-items: center; justify-content: center; color: #dcdfe8; }
+.habit-week-cell--on { color: var(--primary-color); }
 
 /* ── 투어 (직접 눌러보는 온보딩) ─────────────────────────────── */
 /* 딤 없음. 네 장의 막은 터치만 막고 색은 없다. 누를 곳만 컬러 그림자로 빛난다. */

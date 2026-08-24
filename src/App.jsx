@@ -21,12 +21,11 @@ import { supabase, setRememberMe, getRememberMe } from './supabase';
 import { track, identifyUser, resetUser, markFirstMemo } from './analytics';
 import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
 import {
-  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, FIXED_CATEGORY_FROM_DAY, DAY_START_MIN, dateKeyOf, reviewKeyOf,
+  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, FIXED_CATEGORY_FROM_DAY, dateKeyOf, reviewKeyOf,
   buildDayFacts, buildWeekFacts, toSummaryRecords, countRecordDays, topCategories, categoryHints,
 } from './daySummary';
 import { requestDaySummary, summaryCacheKey, peekSummaryCache } from './summaryAI';
 import ReviewScreen from './ReviewScreen';
-import DayShapeStrip from './DayShapeStrip';
 import TourOverlay from './TourOverlay';
 import Splash from './Splash';
 
@@ -355,7 +354,8 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
           onClick={() => onEdit(memo)}
           title="기록 수정하기"
         >
-          <span className="memo-time">{format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}</span>
+          {/* 시작 시각을 직접 고친 기록(backMinutes)은 적은 시각이 아니라 시작 시각을 보여준다 */}
+          <span className="memo-time">{format(new Date(new Date(memo.recordedAt).getTime() - (memo.backMinutes || 0) * 60000), 'aa h:mm', { locale: ko })}</span>
         </div>
         <div
           className="memo-content"
@@ -765,6 +765,8 @@ const isStandaloneApp = () =>
 // 권하는 꼴이라, 몇 줄 써서 아까워질 때쯤 알려준다.
 const SAVE_NOTICE_AFTER = 3;
 const SAVE_NOTICE_KEY = 'timememo-save-notice-dismissed';
+// 회고 안내 토스트를 띄운 날 — 뒤에 회고일(yyyy-MM-dd)이 붙는다. 하루에 한 번만 띄운다
+const REVIEW_TOAST_PREFIX = 'timememo-review-toast-';
 // 체험 모드의 고정 카테고리 세트 (로그인하면 settings.review_categories로)
 const REVIEW_CATEGORIES_KEY = 'timememo-review-categories';
 // 오늘 AI 회고를 몇 번 만들었는지 ({ 'yyyy-MM-dd': n }). 호출마다 비용이 나가므로 하루 횟수를 막는다.
@@ -1028,6 +1030,26 @@ function App() {
 
   // Undo Toast
   const [undoToast, setUndoToast] = useState(null); // { memo, timer }
+  // 회고 안내 토스트 — 기록이 회고 가능 개수(SUMMARY_MIN_RECORDS)에 닿으면 하루 한 번
+  const [reviewToast, setReviewToast] = useState(null); // { timer }
+  useEffect(() => {
+    if (activeView !== 'timeline') return;
+    // 새벽 2시 규칙과 같은 기준으로 '지금 채우고 있는 하루'의 기록을 센다
+    const key = reviewKeyOf(new Date());
+    const count = memos.filter(m => reviewKeyOf(new Date(m.recordedAt)) === key).length;
+    if (count < SUMMARY_MIN_RECORDS) return;
+    const storageKey = REVIEW_TOAST_PREFIX + key;
+    if (localStorage.getItem(storageKey) === '1') return;
+    try { localStorage.setItem(storageKey, '1'); } catch { /* 무시 */ }
+    track('Review Toast Shown', { memo_count: count });
+    const timer = setTimeout(() => setReviewToast(null), 8000);
+    setReviewToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return { timer }; });
+  }, [memos, activeView]);
+  const openReviewFromToast = () => {
+    setReviewToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return null; });
+    track('Review Toast Click');
+    setActiveView('review');
+  };
 
   // Settings (habit keywords)
   const [habitKeywords, setHabitKeywords] = useState([]);
@@ -1313,10 +1335,10 @@ function App() {
       return;
     }
     if (memos.length > prevCount) {
-      // 바닥 여백(날짜 넘기기용 빈 칸)까지 내려가면 키보드가 열린 좁은 화면에서 기록이 위로 밀려
-      // 띠 밑에 숨는다. 마지막 기록이 바닥에 닿는 자리까지만 내린다.
+      // 마지막 기록이 입력창에 딱 붙지 않게, 바닥 여백을 조금(28px) 보이는 자리까지 내린다.
+      // 여백 전체까지 내리면 키보드가 열린 좁은 화면에서 기록이 위로 밀려 숨는다.
       const spacer = el.querySelector('.timeline-bottom-space');
-      el.scrollTop = Math.max(0, el.scrollHeight - (spacer?.offsetHeight ?? 0) - el.clientHeight);
+      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - (spacer?.offsetHeight ?? 0) + 28);
     }
   }, [memos]);
 
@@ -1332,10 +1354,22 @@ function App() {
     let settle = null;
     const handleResize = () => {
       if (!window.visualViewport) return;
+      // 키보드가 올라와 화면이 줄어들 때, 채팅창 바닥 근처를 보고 있었다면 그 자리를 지킨다.
+      // 안 지키면 화면이 줄어든 만큼 마지막 기록이 입력창 밑으로 숨는다.
+      const chat = timelineRef.current;
+      const fromBottom = chat ? chat.scrollHeight - chat.clientHeight - chat.scrollTop : null;
       applyVh();
+      if (chat && fromBottom != null && fromBottom < 200) {
+        chat.scrollTop = chat.scrollHeight - chat.clientHeight - fromBottom;
+      }
       window.scrollTo(0, 0);
       clearTimeout(settle);
-      settle = setTimeout(applyVh, 300);
+      settle = setTimeout(() => {
+        applyVh();
+        if (chat && fromBottom != null && fromBottom < 200) {
+          chat.scrollTop = chat.scrollHeight - chat.clientHeight - fromBottom;
+        }
+      }, 300);
     };
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleResize);
@@ -1364,23 +1398,6 @@ function App() {
   });
   // 채팅창은 고른 날짜 하루만 보여준다. 헤더 날짜와 화면 내용이 어긋나면 안 된다.
   const chatMemos = [...displayedMemos, ...lateNightMemos];
-  // 하루의 경계(새벽 2시)를 채팅창에 한 줄로 표시한다. 경계 앞뒤에 기록이 다 있을 때만.
-  // 이 날짜 02:00: 위쪽 0~2시 기록은 전날 회고에 들어간다 → "여기부터 이 날의 하루"
-  // (전날 페이지 아래에 얹히는 다음날 새벽 기록은 구분선 없이 흐리게만 보인다)
-  const chatDividers = (() => {
-    const map = new Map();
-    const sorted = [...chatMemos].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
-    const dawnEndMs = selectedDayStartMs + DAY_START_MIN * 60000;
-    const dayText = format(selectedDate, 'M월 d일');
-    let prev = null;
-    for (const m of sorted) {
-      const t = new Date(m.recordedAt).getTime();
-      if (prev != null && prev < dawnEndMs && t >= dawnEndMs) map.set(m.id, `여기부터 ${dayText}의 하루`);
-      prev = t;
-    }
-    return map;
-  })();
-
   // ── 오늘의 회고 ──────────────────────────────────────────────
   // 대상은 항상 '오늘'이다 (헤더에서 고른 날짜가 아니라). 오늘의 모양(1)과 다음(4)은 여기서
   // 바로 계산하고, 시간 배분(2)·눈에 띈 것(3)은 회고 탭에서 사용자가 버튼을 눌렀을 때만 만든다.
@@ -4281,14 +4298,6 @@ function App() {
             오늘로
           </button>
         )}
-        {/* 오늘의 모양 띠 — 오늘 채팅창에만. 채팅창 안에는 아무것도 얹지 않는다 */}
-        {activeView === 'timeline' && !showScheduleView && isToday(selectedDate) && todayFacts && (
-          <DayShapeStrip
-            facts={todayFacts}
-            now={nowTime}
-            onClick={() => { track('Day Strip Click', { memo_count: todayFacts.count }); setActiveView('review'); }}
-          />
-        )}
         {activeView === 'timeline' ? (
           /* ── 타임라인 뷰 ── */
           showScheduleView ? (
@@ -4340,9 +4349,6 @@ function App() {
                       {draggingMemoId && reorderDrop === String(memo.id) && (
                         <div className="drop-indicator" aria-hidden="true" />
                       )}
-                      {chatDividers.has(memo.id) && (
-                        <div className="timeline-day-divider" aria-hidden="true"><span>{chatDividers.get(memo.id)}</span></div>
-                      )}
                       <MemoItem
                         memo={memo}
                         onEdit={openBlockEditor}
@@ -4379,6 +4385,7 @@ function App() {
             busy={tour.active ? tour.aiStatus === 'loading' : summaryBusy}
             usesLeft={tour.active ? SUMMARY_DAILY_LIMIT : summaryUsesLeft}
             fixedCategories={reviewCategories}
+            habitKeywords={habitKeywords}
             viewKey={reviewKey}
             onViewed={handleSummaryViewed}
             onWeekViewed={handleWeekViewed}
@@ -4568,6 +4575,13 @@ function App() {
           <div className={toastClass}>
             <span>기록을 옮겼어요</span>
             <button className="undo-btn" onClick={undoMoveAfterConfirm}>되돌리기</button>
+          </div>
+        )}
+        {/* 회고 안내 — 되돌리기 토스트가 떠 있으면 그쪽이 우선 (같은 자리라 겹친다) */}
+        {reviewToast && !undoToast && !moveUndoToast && (
+          <div className={toastClass}>
+            <span>오늘의 회고를 확인해보세요</span>
+            <button className="undo-btn" onClick={openReviewFromToast}>보기</button>
           </div>
         )}
       </div>

@@ -77,17 +77,6 @@ export function formatMinutes(min) {
   return `${h}시간 ${m}분`;
 }
 
-// "2시간 전", "방금" 같은 경과 표기
-export function formatAgo(from, now) {
-  const min = Math.max(0, Math.round((now - from) / 60000));
-  if (min < 1) return '방금';
-  if (min < 60) return `${min}분 전`;
-  const h = Math.floor(min / 60);
-  const r = min % 60;
-  if (r < 10 || h >= 3) return `${h}시간 전`;
-  return `${h}시간 ${r}분 전`;
-}
-
 // ── 하루 리듬 곡선 ─────────────────────────────────────────────
 // 0시~24시를 30분 간격(49점)으로 훑으며, 각 점에서 기록들이 얼마나 가까이 있는지를
 // 더한다(가우시안, σ=75분). 막대 대신 곡선으로 그리는 이유: 기록이 '몰린 시간대'는
@@ -175,6 +164,49 @@ export function buildSegments(sortedMemos, now) {
       state: nowMin == null ? 'done' : nowMin >= toMin(seg.to) ? 'done' : nowMin >= toMin(seg.from) ? 'now' : 'later',
     };
   }).filter(seg => (seg.key !== 'night' && seg.key !== 'dawn') || seg.count > 0); // 새벽·밤은 기록 있을 때만
+}
+
+// ── 키워드 추출 (AI 없음) ──────────────────────────────────────
+// 시간대별 흐름에서 기록 원문 대신 보여줄 단어들. 형태소 분석 없이
+// 낱말을 자르고 흔한 조사를 꼬리에서 떼어낸다. 완벽하진 않아도
+// "뭘 했는지"의 단서가 되는 명사 위주가 남는다.
+const TRAILING_PARTICLES = [
+  '에서부터', '에게서', '한테서', '으로부터', '로부터', '이라서', '라서', '까지', '부터', '처럼', '조차', '마저',
+  '에서', '에게', '한테', '으로', '이랑', '하고', '들이', '들을', '들은', '보다', '밖에',
+  '을', '를', '이', '가', '은', '는', '에', '의', '와', '과', '도', '만', '로', '랑', '요',
+];
+const KEYWORD_STOPWORDS = new Set([
+  '오늘', '지금', '아까', '이제', '다시', '조금', '좀', '너무', '진짜', '정말', '완전', '그냥', '계속',
+  '하고', '해서', '하는', '했다', '했음', '하기', '해야', '하다', '있다', '있음', '없다', '없음',
+  '그리고', '그래서', '근데', '그런데', '하지만', '이거', '저거', '그거', '여기', '거기', '우리', '내가', '나는',
+  '시작', '끝남', '완료', '중간', '이후', '이전', '동안', '하루', '시간', '기록',
+]);
+export function extractKeywords(memos, max = 5) {
+  const freq = new Map();
+  const order = new Map(); // 같은 횟수면 먼저 나온 단어부터
+  let seq = 0;
+  for (const m of memos) {
+    for (let w of (m.content || '').split(/[^0-9A-Za-z가-힣]+/)) {
+      if (!w) continue;
+      for (const p of TRAILING_PARTICLES) {
+        if (w.length > p.length + 1 && w.endsWith(p)) { w = w.slice(0, -p.length); break; }
+      }
+      if (w.length < 2 || w.length > 12 || KEYWORD_STOPWORDS.has(w)) continue;
+      if (!freq.has(w)) order.set(w, seq++);
+      freq.set(w, (freq.get(w) || 0) + 1);
+    }
+  }
+  const ranked = [...freq.entries()]
+    .sort((a, b) => (b[1] - a[1]) || (order.get(a[0]) - order.get(b[0])))
+    .map(e => e[0]);
+  // '준비'와 '준비함'처럼 한쪽이 다른 쪽의 머리인 단어는 하나만 남긴다
+  const picked = [];
+  for (const w of ranked) {
+    if (picked.length >= max) break;
+    if (picked.some(p => p.startsWith(w) || w.startsWith(p))) continue;
+    picked.push(w);
+  }
+  return picked;
 }
 
 // ── 카테고리 집계 ──────────────────────────────────────────────
@@ -277,7 +309,9 @@ export function buildWeekFacts(memos, now) {
     total: weekMemos.length,
     activeDays,
     maxDayCount,
-    totalSpanMinutes: days.reduce((s, d) => s + d.spanMinutes, 0),
+    // 첫 기록~마지막 기록 사이(span)를 더하면 기록 없이 흘려보낸 시간까지 다 들어가
+    // 일주일에 100시간 넘는 숫자가 나온다. '이번 주 시간 배분'과 같은 활동 시간으로 센다.
+    totalActivityMinutes: [...durations.values()].reduce((s, m) => s + m, 0),
     peak: peakHourOf(weekMemos),
     curve: buildDayCurve(weekMemos),
     categories: groupByCategory(weekMemos, durations),
