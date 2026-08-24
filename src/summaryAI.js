@@ -75,6 +75,20 @@ export function collectCachedRabbits() {
   return out;
 }
 
+// 기기 캐시에 남아 있는 회고 전부 (샘플 제외, 날짜당 최근 것 하나).
+// 로그인하면 서버(day_reviews)로 올려 영구 보관한다 — 기기 캐시는 12개까지만 남고
+// 브라우저 정리로 지워질 수 있어서, 진짜 보관처는 서버여야 한다.
+export function collectCachedSummaries() {
+  const byDay = new Map();
+  for (const [k, v] of Object.entries(readCache())) {
+    const day = k.split('|')[0];
+    if (!day || !v?.data || v.mock) continue;
+    const prev = byDay.get(day);
+    if (!prev || (v.at || 0) > prev.at) byDay.set(day, { day, key: k, data: v.data, at: v.at || 0 });
+  }
+  return [...byDay.values()];
+}
+
 // 앱을 다시 열었을 때 이미 만들어 둔 회고가 있으면 네트워크 없이 바로 보여준다.
 // key에는 실제로 매칭된 캐시 키가 담긴다 — 지금 키와 다르면 화면이 '이후 기록 추가됨'을 안다.
 export function peekSummaryCache(key) {

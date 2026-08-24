@@ -24,7 +24,7 @@ import {
   SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, dateKeyOf, reviewKeyOf,
   buildDayFacts, buildWeekFacts, toSummaryRecords, countRecordDays,
 } from './daySummary';
-import { requestDaySummary, summaryCacheKey, peekSummaryCache, collectCachedRabbits } from './summaryAI';
+import { requestDaySummary, summaryCacheKey, peekSummaryCache, collectCachedRabbits, collectCachedSummaries, normalizeSummary } from './summaryAI';
 import ReviewScreen from './ReviewScreen';
 import TourOverlay from './TourOverlay';
 import Splash from './Splash';
@@ -1550,23 +1550,46 @@ function App() {
     return () => clearTimeout(id);
   }, [activeView]);
 
-  // 앱을 다시 열었을 때: 이미 만들어 둔 이 날의 회고가 기기에 있으면 버튼 없이 바로 보여준다.
-  // 캐시 키를 그대로 쓴다 — 만들고 나서 기록을 더 썼다면 키가 달라져 있고,
+  // 앱을 다시 열었을 때: 이미 만들어 둔 이 날의 회고를 보여준다.
+  // 1순위 기기 캐시(빠름), 없으면 서버(day_reviews — 다른 기기에서 만들었거나 캐시가 밀려난 경우).
+  // 매칭된 키를 그대로 쓴다 — 만들고 나서 기록을 더 썼다면 키가 달라져 있고,
   // 그러면 화면이 '이후에 기록이 더 추가됐어요 + 다시 만들기'를 알아서 띄운다.
   useEffect(() => {
     if (activeView !== 'review' || !summaryKey || isGuest) return;
-    const cached = peekSummaryCache(summaryKey);
-    if (!cached) return;
-    const id = setTimeout(() => {
+    const day = summaryKey.split('|')[0];
+    const applyResult = (key, data, mock) => {
       setSummaryAI(prev => {
-        // 이 날의 결과가 이미 화면 상태에 있으면 그대로 둔다 (방금 만든 결과를 캐시로 덮지 않는다)
-        const dayPrefix = `${summaryKey.split('|')[0]}|`;
-        if (prev.status === 'ok' && typeof prev.key === 'string' && prev.key.startsWith(dayPrefix)) return prev;
-        return { key: cached.key ?? summaryKey, status: 'ok', data: cached.data, mock: cached.mock };
+        // 이 날의 결과가 이미 화면 상태에 있으면 그대로 둔다 (방금 만든 결과를 덮지 않는다)
+        if (prev.status === 'ok' && typeof prev.key === 'string' && prev.key.startsWith(`${day}|`)) return prev;
+        return { key, status: 'ok', data, mock };
       });
-    }, 0);
-    return () => clearTimeout(id);
+    };
+    const cached = peekSummaryCache(summaryKey);
+    if (cached) {
+      const id = setTimeout(() => applyResult(cached.key ?? summaryKey, cached.data, cached.mock), 0);
+      return () => clearTimeout(id);
+    }
+    let alive = true;
+    supabase.from('day_reviews').select('data, cache_key').eq('day', day).maybeSingle().then(({ data: row, error }) => {
+      if (!alive || error || !row?.data) return;
+      const clean = normalizeSummary(row.data);
+      if (clean) applyResult(row.cache_key || `${day}|server`, clean, false);
+    });
+    return () => { alive = false; };
   }, [activeView, summaryKey, isGuest]);
+
+  // 로그인하면 기기 캐시에만 있던 회고들을 서버로 올려 영구 보관한다 (이미 있는 날짜는 건드리지 않는다)
+  useEffect(() => {
+    if (!userId) return;
+    const entries = collectCachedSummaries();
+    if (entries.length === 0) return;
+    supabase.from('day_reviews')
+      .upsert(
+        entries.map(e => ({ user_id: userId, day: e.day, data: e.data, cache_key: e.key })),
+        { onConflict: 'user_id,day', ignoreDuplicates: true }
+      )
+      .then(({ error }) => { if (error) console.error('Error syncing cached reviews:', error); });
+  }, [userId]);
 
   // 기록 하나의 카테고리를 바꿔 저장한다 (체험이면 기기, 아니면 서버). 본문은 건드리지 않는다.
   // 그날의 토끼를 저장한다. 기기에 먼저, 로그인이면 서버에도.
@@ -1630,6 +1653,12 @@ function App() {
       }
       // 그날의 토끼를 먼슬리에 쌓는다 (샘플은 제외)
       if (!mock && data.rabbit?.type) saveDayRabbit(reviewKey, data.rabbit.type);
+      // 회고 글을 서버에 영구 보관한다 — 기기 캐시는 12개 한도·브라우저 정리에 취약하다
+      if (!mock && currentUser) {
+        supabase.from('day_reviews')
+          .upsert({ user_id: currentUser.id, day: reviewKey, data, cache_key: key, updated_at: new Date().toISOString() })
+          .then(({ error }) => { if (error) console.error('Error saving day review:', error); });
+      }
       summaryGeneratedRef.current.add(reviewKey);
       track('summary_generated', {
         memo_count: records.length,
