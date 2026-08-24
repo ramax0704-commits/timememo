@@ -2423,8 +2423,9 @@ body.keyboard-open .input-toolbar { display: flex; }
 .week-bar-slot { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .week-bar-count { height: 14px; font-size: 0.66rem; font-weight: 700; color: var(--text-muted); line-height: 14px; font-variant-numeric: tabular-nums; }
 .week-bar-track { flex: 1; width: 100%; display: flex; align-items: flex-end; }
-.week-bar { width: 100%; border-radius: 4px 4px 2px 2px; background-color: #cfd8f7; }
-.week-bar--max { background-color: var(--primary-color); }
+/* 진한 단색은 눈이 아프다 — 리듬 곡선과 같은 톤의 옅은 그라데이션으로 */
+.week-bar { width: 100%; border-radius: 4px 4px 2px 2px; background: linear-gradient(180deg, rgba(74, 114, 255, 0.22), rgba(74, 114, 255, 0.06)); }
+.week-bar--max { background: linear-gradient(180deg, rgba(74, 114, 255, 0.5), rgba(74, 114, 255, 0.14)); }
 .week-bar--empty { height: 2px !important; background-color: #e8eaf2; }
 .week-bar-label { font-size: 0.68rem; color: var(--text-muted); }
 

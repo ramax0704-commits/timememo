@@ -25,16 +25,20 @@ export function summaryCacheKey(dateKey, records) {
   return `${dateKey}|${records.length}|${hash(body)}`;
 }
 
-// 예전 방식(키 끝에 고정 세트가 붙던 때)으로 저장된 것도 찾는다: 같은 날짜·같은 기록 수 중 가장 최근 것
-function findCached(key) {
+// 캐시에서 찾는다. loose=false(생성 경로): 정확히 같은 키, 또는 예전 저장 방식(키 끝에
+// 고정 세트가 붙던 때) 호환으로 같은 날짜·같은 기록 수까지만 — 기록이 바뀌면 다시 만들어야 한다.
+// loose=true(화면 복원 경로): 같은 날짜면 가장 최근 것. 회고를 만든 뒤 기록을 더 쓰면 키가
+// 달라지는데, 그때 만들어둔 회고가 화면에서 사라지면 안 된다 (8/24 "회고 날아갔어").
+function findCached(key, loose = false) {
   const cache = readCache();
-  if (cache[key]?.data) return cache[key];
-  const prefix = key.split('|').slice(0, 2).join('|') + '|';
+  if (cache[key]?.data) return { ...cache[key], key };
+  const prefix = loose ? key.split('|')[0] + '|' : key.split('|').slice(0, 2).join('|') + '|';
   let best = null;
+  let bestKey = null;
   for (const [k, v] of Object.entries(cache)) {
-    if (k.startsWith(prefix) && v?.data && (!best || v.at > best.at)) best = v;
+    if (k.startsWith(prefix) && v?.data && (!best || v.at > best.at)) { best = v; bestKey = k; }
   }
-  return best;
+  return best ? { ...best, key: bestKey } : null;
 }
 
 function readCache() {
@@ -71,10 +75,11 @@ export function collectCachedRabbits() {
   return out;
 }
 
-// 앱을 다시 열었을 때 이미 만들어 둔 회고가 있으면 네트워크 없이 바로 보여준다
+// 앱을 다시 열었을 때 이미 만들어 둔 회고가 있으면 네트워크 없이 바로 보여준다.
+// key에는 실제로 매칭된 캐시 키가 담긴다 — 지금 키와 다르면 화면이 '이후 기록 추가됨'을 안다.
 export function peekSummaryCache(key) {
-  const cached = key ? findCached(key) : null;
-  return cached?.data ? { data: cached.data, mock: Boolean(cached.mock) } : null;
+  const cached = key ? findCached(key, true) : null;
+  return cached?.data ? { data: cached.data, mock: Boolean(cached.mock), key: cached.key } : null;
 }
 
 // 받은 JSON을 고정 스키마로 정리한다. 못 맞추면 null.

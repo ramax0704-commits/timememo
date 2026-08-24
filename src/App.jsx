@@ -1550,13 +1550,20 @@ function App() {
     return () => clearTimeout(id);
   }, [activeView]);
 
-  // 앱을 다시 열었을 때: 이미 만들어 둔 오늘 회고가 기기에 있으면 버튼 없이 바로 보여준다
+  // 앱을 다시 열었을 때: 이미 만들어 둔 이 날의 회고가 기기에 있으면 버튼 없이 바로 보여준다.
+  // 캐시 키를 그대로 쓴다 — 만들고 나서 기록을 더 썼다면 키가 달라져 있고,
+  // 그러면 화면이 '이후에 기록이 더 추가됐어요 + 다시 만들기'를 알아서 띄운다.
   useEffect(() => {
     if (activeView !== 'review' || !summaryKey || isGuest) return;
     const cached = peekSummaryCache(summaryKey);
     if (!cached) return;
     const id = setTimeout(() => {
-      setSummaryAI(prev => (prev.key === summaryKey ? prev : { key: summaryKey, status: 'ok', ...cached }));
+      setSummaryAI(prev => {
+        // 이 날의 결과가 이미 화면 상태에 있으면 그대로 둔다 (방금 만든 결과를 캐시로 덮지 않는다)
+        const dayPrefix = `${summaryKey.split('|')[0]}|`;
+        if (prev.status === 'ok' && typeof prev.key === 'string' && prev.key.startsWith(dayPrefix)) return prev;
+        return { key: cached.key ?? summaryKey, status: 'ok', data: cached.data, mock: cached.mock };
+      });
     }, 0);
     return () => clearTimeout(id);
   }, [activeView, summaryKey, isGuest]);
