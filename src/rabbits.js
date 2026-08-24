@@ -7,6 +7,7 @@
 export const RABBITS = [
   {
     id: 'clock',
+    image: '/rabbits/clock.jpg',
     name: '시계 토끼',
     origin: '이상한 나라의 앨리스',
     desc: '쉴 틈 없이 뛰어다니며 에너지를 쏟아부은, 분주하게 꽉 찬 하루예요.',
@@ -15,6 +16,7 @@ export const RABBITS = [
   },
   {
     id: 'race',
+    image: '/rabbits/race.jpg',
     name: '경주 토끼',
     origin: '토끼와 거북이',
     desc: '의욕적으로 몰아치다 후반에 힘이 빠진, 완급 조절이 아쉬웠던 하루예요.',
@@ -23,6 +25,7 @@ export const RABBITS = [
   },
   {
     id: 'moon',
+    image: '/rabbits/moon.jpg',
     name: '옥토끼',
     origin: '달나라 방앗간',
     desc: '자기 자리에서 묵묵히 할 일을 끝까지 해낸, 성실하고 평온한 하루예요.',
@@ -31,6 +34,7 @@ export const RABBITS = [
   },
   {
     id: 'fighter',
+    image: '/rabbits/fighter.jpg',
     name: '전투 토끼',
     origin: '글러브를 낀 토끼',
     desc: '감정 소모가 크거나 치열하게 부딪히며 에너지를 쓴 하루예요.',
@@ -41,7 +45,6 @@ export const RABBITS = [
     id: 'arctic',
     name: '북극토끼',
     origin: '설원의 생존자',
-    // 사진: Isaac Demeester, Unsplash (무료 라이선스). 다른 토끼도 사진이 정해지면 image를 채운다.
     image: '/rabbits/arctic.jpg',
     desc: '힘든 상황을 단단하게 버텨낸, 고요하지만 강한 하루예요.',
     trivia: '북극토끼는 웅크리면 눈덩이처럼 둥글다가 일어서면 다리가 길쭉한 반전 매력이 있어요. 버티는 동안에도 그 다리는 그대로예요.',
@@ -49,6 +52,7 @@ export const RABBITS = [
   },
   {
     id: 'burrow',
+    image: '/rabbits/burrow.jpg',
     name: '굴토끼',
     origin: '땅굴 마을',
     desc: '사람들과 어울리며 관계 속에서 에너지를 주고받은 하루예요.',
@@ -57,6 +61,7 @@ export const RABBITS = [
   },
   {
     id: 'hare',
+    image: '/rabbits/hare.jpg',
     name: '산토끼',
     origin: '들판의 질주자',
     desc: '활동적인 에너지를 뿜어내며 역동적으로 내달린 하루예요.',
@@ -65,6 +70,7 @@ export const RABBITS = [
   },
   {
     id: 'lop',
+    image: '/rabbits/lop.jpg',
     name: '롭이어 토끼',
     origin: '늘어진 귀',
     desc: '만사 내려놓고 온전히 쉼에 집중한, 느긋한 하루예요.',
