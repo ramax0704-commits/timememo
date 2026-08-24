@@ -2379,7 +2379,17 @@ function App() {
   // (채팅창과 타임블럭은 서로 다른 상자라 같이 들고 있어야 비교가 된다)
   const autoScrollRef = useRef(null); // { view, top } — 어느 화면에서 어디에 맞춰뒀는지
   useEffect(() => {
-    if (activeView !== 'timeline') { autoScrollKeyRef.current = ''; return; }
+    if (activeView !== 'timeline') {
+      // 탭을 떠나면 '맞춰둔 자리' 기억을 지운다. 돌아올 때 화면이 새로 만들어지며
+      // 스크롤이 판 맨 위(창의 첫 날)로 리셋되는데, 옛 기억과 비교하면 그걸
+      // '사용자가 맨 위로 스크롤했다'로 오해해 자리를 안 잡아주고 — 헤더가
+      // 창의 첫 날짜(예: 8월 11일)로 확정되는 사고가 났다 (8/25).
+      autoScrollKeyRef.current = '';
+      autoScrollRef.current = null;
+      // 떠나기 직전 스크롤이 예약해 둔 날짜 변경도 무효다
+      clearTimeout(dateCommitTimerRef.current);
+      return;
+    }
     const key = `${showScheduleView}|${memos.length > 0}|${format(effectiveAnchor, 'yyyy-MM-dd')}`;
     if (autoScrollKeyRef.current === key) return;
     const el = timelineScrollerEl();
