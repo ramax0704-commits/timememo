@@ -280,18 +280,20 @@ export function buildDayFacts(dayMemos, allMemos, now, { past = false } = {}) {
 }
 
 // ── 이번 주 리포트 (계산만) ────────────────────────────────────
-// 오늘을 포함한 최근 7일. 달력 주(월~일)로 하면 월요일마다 텅 비어 보인다.
+// 달력 주(월~일). "이번 주"라고 써 놓고 최근 7일을 보여주면 요일이 화요일부터 시작해
+// 어리둥절해진다 (8/24 피드백). 아직 오지 않은 요일은 future로 표시해 빈 칸으로 그린다.
 export function buildWeekFacts(memos, now) {
   const days = [];
-  // 창의 끝은 달력 날짜의 오늘. (새벽 1시여도 오늘은 오늘 — 그 날의 회고가 아직 비어 있을 뿐)
   const todayKey = dateKeyOf(now);
-  for (let i = WEEKLY_DAYS - 1; i >= 0; i--) {
-    const d = addDays(new Date(now.getFullYear(), now.getMonth(), now.getDate()), -i);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const monday = addDays(today, -((today.getDay() + 6) % 7));
+  for (let i = 0; i < WEEKLY_DAYS; i++) {
+    const d = addDays(monday, i);
     const key = dateKeyOf(d);
     const items = memos
       .filter(m => reviewKeyOf(new Date(m.recordedAt)) === key)
       .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
-    days.push({ date: d, key: dateKeyOf(d), count: items.length, items, spanMinutes: spanMinutes(items) });
+    days.push({ date: d, key, count: items.length, items, spanMinutes: spanMinutes(items), future: key > todayKey });
   }
   const weekMemos = days.flatMap(d => d.items);
   const activeDays = days.filter(d => d.count > 0).length;

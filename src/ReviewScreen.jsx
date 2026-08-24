@@ -15,7 +15,7 @@ import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Lock, Inbox, RefreshCw, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
-  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, WEEKLY_DAYS,
+  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT,
 } from './daySummary';
 import { rabbitById } from './rabbits';
 
@@ -318,6 +318,8 @@ function HabitWeek({ week, habitKeywords }) {
                 {k.name}
               </span>
               {week.days.map(d => {
+                // 아직 오지 않은 요일은 빈 칸 — 안 한 것처럼 보이면 안 된다
+                if (d.future) return <span key={d.key} className="habit-week-cell" aria-hidden="true" />;
                 const done = d.items.some(m => m.content.includes(k.name));
                 return (
                   <span key={d.key} className={`habit-week-cell${done ? ' habit-week-cell--on' : ''}`} aria-label={done ? '함' : '안 함'}>
@@ -396,7 +398,6 @@ function WeekView({ week, habitKeywords, onViewed }) {
       <section className="day-summary shape" aria-label="이번 주 기록">
         <header className="day-summary-head">
           <span className="day-summary-title">이번 주 리듬</span>
-          <span className="day-summary-count">기록한 날 {week.activeDays}/{WEEKLY_DAYS}일</span>
         </header>
         <DayCurve curve={week.curve} now={null} peakLabel={peakLabel} />
         {/* 이 막대가 뭘 세는지 그래프만 봐서는 안 보였다 — 제목을 붙인다 */}
