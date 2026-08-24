@@ -2573,6 +2573,13 @@ body.keyboard-open .input-toolbar { display: flex; }
   background: linear-gradient(160deg, #f2f5ff 0%, #fbfcff 70%);
   border: 1px solid #dfe6ff;
 }
+.rabbit-photo {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
 .rabbit-label {
   font-size: 0.7rem;
   font-weight: 700;

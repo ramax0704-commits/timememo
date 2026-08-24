@@ -107,6 +107,7 @@ function RabbitHero({ rabbit }) {
   if (!info) return null;
   return (
     <div className="rabbit-hero">
+      {info.image && <img className="rabbit-photo" src={info.image} alt={info.name} />}
       <span className="rabbit-label">오늘의 토끼</span>
       <h2 className="rabbit-name">{info.name}</h2>
       <p className="rabbit-desc">{info.desc}</p>
@@ -127,10 +128,8 @@ function ReflectionBlock({ data, mock, stale, busy, usesLeft, onGenerate }) {
 
   return (
     <section className="day-summary reflection" aria-label="오늘의 회고">
-      <header className="day-summary-head">
-        <span className="day-summary-title">오늘의 회고</span>
-        {mock && <span className="day-summary-mock" title="AI 키가 아직 없어 샘플로 보여줍니다">샘플</span>}
-      </header>
+      {/* 제목 없이 결과부터 — 이미지 → 어떤 토끼인지 → 회고 글 순서 */}
+      {mock && <span className="day-summary-mock" title="AI 키가 아직 없어 샘플로 보여줍니다">샘플</span>}
       {data.rabbit && <RabbitHero rabbit={data.rabbit} />}
       {data.headline && <h2 className="reflection-headline">{data.headline}</h2>}
       <p className="day-summary-narrative reflection-narrative">{data.narrative}</p>

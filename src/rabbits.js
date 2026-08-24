@@ -41,6 +41,8 @@ export const RABBITS = [
     id: 'arctic',
     name: '북극토끼',
     origin: '설원의 생존자',
+    // 사진: Isaac Demeester, Unsplash (무료 라이선스). 다른 토끼도 사진이 정해지면 image를 채운다.
+    image: '/rabbits/arctic.jpg',
     desc: '힘든 상황을 단단하게 버텨낸, 고요하지만 강한 하루예요.',
     trivia: '북극토끼는 웅크리면 눈덩이처럼 둥글다가 일어서면 다리가 길쭉한 반전 매력이 있어요. 버티는 동안에도 그 다리는 그대로예요.',
     criteria: '역경이나 부담을 묵묵히 견딘 날. 혼자만의 고요한 시간 속에서 내면을 지켰다. 힘든 흔적은 있지만 무너진 흔적은 없다.',
