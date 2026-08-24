@@ -2011,8 +2011,9 @@ body.keyboard-open .input-toolbar { display: flex; }
    '누가 말한 것'이 아니라 '정리'로 읽히게 한다. */
 .day-summary {
   padding: 16px 16px 14px;
-  background-color: var(--memo-bg);
-  border: 1px solid #e8e8f0;
+  /* 회색 채움은 답답하다 — 흰 바탕에 얇은 선만 */
+  background-color: #fff;
+  border: 1px solid #ececf2;
   border-radius: 16px;
   display: flex;
   flex-direction: column;

@@ -13,9 +13,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Sparkles, Lock, Inbox, RefreshCw, Flame, Check } from 'lucide-react';
+import { Lock, Inbox, RefreshCw, Check } from 'lucide-react';
 import {
-  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, WEEKLY_DAYS, formatMinutes,
+  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, WEEKLY_DAYS,
 } from './daySummary';
 import { rabbitById } from './rabbits';
 
@@ -128,7 +128,7 @@ function ReflectionBlock({ data, mock, stale, busy, usesLeft, onGenerate }) {
   return (
     <section className="day-summary reflection" aria-label="오늘의 회고">
       <header className="day-summary-head">
-        <span className="day-summary-title"><Sparkles size={13} /> 오늘의 회고</span>
+        <span className="day-summary-title">오늘의 회고</span>
         {mock && <span className="day-summary-mock" title="AI 키가 아직 없어 샘플로 보여줍니다">샘플</span>}
       </header>
       {data.rabbit && <RabbitHero rabbit={data.rabbit} />}
@@ -237,7 +237,7 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
   if (ai?.status === 'loading') {
     return (
       <section className="day-summary day-summary--ai-gate" aria-live="polite">
-        <div className="day-summary-ai-title"><Sparkles size={13} /> 오늘의 회고</div>
+        <div className="day-summary-ai-title">오늘의 회고</div>
         <p className="day-summary-muted day-summary-loading-text">오늘 남긴 말들을 읽는 중…</p>
         <LoadingHint startedAt={ai.startedAt} />
       </section>
@@ -247,7 +247,7 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
   const exhausted = usesLeft <= 0;
   return (
     <section className="day-summary day-summary--ai-gate">
-      <div className="day-summary-ai-title"><Sparkles size={13} /> 오늘의 회고</div>
+      <div className="day-summary-ai-title">오늘의 회고</div>
       {ai?.status === 'capped' ? (
         <p className="day-summary-muted">오늘은 회고를 만들 수 있는 전체 사용량이 다 찼어요. 내일 다시 열려요.</p>
       ) : ai?.status === 'failed' ? (
@@ -343,19 +343,10 @@ function WeekView({ week, habitKeywords, onViewed }) {
   return (
     <>
       <section className="day-summary shape" aria-label="이번 주 기록">
-        <div className="shape-top">
-          <div className="shape-main">
-            <span className="day-summary-stat-label">최근 7일 활동 시간</span>
-            <span className="shape-big">{week.totalActivityMinutes > 0 ? formatMinutes(week.totalActivityMinutes) : '—'}</span>
-          </div>
-          {week.streak > 0 && (
-            <span className="streak-badge"><Flame size={13} /> {week.streak}일 연속</span>
-          )}
-        </div>
-        <div className="shape-sub">
-          기록 <strong>{week.total}회</strong> · 기록한 날 <strong>{week.activeDays}/{WEEKLY_DAYS}일</strong>
-          {peakHour != null && <> · 몰린 시간 <strong>{hourLabel(peakHour)}</strong></>}
-        </div>
+        <header className="day-summary-head">
+          <span className="day-summary-title">이번 주 리듬</span>
+          <span className="day-summary-count">기록한 날 {week.activeDays}/{WEEKLY_DAYS}일</span>
+        </header>
         <DayCurve curve={week.curve} now={null} peakLabel={peakLabel} />
         {/* 이 막대가 뭘 세는지 그래프만 봐서는 안 보였다 — 제목을 붙인다 */}
         <div className="week-bars-caption">날짜별 기록 수</div>
