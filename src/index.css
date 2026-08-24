@@ -2561,10 +2561,15 @@ body.keyboard-open .input-toolbar { display: flex; }
 .seg-state { font-size: 0.84rem; font-weight: 600; color: var(--text-main); word-break: keep-all; }
 .day-summary-uses { font-size: 0.7rem; color: var(--text-muted); }
 
-/* ── 오늘의 토끼 ─────────────────────────────────────────────── */
-.rabbit-card {
+/* ── 오늘의 토끼 (회고 카드의 머리) ──────────────────────────── */
+.rabbit-hero {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  background: linear-gradient(160deg, #f7f9ff 0%, #ffffff 55%);
+  margin: 2px 0 6px;
+  padding: 14px;
+  border-radius: 12px;
+  background: linear-gradient(160deg, #f2f5ff 0%, #fbfcff 70%);
   border: 1px solid #dfe6ff;
 }
 .rabbit-label {

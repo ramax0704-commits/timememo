@@ -13,10 +13,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Sparkles, Lock, Inbox, RefreshCw, X, Plus, Flame, Check } from 'lucide-react';
+import { Sparkles, Lock, Inbox, RefreshCw, Flame, Check } from 'lucide-react';
 import {
-  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, WEEKLY_DAYS, UNCATEGORIZED, groupByCategory, formatMinutes,
-  extractKeywords,
+  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, WEEKLY_DAYS, formatMinutes,
 } from './daySummary';
 import { rabbitById } from './rabbits';
 
@@ -100,157 +99,24 @@ export function DayCurve({ curve, now, peakLabel }) {
   );
 }
 
-// ── 카테고리 고르기 (기록 하나의 분류를 바꾼다) ────────────────
-function CategoryPicker({ memo, categories, onPick, onClose }) {
-  const [custom, setCustom] = useState('');
-  const current = memo.category || UNCATEGORIZED;
-  const options = [...categories.filter(c => c !== UNCATEGORIZED), UNCATEGORIZED];
-  return (
-    <div className="cat-picker-backdrop" onClick={onClose}>
-      <div className="cat-picker" onClick={e => e.stopPropagation()} role="dialog" aria-label="카테고리 바꾸기">
-        <div className="cat-picker-head">
-          <span className="cat-picker-memo">{format(new Date(memo.recordedAt), 'HH:mm')} · {memo.content}</span>
-          <button type="button" className="cat-picker-close" onClick={onClose} aria-label="닫기"><X size={16} /></button>
-        </div>
-        <div className="cat-picker-list">
-          {options.map(name => (
-            <button
-              key={name}
-              type="button"
-              className={`cat-picker-item${name === current ? ' cat-picker-item--on' : ''}`}
-              onClick={() => onPick(name === UNCATEGORIZED ? null : name)}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-        <form
-          className="cat-picker-new"
-          onSubmit={e => { e.preventDefault(); const v = custom.trim(); if (v) onPick(v.slice(0, 12)); }}
-        >
-          <input
-            type="text"
-            value={custom}
-            onChange={e => setCustom(e.target.value)}
-            placeholder="새 카테고리 (2~5자)"
-            maxLength={12}
-          />
-          <button type="submit" disabled={!custom.trim()} aria-label="추가"><Plus size={16} /></button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// ── 블록 2: 오늘의 시간 배분 ──────────────────────────────────
-// 기록의 category로 그린다. 미분류는 숨기지 않는다 — 어떤 입력이 분류되지 않는지 보는 것도 목적이다.
-// 기록 수가 아니라 '활동 시간'으로 그린다. 기록 한 줄은 다음 기록까지의 시간을 대표한다고 보고
-// (최대 3시간), 카테고리별로 그 시간을 더한다. "오늘 업무에 4시간, 휴식에 1시간"이어야
-// 다음 행동(내일은 휴식을 더, 이 일은 줄이기)이 나온다. 기록 수 비중은 그걸 못 준다.
-function CategoryBlock({ memos, durations, fixedCategories, onEdit, mock }) {
-  const [picking, setPicking] = useState(null);
-  const groups = groupByCategory(memos, durations);
-  const totalMin = groups.reduce((s, g) => s + g.minutes, 0) || 1;
-  const names = [...new Set([...fixedCategories, ...groups.map(g => g.name)])];
-
-  return (
-    <section className="day-summary" aria-label="오늘의 시간 배분">
-      <header className="day-summary-head">
-        <span className="day-summary-title">오늘의 시간 배분</span>
-        <span className="day-summary-count">
-          {mock && <span className="day-summary-mock" title="AI 키가 아직 없어 샘플로 분류했습니다">샘플</span>}
-          활동 시간 기준
-        </span>
-      </header>
-      <div className="cat-list">
-        {groups.map(g => (
-          <div key={g.name} className={`cat-row${g.name === UNCATEGORIZED ? ' cat-row--none' : ''}`}>
-            <div className="cat-row-head">
-              <span className="cat-row-name">{g.name}</span>
-              <span className="cat-row-count">{formatMinutes(g.minutes)} · {Math.round((g.minutes / totalMin) * 100)}%</span>
-            </div>
-            <div className="cat-row-bar"><div className="cat-row-fill" style={{ width: `${(g.minutes / totalMin) * 100}%` }} /></div>
-            <div className="cat-row-items">
-              {g.items.map(m => (
-                <button key={m.id} type="button" className="cat-chip" onClick={() => setPicking(m)} title="탭해서 카테고리 바꾸기">
-                  <span className="cat-chip-time">{format(new Date(m.recordedAt), 'HH:mm')}</span>
-                  <span className="cat-chip-text">{m.content}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      <p className="day-summary-muted cat-hint">기록부터 다음 기록까지를 그 활동의 시간으로 쳐요(최대 3시간). 기록을 탭하면 카테고리를 바꿀 수 있고, 바꾼 건 다음 분류에 반영돼요.</p>
-      {picking && (
-        <CategoryPicker
-          memo={picking}
-          categories={names}
-          onClose={() => setPicking(null)}
-          onPick={(name) => { onEdit(picking, name); setPicking(null); }}
-        />
-      )}
-    </section>
-  );
-}
-
 // ── 오늘의 토끼 (AI 회고의 대표 결과) ─────────────────────────
 // 숫자 대신, 오늘 기록에서 읽힌 상태·감정을 토끼 아키타입으로 비춰준다.
-function RabbitBlock({ rabbit }) {
+// 회고 글과 한 덩어리로 보여야 해서 ReflectionBlock 머리에 들어간다.
+function RabbitHero({ rabbit }) {
   const info = rabbitById(rabbit?.type);
   if (!info) return null;
   return (
-    <section className="day-summary rabbit-card" aria-label="오늘의 토끼">
+    <div className="rabbit-hero">
       <span className="rabbit-label">오늘의 토끼</span>
       <h2 className="rabbit-name">{info.name}</h2>
       <p className="rabbit-desc">{info.desc}</p>
       {rabbit.reason && <p className="rabbit-reason">{rabbit.reason}</p>}
       <p className="rabbit-trivia">{info.trivia}</p>
-    </section>
+    </div>
   );
 }
 
-// ── 시간대별 흐름 ─────────────────────────────────────────────
-// 기록이 있는 시간대만 보여준다 — 아직 오지 않았거나 비어 있는 칸을 미리 늘어놓지 않는다.
-// 회고를 만들면 그 시간대의 '상태'(AI)가 보이고, 만들기 전에는 키워드가 자리를 지킨다.
-function SegmentBlock({ segments, states }) {
-  const filled = segments.filter(seg => seg.count > 0);
-  if (filled.length === 0) return null;
-  const stateOf = (label) => states?.find(s => s.segment === label)?.state ?? null;
-  return (
-    <section className="day-summary" aria-label="시간대별 흐름">
-      <header className="day-summary-head">
-        <span className="day-summary-title">시간대별 흐름</span>
-        <span className="day-summary-count">기록 시각 기준</span>
-      </header>
-      <div className="seg-list">
-        {filled.map(seg => {
-          const state = stateOf(seg.label);
-          return (
-            <div key={seg.key} className={`seg-row seg-row--${seg.state}`}>
-              <div className="seg-head">
-                <span className="seg-label">{seg.label}</span>
-                <span className="seg-range">{String(seg.from % 24).padStart(2, '0')}–{String(seg.to % 24).padStart(2, '0')}시</span>
-                {seg.state === 'now' && <span className="seg-now">진행 중</span>}
-              </div>
-              <div className="seg-body">
-                {state ? (
-                  <span className="seg-state">{state}</span>
-                ) : (
-                  <span className="day-summary-keywords seg-keywords">
-                    {extractKeywords(seg.items).map(w => <span key={w} className="day-summary-chip">{w}</span>)}
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-// ── 블록 3: 오늘의 회고 (AI) ──────────────────────────────────
+// ── 오늘의 회고 (AI) — 토끼 + 회고 글이 한 덩어리 ─────────────
 function ReflectionBlock({ data, mock, stale, busy, usesLeft, onGenerate }) {
   const hasFlow = data.thoughtFlow?.length > 0;
   const hasLoops = data.loops?.length > 0;
@@ -265,6 +131,7 @@ function ReflectionBlock({ data, mock, stale, busy, usesLeft, onGenerate }) {
         <span className="day-summary-title"><Sparkles size={13} /> 오늘의 회고</span>
         {mock && <span className="day-summary-mock" title="AI 키가 아직 없어 샘플로 보여줍니다">샘플</span>}
       </header>
+      {data.rabbit && <RabbitHero rabbit={data.rabbit} />}
       {data.headline && <h2 className="reflection-headline">{data.headline}</h2>}
       <p className="day-summary-narrative reflection-narrative">{data.narrative}</p>
 
@@ -350,7 +217,7 @@ function LoadingHint({ startedAt }) {
   }, [startedAt]);
   return (
     <p className="day-summary-muted" style={{ fontSize: '0.75rem', marginTop: '4px' }}>
-      {sec < 25 ? '보통 10~20초 걸려요' : '기록이 많은 날은 조금 더 걸려요'}{sec > 0 ? ` · ${sec}초` : ''}
+      {sec < 15 ? '보통 10초 안팎 걸려요' : '기록이 많은 날은 조금 더 걸려요'}{sec > 0 ? ` · ${sec}초` : ''}
     </p>
   );
 }
@@ -470,9 +337,6 @@ function HabitWeek({ week, habitKeywords }) {
 // ── 이번 주 ──────────────────────────────────────────────────
 function WeekView({ week, habitKeywords, onViewed }) {
   useEffect(() => { onViewed?.(); }, [onViewed]);
-  const cats = week.categories;
-  const catTotal = cats.reduce((s, g) => s + g.minutes, 0) || 1;
-  const hasCats = cats.some(g => g.minutes > 0);
   const peakHour = peakHourFromCurve(week.curve);
   const peakLabel = peakHour != null ? `${hourLabel(peakHour)}쯤 가장 많이` : null;
 
@@ -512,36 +376,14 @@ function WeekView({ week, habitKeywords, onViewed }) {
       </section>
 
       <HabitWeek week={week} habitKeywords={habitKeywords} />
-
-      <section className="day-summary" aria-label="이번 주 시간 배분">
-        <header className="day-summary-head">
-          <span className="day-summary-title">이번 주 시간 배분</span>
-          <span className="day-summary-count">활동 시간 기준</span>
-        </header>
-        {!hasCats ? (
-          <p className="day-summary-muted">아직 분류된 기록이 없어요. 오늘 탭에서 회고를 만들면 여기에 쌓여요.</p>
-        ) : (
-          <div className="cat-list cat-list--compact">
-            {cats.map(g => (
-              <div key={g.name} className={`cat-row${g.name === UNCATEGORIZED ? ' cat-row--none' : ''}`}>
-                <div className="cat-row-head">
-                  <span className="cat-row-name">{g.name}</span>
-                  <span className="cat-row-count">{formatMinutes(g.minutes)} · {Math.round((g.minutes / catTotal) * 100)}%</span>
-                </div>
-                <div className="cat-row-bar"><div className="cat-row-fill" style={{ width: `${(g.minutes / catTotal) * 100}%` }} /></div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
     </>
   );
 }
 
 // ── 화면 ──────────────────────────────────────────────────────
 export default function ReviewScreen({
-  facts, todayMemos, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, busy, usesLeft, fixedCategories,
-  habitKeywords, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline, onEditCategory,
+  facts, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, busy, usesLeft,
+  habitKeywords, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline,
 }) {
   const [mode, setMode] = useState('today'); // 'today' | 'week'
 
@@ -550,7 +392,6 @@ export default function ReviewScreen({
     if (mode === 'today' && facts) onViewed?.(viewKey);
   }, [mode, facts, viewKey, onViewed]);
 
-  const hasCategories = todayMemos.some(m => m.category);
   const aiOk = ai?.status === 'ok' && ai.data;
 
   // 좌우로 밀면 날짜가 바뀐다 (타임라인 채팅창과 같은 손짓). 세로 스크롤과 헷갈리지 않게
@@ -593,33 +434,21 @@ export default function ReviewScreen({
             </div>
           ) : (
             <>
-          {/* 오늘의 토끼 — 회고를 만들면 맨 위에 결과로 뜬다 */}
-          {aiOk && !locked && ai.data.rabbit && <RabbitBlock rabbit={ai.data.rabbit} />}
-
-          <ShapeBlock facts={facts} now={isToday ? now : null} dayLabel={dayLabel} />
-
-          {/* 시간대별 흐름 — 회고 생성 전엔 키워드, 생성 후엔 그 시간대의 상태 */}
-          <SegmentBlock segments={facts.segments} states={aiOk && !locked ? ai.data.segmentStates : null} />
-
-          {/* 오늘의 회고 (AI) / 만들기 버튼 */}
+          {/* 회고를 만들면 결과(토끼+회고 글)가 한 덩어리로 맨 위에, 리듬 곡선은 그 아래로.
+              만들기 전에는 리듬 곡선 아래에 만들기 버튼이 있다 — 결과가 위아래로 찢어지지 않는다 */}
           {aiOk && !locked ? (
-            <ReflectionBlock data={ai.data} mock={ai.mock} stale={ai.stale} busy={busy} usesLeft={usesLeft} onGenerate={onGenerate} />
+            <>
+              <ReflectionBlock data={ai.data} mock={ai.mock} stale={ai.stale} busy={busy} usesLeft={usesLeft} onGenerate={onGenerate} />
+              <ShapeBlock facts={facts} now={isToday ? now : null} dayLabel={dayLabel} />
+            </>
           ) : (
-            <AIGate ai={ai} locked={locked} recordCount={facts.count} busy={busy} usesLeft={usesLeft} onGenerate={onGenerate} onLoginClick={onLoginClick} />
+            <>
+              <ShapeBlock facts={facts} now={isToday ? now : null} dayLabel={dayLabel} />
+              <AIGate ai={ai} locked={locked} recordCount={facts.count} busy={busy} usesLeft={usesLeft} onGenerate={onGenerate} onLoginClick={onLoginClick} />
+            </>
           )}
 
-          {/* 시간 배분 — 분류가 있으면 AI 상태와 상관없이 그린다 (활동 시간 기준) */}
-          {hasCategories && !locked && (
-            <CategoryBlock
-              memos={todayMemos}
-              durations={facts.durations}
-              fixedCategories={fixedCategories}
-              onEdit={onEditCategory}
-              mock={Boolean(aiOk && ai.mock)}
-            />
-          )}
-
-          {/* 4. 다음 — 계산값만. 첫날이어도 빈 칸이 없다 */}
+          {/* 다음 — 계산값만. 첫날이어도 빈 칸이 없다 */}
           <footer className="day-summary-hook">
             <strong>기록 {facts.recordDays}일차</strong>
             <span>

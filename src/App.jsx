@@ -21,8 +21,8 @@ import { supabase, setRememberMe, getRememberMe } from './supabase';
 import { track, identifyUser, resetUser, markFirstMemo } from './analytics';
 import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
 import {
-  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, FIXED_CATEGORY_FROM_DAY, dateKeyOf, reviewKeyOf,
-  buildDayFacts, buildWeekFacts, toSummaryRecords, countRecordDays, topCategories, categoryHints,
+  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, dateKeyOf, reviewKeyOf,
+  buildDayFacts, buildWeekFacts, toSummaryRecords, countRecordDays,
 } from './daySummary';
 import { requestDaySummary, summaryCacheKey, peekSummaryCache } from './summaryAI';
 import ReviewScreen from './ReviewScreen';
@@ -827,8 +827,6 @@ const SAVE_NOTICE_AFTER = 3;
 const SAVE_NOTICE_KEY = 'timememo-save-notice-dismissed';
 // 회고 안내 토스트를 띄운 날 — 뒤에 회고일(yyyy-MM-dd)이 붙는다. 하루에 한 번만 띄운다
 const REVIEW_TOAST_PREFIX = 'timememo-review-toast-';
-// 체험 모드의 고정 카테고리 세트 (로그인하면 settings.review_categories로)
-const REVIEW_CATEGORIES_KEY = 'timememo-review-categories';
 // 오늘 AI 회고를 몇 번 만들었는지 ({ 'yyyy-MM-dd': n }). 호출마다 비용이 나가므로 하루 횟수를 막는다.
 // 기기 로컬이라 완벽한 잠금은 아니다 — 진짜 결제 연동을 하면 서버에서 세야 한다.
 const SUMMARY_USES_KEY = 'timememo-summary-uses';
@@ -999,16 +997,6 @@ function App() {
   // key = 날짜 + 당일 기록 내용의 해시. 기록이 늘거나 바뀌면 키가 달라져 '이후 기록이 추가됨'을 안다.
   const [summaryAI, setSummaryAI] = useState({ key: null, status: 'idle', data: null, mock: false });
   const [summaryBusy, setSummaryBusy] = useState(false);
-  // 4일차부터 고정되는 사용자 카테고리 세트. 로그인은 settings.review_categories, 체험은 기기에.
-  const [reviewCategories, setReviewCategories] = useState(() => {
-    try {
-      const raw = localStorage.getItem(REVIEW_CATEGORIES_KEY);
-      const arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr.filter(c => typeof c === 'string') : [];
-    } catch {
-      return [];
-    }
-  });
   const weekViewedRef = useRef(false);
   const [summaryUses, setSummaryUses] = useState(readSummaryUses);
   const [reviewDayPick, setReviewDayPick] = useState(null); // 회고 탭에서 고른 날 (null=오늘)
@@ -1326,7 +1314,7 @@ function App() {
     const loadSettings = async () => {
       const { data, error } = await supabase
         .from('settings')
-        .select('habit_keywords, review_categories')
+        .select('habit_keywords')
         .eq('user_id', userId)
         .maybeSingle();
       if (error) {
@@ -1335,9 +1323,6 @@ function App() {
       }
       if (data?.habit_keywords && Array.isArray(data.habit_keywords)) {
         setHabitKeywords(data.habit_keywords);
-      }
-      if (Array.isArray(data?.review_categories)) {
-        setReviewCategories(data.review_categories.filter(c => typeof c === 'string'));
       }
     };
     loadSettings();
@@ -1512,19 +1497,6 @@ function App() {
   }, [todayKey]);
   const memoDayKeys = new Set(memos.map(m => dateKeyOf(new Date(m.recordedAt))));
 
-  // 고정 세트 저장. 로그인이면 settings, 체험이면 기기.
-  const saveReviewCategories = useCallback(async (list) => {
-    setReviewCategories(list);
-    try { localStorage.setItem(REVIEW_CATEGORIES_KEY, JSON.stringify(list)); } catch { /* 무시 */ }
-    if (!currentUser) return;
-    const { error } = await supabase.from('settings').upsert({
-      user_id: currentUser.id,
-      review_categories: list,
-      updated_at: new Date().toISOString(),
-    });
-    if (error) console.error('Error saving review categories:', error);
-  }, [currentUser]);
-
   // 약관·방침 전문을 보고 '/?consent=1'로 돌아온 사람은 동의 시트를 다시 띄운다
   useEffect(() => {
     if (authLoading) return;
@@ -1550,16 +1522,6 @@ function App() {
     });
     return () => { alive = false; };
   }, [currentUser]);
-
-  // 누적 기록일이 4일에 닿으면 그때까지 많이 쓰인 상위 5개를 고정 세트로 삼는다. 한 번 정하면 안 바꾼다.
-  useEffect(() => {
-    if (reviewCategories.length > 0) return;
-    if (countRecordDays(memos) < FIXED_CATEGORY_FROM_DAY) return;
-    const top = topCategories(memos);
-    if (top.length === 0) return;
-    const id = setTimeout(() => { saveReviewCategories(top); track('Categories Fixed', { count: top.length }); }, 0);
-    return () => clearTimeout(id);
-  }, [memos, reviewCategories.length, saveReviewCategories]);
 
   // 회고 탭에 넘길 AI 상태. 같은 키면 그대로, 오늘 것인데 키가 달라졌으면 '이후 기록 추가됨'으로 표시.
   const summaryForScreen =
@@ -1587,37 +1549,10 @@ function App() {
   }, [activeView, summaryKey, isGuest]);
 
   // 기록 하나의 카테고리를 바꿔 저장한다 (체험이면 기기, 아니면 서버). 본문은 건드리지 않는다.
-  const writeMemoCategories = async (pairs) => {
-    if (pairs.length === 0) return;
-    const byId = new Map(pairs.map(([memo, name]) => [memo.id, name]));
-    setMemos(prev => prev.map(m => (byId.has(m.id) ? { ...m, category: byId.get(m.id) } : m)));
-    if (isGuest) {
-      saveGuestRows(loadGuestRows().map(r => (byId.has(r.id) ? { ...r, category: byId.get(r.id) } : r)));
-      return;
-    }
-    const results = await Promise.all(
-      pairs.map(([memo, name]) => supabase.from('memos').update({ category: name }).eq('id', memo.id))
-    );
-    results.forEach(({ error }) => { if (error) console.error('Error saving category:', error); });
-  };
-
-  // 사용자가 직접 고친 분류. 다음 AI 분류에 힌트로 들어간다.
-  const handleEditCategory = (memo, name) => {
-    const known = new Set([...reviewCategories, ...memos.map(m => m.category).filter(Boolean)]);
-    track('category_edited', {
-      had_category: Boolean(memo.category),
-      to_uncategorized: name === null,
-      is_new_name: name !== null && !known.has(name),
-      guest: isGuest,
-    });
-    writeMemoCategories([[memo, name]]);
-  };
-
   const generateSummary = async () => {
     if (!canGenerate || isGuest || summaryBusy) return;
     const key = summaryKey;
     const records = todayRecords;
-    const sorted = todayMemos;
     const regenerate = summaryGeneratedRef.current.has(reviewKey);
     const facts = {
       count: todayFacts.count,
@@ -1634,9 +1569,6 @@ function App() {
         dateKey: reviewKey,
         records,
         facts,
-        fixedCategories: reviewCategories,
-        // 고정 세트가 없을 때만 힌트를 준다 (있으면 그 이름에만 매핑해야 한다)
-        knownCategories: reviewCategories.length ? [] : categoryHints(memos),
       });
       setSummaryAI({ key, status: 'ok', data, mock });
       // 실제로 AI를 부른 경우에만 오늘 횟수를 깎는다 (캐시 히트·샘플은 비용이 없다)
@@ -1645,30 +1577,16 @@ function App() {
         setSummaryUses(next);
         try { localStorage.setItem(SUMMARY_USES_KEY, JSON.stringify(next)); } catch { /* 무시 */ }
       }
-      // AI 분류를 기록에 붙인다. 이미 카테고리가 있는 기록(사용자가 고친 것 포함)은 건드리지 않는다.
-      const pairs = [];
-      for (const c of data.categories) {
-        for (const idx of c.recordIndexes) {
-          const memo = sorted[idx];
-          if (memo && !memo.category) pairs.push([memo, c.name]);
-        }
-      }
-      await writeMemoCategories(pairs);
       summaryGeneratedRef.current.add(reviewKey);
       track('summary_generated', {
         memo_count: records.length,
         record_days: countRecordDays(memos),
         hour: new Date().getHours(),
-        categories: data.categories.length,
-        classified: pairs.length,
-        unclassified: sorted.filter(m => !m.category).length - pairs.length,
         has_flow: data.thoughtFlow.length > 0,
         loops: data.loops.length,
         energy_words: data.energyWords.up.length + data.energyWords.down.length,
         // 어떤 토끼가 얼마나 나오는지 — 매칭 분포가 한쪽으로 쏠리면 기준을 손봐야 한다
         rabbit: data.rabbit?.type ?? null,
-        segment_states: data.segmentStates?.length ?? 0,
-        fixed_set: reviewCategories.length > 0,
         mock,
         from_cache: fromCache,
         regenerate,
@@ -4489,13 +4407,11 @@ function App() {
             locked={isGuest && !tour.active}
             busy={tour.active ? tour.aiStatus === 'loading' : summaryBusy}
             usesLeft={tour.active ? SUMMARY_DAILY_LIMIT : summaryUsesLeft}
-            fixedCategories={reviewCategories}
             habitKeywords={habitKeywords}
             viewKey={reviewKey}
             onViewed={handleSummaryViewed}
             onWeekViewed={handleWeekViewed}
             onGenerate={tour.active ? tourGenerate : generateSummary}
-            onEditCategory={handleEditCategory}
             onGoTimeline={() => setActiveView('timeline')}
             onLoginClick={() => {
               track('Summary Login Click', { memo_count: todayFacts?.count ?? 0 });

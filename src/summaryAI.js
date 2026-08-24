@@ -66,20 +66,8 @@ export function peekSummaryCache(key) {
 }
 
 // 받은 JSON을 고정 스키마로 정리한다. 못 맞추면 null.
-export function normalizeSummary(obj, recordCount) {
+export function normalizeSummary(obj) {
   if (!obj || typeof obj !== 'object') return null;
-  const seen = new Set();
-  const categories = (Array.isArray(obj.categories) ? obj.categories : [])
-    .map(c => {
-      const name = typeof c?.name === 'string' ? c.name.trim().replace(/^#/, '').slice(0, 12) : '';
-      const recordIndexes = Array.isArray(c?.recordIndexes)
-        ? [...new Set(c.recordIndexes.filter(i => Number.isInteger(i) && i >= 0 && i < recordCount && !seen.has(i)))]
-        : [];
-      recordIndexes.forEach(i => seen.add(i));
-      return { name, recordIndexes };
-    })
-    .filter(c => c.name && c.recordIndexes.length > 0)
-    .slice(0, 6);
   const narrative = typeof obj.narrative === 'string' ? obj.narrative.trim() : '';
   if (!narrative) return null;
   const strs = (arr, max, len) => (Array.isArray(arr) ? arr : [])
@@ -98,17 +86,11 @@ export function normalizeSummary(obj, recordCount) {
   const rabbit = obj.rabbit && RABBIT_IDS.includes(obj.rabbit.type) && typeof obj.rabbit.reason === 'string' && obj.rabbit.reason.trim()
     ? { type: obj.rabbit.type, reason: obj.rabbit.reason.trim().slice(0, 160) }
     : null;
-  const SEGMENT_NAMES = ['새벽', '오전', '점심', '오후', '저녁', '밤'];
-  const segSeen = new Set();
-  const segmentStates = (Array.isArray(obj.segmentStates) ? obj.segmentStates : [])
-    .filter(s => s && SEGMENT_NAMES.includes(s.segment) && typeof s.state === 'string' && s.state.trim() && !segSeen.has(s.segment) && segSeen.add(s.segment))
-    .map(s => ({ segment: s.segment, state: s.state.trim().slice(0, 40) }))
-    .slice(0, 6);
-  return { categories, headline, narrative, thoughtFlow, loops, energyWords, keywords, rabbit, segmentStates };
+  return { headline, narrative, thoughtFlow, loops, energyWords, keywords, rabbit };
 }
 
-// records: [{ time, text }] 시간순 / facts: 계산값 / fixedCategories: 고정 세트 / knownCategories: 힌트
-export async function requestDaySummary({ dateKey, records, facts, fixedCategories = [], knownCategories = [], signal }) {
+// records: [{ time, text }] 시간순 / facts: 계산값
+export async function requestDaySummary({ dateKey, records, facts, signal }) {
   const key = summaryCacheKey(dateKey, records);
   const cached = findCached(key);
   if (cached?.data) return { data: cached.data, mock: Boolean(cached.mock), fromCache: true };
@@ -123,7 +105,7 @@ export async function requestDaySummary({ dateKey, records, facts, fixedCategori
     const res = await fetch('/api/summarize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: dateKey, records, facts, fixedCategories, knownCategories }),
+      body: JSON.stringify({ date: dateKey, records, facts }),
       signal: ctrl.signal,
     });
     if (res.status === 429) {
@@ -141,10 +123,10 @@ export async function requestDaySummary({ dateKey, records, facts, fixedCategori
     // 로컬 개발(vite dev)에는 /api가 없다. 화면을 확인할 수 있게 샘플로 대신한다.
     // 배포 환경에서는 그대로 실패시킨다 — 샘플이 실제 회고인 척 보이면 안 된다.
     if (!import.meta.env.DEV) throw e;
-    payload = { ...mockDaySummary(records, { fixedCategories, facts }), mock: true };
+    payload = { ...mockDaySummary(records, { facts }), mock: true };
   }
 
-  const data = normalizeSummary(payload, records.length);
+  const data = normalizeSummary(payload);
   if (!data) throw new Error('summary schema mismatch');
   const result = { data, mock: Boolean(payload.mock) };
   // 샘플은 캐시하지 않는다 — 키를 넣는 순간부터 실제 회고가 보여야 한다
