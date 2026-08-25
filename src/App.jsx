@@ -909,7 +909,11 @@ function buildDayBlocks(sortedMemos, { dayStartMs, nowMs, gridMinutes, clampDawn
     if (backMin > 0) {
       startPos = ownPos - backMin;
     } else if (spansPrev) {
-      startPos = prevPos !== null ? prevPos : ownPos - MIN_BLOCK_MINUTES;
+      // 이전 기록이 '끝난 데'부터 잇는다. 이전 기록의 끝을 직접 늘려뒀으면(endMinutes)
+      // 기록 시각이 아니라 그 늘린 끝이 경계다 — 기록 시각에 붙이면 늘린 구간과 겹친다
+      // (블록을 꾹 눌러 옮기거나 끝을 고친 뒤 '이전 기록부터'가 옛 시각에 붙던 버그).
+      const prevEndPos = prevPos !== null ? prevPos + Math.max(0, prevMemo.endMinutes || 0) : null;
+      startPos = prevEndPos !== null ? Math.min(prevEndPos, ownPos) : ownPos - MIN_BLOCK_MINUTES;
     }
     const startsEarlier = startPos < ownPos;
     if (clampDawn && startsEarlier) {
@@ -924,7 +928,9 @@ function buildDayBlocks(sortedMemos, { dayStartMs, nowMs, gridMinutes, clampDawn
       endPos = ownPos + endMin;
     } else if (spansNext) {
       if (nextPos !== null) {
-        endPos = nextPos;
+        // 같은 이유의 거울: 다음 기록이 시작을 직접 당겨뒀으면(backMinutes)
+        // 그 당긴 시작 전까지만 잇는다 — 다음 기록 시각까지 가면 겹친다
+        endPos = Math.max(ownPos, nextPos - Math.max(0, nextMemo.backMinutes || 0));
       } else {
         const nowPosInDay = (nowMs - dayStartMs) / 60000;
         endPos = (nowPosInDay > ownPos && nowPosInDay < gridMinutes)
