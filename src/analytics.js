@@ -34,6 +34,13 @@ if (analyticsEnabled) {
     // 개인 기록 앱이라 IP 기반 위치 수집은 받지 않는다
     ip: false,
 
+    // 기기 id를 쿠키가 아니라 localStorage에 보관한다.
+    // 사파리(ITP)가 스크립트로 만든 쿠키를 7일이면 지워서, 일주일 넘어 재방문한
+    // 사람이 새 기기로 쪼개졌다 — 8/25 온보딩 퍼널 조사에서 확인 (스플래시를 본
+    // 옛 id와 투어를 돈 새 id가 이어지지 않아 퍼널이 0%로 나왔다).
+    // 앱 자체 키(온보딩 완료 등)도 localStorage라 수명이 같아진다.
+    persistence: 'localStorage',
+
     // 로컬 개발 중일 때만 콘솔에 전송 내역을 찍어준다
     debug: import.meta.env.DEV,
   });
