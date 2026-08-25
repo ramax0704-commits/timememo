@@ -1854,14 +1854,19 @@ function App() {
 
   // 확정: 휠에서 고친 시각으로 옮기기를 마친다.
   // 시작·종료를 손대지 않았으면 드롭 시각 그대로 두고 아무것도 더 쓰지 않는다.
+  // 단, 자동 잇기 구간('이전 기록부터'·'다음 기록까지')은 예외 — 경계가 recordedAt이
+  // 아니라 이웃 기록에 붙어 있어서, recordedAt만 옮기면 시작(또는 끝)이 제자리에
+  // 남는다. 드롭한 자리의 구간을 명시적으로 굳혀야 옮겨진다.
   const confirmMove = async () => {
     const m = moveConfirm;
     if (!m) return;
     setMoveConfirm(null);
     const startChanged = m.draftStart !== m.initStart;
     const endChanged = m.isRange && m.draftEnd !== m.initEnd;
+    const p = m.prev.local;
+    const autoLinked = (p.spansFromPrev && !p.backMinutes) || (p.spansToNext && !p.endMinutes);
 
-    if (startChanged || endChanged) {
+    if (startChanged || endChanged || (m.isRange && autoLinked)) {
       const toMin = (s) => { const [h, mi] = s.split(':').map(Number); return h * 60 + mi; };
       const base = new Date(m.baseIso);
 
