@@ -4229,6 +4229,16 @@ function App() {
         {showConsent && (
           <ConsentSheet onAgree={agreeAndSignIn} onClose={() => { track('Consent', { action: 'closed' }); setShowConsent(false); }} />
         )}
+        {/* 하단 '로그인' 탭으로 들어온 사람이 나가는 길을 못 찾고 당황했다.
+            '나중에 하기'는 눈에 안 띄어서, 익숙한 자리(좌상단)에 뒤로가기를 둔다. */}
+        <button
+          type="button"
+          className="auth-back-btn"
+          aria-label="뒤로가기"
+          onClick={() => { setShowLogin(false); setAuthError(''); }}
+        >
+          ←
+        </button>
         <div className="auth-card">
           <div className="auth-logo">
             <span className="auth-logo-icon">🕒</span>

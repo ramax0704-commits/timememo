@@ -1480,11 +1480,31 @@ body.keyboard-open .input-toolbar { display: flex; }
 
 /* ── Auth Screen ─────────────────────────────────────────────── */
 .auth-wrapper {
+  position: relative; /* 좌상단 뒤로가기 기준점 */
   display: flex;
   background-color: var(--bg-body);
   padding: 20px;
   overflow-y: auto; /* 카드가 화면보다 길면 스크롤 (모바일 잘림 방지) */
 }
+
+.auth-back-btn {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-main);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.auth-back-btn:active { background-color: rgba(0, 0, 0, 0.06); }
 
 .auth-card {
   background-color: white;
