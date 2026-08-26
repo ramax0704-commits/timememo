@@ -1496,7 +1496,7 @@ body.keyboard-open .input-toolbar { display: flex; }
   border: none;
   border-radius: 50%;
   background: none;
-  color: var(--text-main);
+  color: #888;
   font-size: 1.4rem;
   line-height: 1;
   cursor: pointer;
