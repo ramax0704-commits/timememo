@@ -1509,7 +1509,7 @@ function App() {
     const t = parseTimeSpan(inputText, nowTime);
     return t ? { ...t, dayMs: selectedDayStartMs } : null;
   })();
-  const pendingKey = pendingSpan ? `${pendingSpan.start}-${pendingSpan.end}-${pendingSpan.dayMs}` : null;
+  const pendingKey = pendingSpan ? `${pendingSpan.start}-${pendingSpan.end}-${pendingSpan.dayMs}-${!!slotPick}` : null;
   // 잡힌 시간 영역이 생기거나 바뀌면 그 띠를 화면에 보여준다 (등록 전에).
   // 이러면 등록해도 블록이 이미 보이던 자리에 나타나 화면이 안 튄다.
   useEffect(() => {
@@ -5193,7 +5193,7 @@ function App() {
 
       {/* 시간표 빈 자리를 누른 직후: 휠로 시각을 맞춘 뒤 입력창으로 간다 */}
       {slotPick && (
-        <div className="block-sheet-overlay block-sheet-overlay--peek" onClick={() => setSlotPick(null)}>
+        <div className="block-sheet-overlay block-sheet-overlay--peek" onClick={() => { setSlotPick(null); setInputText(prev => prev.replace(PREFIX_RE, '')); }}>
           <div className="block-sheet move-confirm-sheet" onClick={e => e.stopPropagation()}>
             <div className="block-sheet-handle" />
             <div className="block-sheet-head">
@@ -5241,7 +5241,7 @@ function App() {
               );
             })()}
             <div className="block-sheet-actions">
-              <button className="btn-cancel" onClick={() => setSlotPick(null)}>취소</button>
+              <button className="btn-cancel" onClick={() => { setSlotPick(null); setInputText(prev => prev.replace(PREFIX_RE, '')); }}>취소</button>
               <button className="btn-save" onClick={confirmSlotPick}>이 시각으로 쓰기</button>
             </div>
           </div>
