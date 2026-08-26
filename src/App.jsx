@@ -1444,6 +1444,14 @@ function App() {
           // 블록 위 가장자리를 상자 위에서 96px 아래에 둔다 — 시각·내용 줄이 경계에 잘리지 않게
           // 넉넉히 띄운다. (scrollIntoView는 iOS에서 바깥 컨테이너까지 밀어 잘렸다)
           scroller.scrollTop = Math.max(0, scroller.scrollTop + (tr.top - sr.top) - 96);
+          // 이 스크롤을 '확정 위치'로 못박는다. 안 그러면 스크롤에 반응하는 날짜 커밋과
+          // 자동 정렬이 뒤늦게 끼어들어 방금 맞춘 자리를 다시 옮겨('됐다 안됐다') 버린다.
+          clearTimeout(dateCommitTimerRef.current);
+          if (showScheduleView) {
+            autoScrollKeyRef.current = `${showScheduleView}|${memos.length > 0}|${format(effectiveAnchor, 'yyyy-MM-dd')}`;
+            autoScrollRef.current = { view: showScheduleView, top: scroller.scrollTop };
+            lastScrollTopRef.current = scroller.scrollTop;
+          }
         };
         // 시간표뷰는 등록과 동시에 키보드가 내려가며 판 높이가 계속 바뀐다.
         // 정착 시점을 하나로 못 잡으므로 몇 번에 걸쳐 다시 맞춘다(같은 자리로 가는 것이라 안전).
