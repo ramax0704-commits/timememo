@@ -1427,14 +1427,20 @@ function App() {
       const iso = justAddedRef.current;
       justAddedRef.current = null;
       if (iso) {
-        requestAnimationFrame(() => {
+        const doScroll = () => {
           const scroller = showScheduleView ? scheduleViewRef.current : timelineRef.current;
           const target = scroller?.querySelector(`[data-at="${iso}"]`);
           if (!target || !scroller) return;
           const sr = scroller.getBoundingClientRect();
           const tr = target.getBoundingClientRect();
-          scroller.scrollTop += (tr.top - sr.top) - scroller.clientHeight / 2 + tr.height / 2;
-        });
+          // 긴 구간 블록은 가운데 두면 위아래가 다 잘린다 — 시작이 살짝 위에 오게 둔다.
+          const anchor = tr.height > scroller.clientHeight * 0.7 ? 24 : (scroller.clientHeight / 2 - tr.height / 2);
+          scroller.scrollTop += (tr.top - sr.top) - anchor;
+        };
+        // 시간표뷰는 키보드가 내려가며 판 높이가 바뀌므로, 정착된 뒤(≈350ms)에 옮긴다.
+        // 채팅뷰는 키보드가 그대로라 다음 프레임이면 된다.
+        if (showScheduleView) setTimeout(doScroll, 350);
+        else requestAnimationFrame(doScroll);
         return;
       }
       // 마지막 기록이 입력창에 딱 붙지 않게, 바닥 여백을 조금(28px) 보이는 자리까지 내린다.
@@ -3289,6 +3295,9 @@ function App() {
       end_minutes: timed?.kind === 'range' ? timed.durationMin : 0,
     };
     justAddedRef.current = newMemoData.recorded_at;
+    // 시간표뷰: 등록하면 키보드를 내린다. 키보드가 떠 있으면 판이 눌려 방금 넣은
+    // 기록이 가려지고 '오늘로' 버튼이 겹친다. 채팅뷰는 이어서 적는 흐름이라 그대로 둔다.
+    if (showScheduleView) inputRef.current?.blur();
     setInputText('');
     setPromptIdx(i => (i + 1) % INPUT_PROMPTS.length);
     // 여러 줄로 자라 있던 입력칸을 한 줄로 되돌린다
