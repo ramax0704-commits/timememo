@@ -2672,8 +2672,13 @@ function App() {
       const centerTarget = latest || nowLine;
       if (centerTarget) {
         const r = centerTarget.getBoundingClientRect();
-        const delta = r.top + r.height / 2 - el.getBoundingClientRect().top;
-        el.scrollTop = Math.max(0, el.scrollTop + delta - el.clientHeight / 2);
+        // 긴 블록은 가운데 맞추면 시각·내용(맨 위)이 위로 잘려 아래만 보인다.
+        // 화면 높이의 60%보다 크면 상단을 96px 아래에 두고, 아니면 가운데.
+        const tall = r.height > el.clientHeight * 0.6;
+        const delta = tall
+          ? (r.top - el.getBoundingClientRect().top) - 96
+          : (r.top + r.height / 2 - el.getBoundingClientRect().top) - el.clientHeight / 2;
+        el.scrollTop = Math.max(0, el.scrollTop + delta);
         autoScrollRef.current = { view: showScheduleView, top: el.scrollTop };
         scrollDayRef.current = idx;
         lastScrollTopRef.current = el.scrollTop;
