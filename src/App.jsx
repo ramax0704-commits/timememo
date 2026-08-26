@@ -1022,6 +1022,10 @@ function App() {
   // (헤더 날짜는 스크롤을 따라 계속 바뀌는데, 그때마다 창을 다시 잡으면 화면이 튄다)
   const [anchorDate, setAnchorDate] = useState(new Date());
   const [inputText, setInputText] = useState('');
+  // 입력창 활성화 여부(칩 표시·헤더 접기용)
+  const [inputFocused, setInputFocused] = useState(false);
+  // 빈 자리를 누른 직후 뜨는 시각 조정 시트. { isRange, dayMs, draftStart, draftEnd, wheel }
+  const [slotPick, setSlotPick] = useState(null);
   const [selectedColor, setSelectedColor] = useState('default');
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeView, setActiveView] = useState('timeline'); // 'timeline' | 'settings'
@@ -3576,12 +3580,6 @@ function App() {
   // 예전엔 보내기를 꾹 누른 채 위/아래로 끌어 골랐는데, 발견되지 않아 버튼으로 뺐다.
   // 입력창 위 칩에서 '이전 기록부터' 또는 '다음 기록까지'를 켜 두고 보내면 적용되고,
   // 보내고 나면 다시 단일로 돌아간다.
-  // 칩 자체가 보내기 버튼이다 — 누르면 그 방식으로 바로 저장된다.
-  // 입력창을 누르기 전(활성화 전)에는 칩을 숨겨 화면을 조용히 둔다.
-  const [inputFocused, setInputFocused] = useState(false);
-  // 빈 자리를 누른 직후 뜨는 시각 조정 시트. 5분 눈금이 좁아 정확히 누르기 어려우니 휠로 맞춘다.
-  // { isRange, dayMs(그 날 자정), draftStart:'HH:mm', draftEnd, wheel:'start'|'end' }
-  const [slotPick, setSlotPick] = useState(null);
   // 앞머리에 적은 시각이 인식되면 그 부분에 색을 입힌다 (입력창 뒤에 깔린 거울 글자가 담당)
   const timePrefixLen = (() => {
     const m = inputText.match(PREFIX_RE);
