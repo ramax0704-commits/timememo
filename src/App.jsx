@@ -4381,7 +4381,8 @@ function App() {
                 className="schedule-hour-label"
                 style={{ top: `${timeToPx(hour * 60)}px` }}
               >
-                {(hour % 24).toString().padStart(2, '0')}:00
+                {/* 자정(00:00)엔 시간 대신 날짜 라벨이 그 자리에 뜨므로 시간은 숨긴다 */}
+                {hour % 24 === 0 ? '' : `${(hour % 24).toString().padStart(2, '0')}:00`}
               </div>
             ))}
           </div>
