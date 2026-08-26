@@ -2110,6 +2110,7 @@ function App() {
   };
   const endSlotGesture = (g, commit) => {
     clearTimeout(g.timer);
+    cancelAnimationFrame(g.raf);
     if (g.prevent) window.removeEventListener('touchmove', g.prevent);
     if (scheduleSlotHighlightRef.current) scheduleSlotHighlightRef.current.style.display = 'none';
     if (scheduleBadgeRef.current) scheduleBadgeRef.current.style.display = 'none';
@@ -2128,7 +2129,7 @@ function App() {
     const startMin = gridMinuteAt(e.clientY);
     if (startMin == null) return;
     const el = e.currentTarget; // 타이머 안에서는 currentTarget이 비어 있다
-    const g = { id: e.pointerId, x: e.clientX, y: e.clientY, startMin, curMin: startMin, mode: 'pending', timer: null, prevent: null };
+    const g = { id: e.pointerId, x: e.clientX, y: e.clientY, lastClientY: e.clientY, startMin, curMin: startMin, mode: 'pending', timer: null, prevent: null, raf: 0 };
     g.timer = setTimeout(() => {
       if (scheduleSlotRef.current !== g || g.mode !== 'pending') return;
       g.mode = 'range';
@@ -2137,6 +2138,26 @@ function App() {
       g.prevent = (ev) => ev.preventDefault();
       window.addEventListener('touchmove', g.prevent, { passive: false });
       paintSlotHighlight(g);
+      // 가장자리 자동 스크롤 — 화면 밖 시각까지 끌 수 있어야 한다 (3시에 눌러 7시까지)
+      const step = () => {
+        if (scheduleSlotRef.current !== g || g.mode !== 'range') return;
+        const cont = scheduleViewRef.current;
+        if (cont) {
+          const r = cont.getBoundingClientRect();
+          let moved = false;
+          if (g.lastClientY < r.top + REORDER_EDGE) {
+            cont.scrollTop -= Math.min(14, (r.top + REORDER_EDGE - g.lastClientY) / 3); moved = true;
+          } else if (g.lastClientY > r.bottom - REORDER_EDGE) {
+            cont.scrollTop += Math.min(14, (g.lastClientY - (r.bottom - REORDER_EDGE)) / 3); moved = true;
+          }
+          if (moved) {
+            const m = gridMinuteAt(g.lastClientY);
+            if (m != null) { g.curMin = m; paintSlotHighlight(g); }
+          }
+        }
+        g.raf = requestAnimationFrame(step);
+      };
+      g.raf = requestAnimationFrame(step);
     }, 450);
     scheduleSlotRef.current = g;
   };
@@ -2149,6 +2170,7 @@ function App() {
       return;
     }
     if (g.mode !== 'range') return;
+    g.lastClientY = e.clientY;
     const m = gridMinuteAt(e.clientY);
     if (m != null) { g.curMin = m; paintSlotHighlight(g); }
   };
@@ -3957,8 +3979,20 @@ function App() {
 
     const expansions = [];
     for (const c of clusters) {
-      // 옆으로 나누는 묶음은 시간 축을 늘릴 필요가 없다 (제 시각 자리에 그대로 두므로)
-      if (c.useColumns) continue;
+      // 옆으로 나누는 묶음: 구간 블록은 제 시각 자리에 그대로 두지만,
+      // 순간 기록들은 열 하나에 위아래로 쌓으므로 그만큼은 시간 축을 늘려야 한다.
+      // (순간 기록마다 열을 주면 4~5칸으로 쪼개져 글자가 한 자도 안 보인다)
+      if (c.useColumns) {
+        const compacts = c.items.filter(s => s.isCompact);
+        if (compacts.length >= 2) {
+          const from = compacts[0].startPos;
+          const to = Math.max(compacts[compacts.length - 1].startPos, from + 5);
+          const needPx = compacts.length * MIN_COMPACT_PX;
+          const naturalPx = (to - from) * PX_PER_MIN;
+          if (needPx > naturalPx) expansions.push({ from, to, extra: needPx - naturalPx });
+        }
+        continue;
+      }
       c.needPx = c.items.reduce((sum, s) => sum + slotPxFor(s), 0);
       const naturalPx = (c.end - c.start) * PX_PER_MIN;
       if (c.needPx > naturalPx) expansions.push({ from: c.start, to: c.end, extra: c.needPx - naturalPx });
@@ -3985,17 +4019,31 @@ function App() {
         // (짧은 구간이 최소 높이 때문에 시간보다 길게 그려지며 다음 블록을 덮는 것 방지)
         const paddedEnd = (s) => s.startPos + Math.max(slotPxFor(s) / PX_PER_MIN, s.endPos - s.startPos);
         const colEnds = [];
-        for (const s of c.items) {
+        const spans = c.items.filter(s => !s.isCompact);
+        const compacts = c.items.filter(s => s.isCompact);
+        for (const s of spans) {
           let ci = colEnds.findIndex(end => end <= s.startPos);
           if (ci === -1) { ci = colEnds.length; colEnds.push(paddedEnd(s)); }
           else colEnds[ci] = paddedEnd(s);
           s.col = ci;
         }
-        for (const s of c.items) {
-          s.colCount = colEnds.length;
-          s.top = timeToPx(s.startPos); // 제 시각 자리 그대로
-          s.height = Math.max(slotPxFor(s), (s.endPos - s.startPos) * PX_PER_MIN) - BLOCK_GAP_PX;
+        // 순간 기록은 열 하나를 같이 쓰며 위에서부터 쌓는다 (시간 축은 위에서 그만큼 늘려뒀다)
+        if (compacts.length) {
+          const ci = colEnds.length;
+          colEnds.push(Infinity);
+          let y = timeToPx(compacts[0].startPos);
+          for (const s of compacts) {
+            s.col = ci;
+            s.top = Math.max(y, timeToPx(s.startPos));
+            s.height = MIN_COMPACT_PX - BLOCK_GAP_PX;
+            y = s.top + MIN_COMPACT_PX;
+          }
         }
+        for (const s of spans) {
+          s.top = timeToPx(s.startPos); // 제 시각 자리 그대로
+          s.height = Math.max(timeToPx(s.endPos) - timeToPx(s.startPos), slotPxFor(s)) - BLOCK_GAP_PX;
+        }
+        for (const s of c.items) s.colCount = colEnds.length;
         continue;
       }
       let y = timeToPx(c.start);
@@ -4113,7 +4161,7 @@ function App() {
               return (
                 <div
                   key={idx}
-                  className={`schedule-block${isCompact ? ' schedule-block--compact' : ''}${schedule.isInner ? ' schedule-block--inner' : ''}`}
+                  className={`schedule-block${isCompact ? ' schedule-block--compact' : ''}${schedule.isInner ? ' schedule-block--inner' : ''}${schedule.colCount > 1 ? ' schedule-block--narrow' : ''}`}
                   data-at={schedule.memo.recordedAt}
                   onClick={() => openBlockEditor(schedule.memo)}
                   // 꾹 누르면(0.45초) 이동 모드 — 파란 테두리가 생기고 끌어서 시각을 옮긴다
