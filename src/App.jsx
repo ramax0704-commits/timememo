@@ -1488,6 +1488,9 @@ function App() {
     }
   }, [memos, showScheduleView]);
 
+  // 입력창 앞머리에 잡힌 시간 영역 — 시간표뷰에서 등록 전에 미리 띠로 보여준다
+  const pendingSpan = showScheduleView ? parseTimeSpan(inputText, nowTime) : null;
+  const pendingKey = pendingSpan ? `${pendingSpan.start}-${pendingSpan.end}` : null;
   // 잡힌 시간 영역이 생기거나 바뀌면 그 띠를 화면에 보여준다 (등록 전에).
   // 이러면 등록해도 블록이 이미 보이던 자리에 나타나 화면이 안 튄다.
   useEffect(() => {
@@ -1553,9 +1556,6 @@ function App() {
   const displayedMemos = memos.filter(m => isSameDay(new Date(m.recordedAt), selectedDate));
 
   // 다음날 자정~새벽 2시 메모: 전날 채팅창에도 흐리게 함께 표시
-  // 입력창 앞머리에 잡힌 시간 영역 — 시간표뷰에서 등록 전에 미리 띠로 보여준다
-  const pendingSpan = showScheduleView ? parseTimeSpan(inputText, nowTime) : null;
-  const pendingKey = pendingSpan ? `${pendingSpan.start}-${pendingSpan.end}` : null;
   const selectedDayStartMs = new Date(
     selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()
   ).getTime();
