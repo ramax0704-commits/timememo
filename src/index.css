@@ -3234,11 +3234,16 @@ body.keyboard-open .input-toolbar { display: flex; }
   border-radius: 999px;
   cursor: pointer;
 }
+.range-scroll {
+  overflow-y: auto;
+  margin: 0 4px 8px 0;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
 .range-timeline {
   position: relative;
-  margin: 0 4px 8px 44px;
+  margin-left: 44px;
   border-left: 1px solid var(--border-color);
-  touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -3288,6 +3293,7 @@ body.keyboard-open .input-toolbar { display: flex; }
 .range-handle--top { top: -11px; left: 8px; cursor: ns-resize; }
 .range-handle--bot { bottom: -11px; right: 8px; cursor: ns-resize; }
 .range-wheel-wrap { padding: 4px 0 8px; }
+.range-wheel-tabs { margin-bottom: 18px; }
 .range-dur-line {
   text-align: center;
   margin: 8px 0 0;

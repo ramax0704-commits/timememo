@@ -597,19 +597,24 @@ const timeLabel12 = (str) => {
 };
 
 // ── 시간 범위 조정 시트 (드래그 핸들 + 고급선택 휠) ──────────────
-// 잡힌 시간대를 세부 조정한다. 캘린더처럼 위/아래 핸들로 시작·끝을,
-// 가운데를 잡아 통째로 이동. '고급선택'을 누르면 다이얼(휠)로 바뀐다.
-// 단일 시각은 드래그가 의미 없어 바로 휠로 연다.
-const RS_PX_PER_MIN = 1;      // 기본 배율 (분당 픽셀)
-const RS_VIEW_H = 300;        // 타임라인 표시 높이
+// 잡힌 시간대를 세부 조정한다. 위/아래 핸들로 시작·끝을, 가운데를 잡아 통째로 이동.
+// '고급선택'을 누르면 다이얼(휠)로 바뀐다. 단일 시각은 바로 휠로 연다.
+// 좌표계는 '하루 전체(고정 배율)'라 드래그 중에 창이 바뀌며 길이가 쪼그라들던 문제가 없다.
+const RS_PPM = 0.8;             // 분당 픽셀(고정)
+const RS_DAY = 1440;
+const RS_VIEW_H = 300;          // 스크롤 영역 높이
+const RS_EDGE = 48;             // 가장자리 자동 스크롤 감지 폭
 function TimeRangeSheet({ init, onDone, onCancel }) {
   const isRange = init.isRange;
   const [start, setStart] = useState(init.start);
   const [end, setEnd] = useState(init.end != null ? init.end : init.start + 30);
   const [mode, setMode] = useState(isRange ? 'drag' : 'wheel');
   const [wheelSel, setWheelSel] = useState('start');
-  const areaRef = useRef(null);
+  const scrollRef = useRef(null);
   const dragRef = useRef(null);
+  // 최신 start/end를 드래그 클램프에서 읽되, 좌표계(배율)는 안 바뀌게 한다
+  const stateRef = useRef({ start, end });
+  stateRef.current = { start, end };
 
   const fmt = (min) => {
     const d = new Date(init.dayMs + min * 60000);
@@ -617,45 +622,67 @@ function TimeRangeSheet({ init, onDone, onCancel }) {
     return `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
   const snap = (v) => Math.round(v / 5) * 5;
+  const innerH = RS_DAY * RS_PPM;
+  const yOf = (min) => min * RS_PPM;
 
-  // 타임라인 창: 범위 앞뒤 90분 여유. 화면 높이에 맞춰 배율을 줄인다.
-  const winStart = Math.max(0, Math.min(start, init.start) - 90);
-  const winEnd = Math.min(1440, Math.max(end, init.start + 30) + 90);
-  const ppm = Math.min(RS_PX_PER_MIN, RS_VIEW_H / Math.max(60, winEnd - winStart));
-  const yOf = (min) => (min - winStart) * ppm;
-  const hours = [];
-  for (let h = Math.ceil(winStart / 60); h <= Math.floor(winEnd / 60); h++) hours.push(h);
+  // 처음 열릴 때 잡힌 구간이 가운데 오도록 스크롤
+  useEffect(() => {
+    const sc = scrollRef.current;
+    if (sc) sc.scrollTop = Math.max(0, yOf(start) - 80);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  const applyDrag = (clientY) => {
+    const g = dragRef.current;
+    if (!g) return;
+    const sc = scrollRef.current;
+    const scrolled = sc ? sc.scrollTop - g.scroll0 : 0;
+    const dMin = snap(((clientY - g.y) + scrolled) / RS_PPM);
+    const { start: cs, end: ce } = stateRef.current;
+    if (g.type === 'start') setStart(Math.max(0, Math.min(g.s0 + dMin, ce - 5)));
+    else if (g.type === 'end') setEnd(Math.min(RS_DAY, Math.max(g.e0 + dMin, cs + 5)));
+    else {
+      const len = g.e0 - g.s0;
+      let ns = Math.max(0, Math.min(g.s0 + dMin, RS_DAY - len));
+      setStart(ns); setEnd(ns + len);
+    }
+  };
+  const edgeScroll = () => {
+    const g = dragRef.current;
+    const sc = scrollRef.current;
+    if (!g || !sc) return;
+    const r = sc.getBoundingClientRect();
+    let moved = false;
+    if (g.lastY < r.top + RS_EDGE) { sc.scrollTop -= 10; moved = true; }
+    else if (g.lastY > r.bottom - RS_EDGE) { sc.scrollTop += 10; moved = true; }
+    if (moved) applyDrag(g.lastY);
+    g.raf = requestAnimationFrame(edgeScroll);
+  };
   const onHandleDown = (type) => (e) => {
     e.stopPropagation();
-    dragRef.current = { type, id: e.pointerId, y: e.clientY, s0: start, e0: end };
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 캡처 불가여도 드래그는 진행 */ }
+    const sc = scrollRef.current;
+    dragRef.current = { type, id: e.pointerId, y: e.clientY, lastY: e.clientY, s0: start, e0: end, scroll0: sc ? sc.scrollTop : 0, raf: 0 };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 무시 */ }
+    dragRef.current.raf = requestAnimationFrame(edgeScroll);
   };
   const onMove = (e) => {
     const g = dragRef.current;
     if (!g || e.pointerId !== g.id) return;
-    const dMin = snap((e.clientY - g.y) / ppm);
-    if (g.type === 'start') setStart(Math.max(winStart, Math.min(g.s0 + dMin, end - 5)));
-    else if (g.type === 'end') setEnd(Math.min(winEnd, Math.max(g.e0 + dMin, start + 5)));
-    else if (g.type === 'move') {
-      const len = g.e0 - g.s0;
-      let ns = g.s0 + dMin;
-      ns = Math.max(winStart, Math.min(ns, winEnd - len));
-      setStart(ns); setEnd(ns + len);
-    }
+    g.lastY = e.clientY;
+    applyDrag(e.clientY);
   };
-  const onUp = () => { dragRef.current = null; };
+  const onUp = () => { const g = dragRef.current; if (g) cancelAnimationFrame(g.raf); dragRef.current = null; };
 
   const dur = (() => {
     const t = end - start;
     const h = Math.floor(t / 60), m = t % 60;
     return `${h > 0 ? `${h}시간 ` : ''}${m > 0 ? `${m}분` : (h > 0 ? '' : '0분')}`.trim();
   })();
-
   const done = () => onDone(start, isRange ? end : null);
+  const hours = Array.from({ length: 25 }, (_, h) => h);
 
   return (
-    <div className="block-sheet-overlay block-sheet-overlay--peek" onClick={onCancel}>
+    <div className="block-sheet-overlay" onClick={onCancel}>
       <div className="block-sheet range-sheet" onClick={e => e.stopPropagation()}>
         <div className="block-sheet-handle" />
         <div className="range-sheet-head">
@@ -668,34 +695,36 @@ function TimeRangeSheet({ init, onDone, onCancel }) {
         </div>
 
         {mode === 'drag' ? (
-          <div className="range-timeline" ref={areaRef} style={{ height: `${(winEnd - winStart) * ppm}px` }}
+          <div className="range-scroll" ref={scrollRef} style={{ height: `${RS_VIEW_H}px` }}
                onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
-            {hours.map(h => (
-              <div key={h} className="range-hour" style={{ top: `${yOf(h * 60)}px` }}>
-                <span>{`${String(h % 24).padStart(2, '0')}:00`}</span>
+            <div className="range-timeline" style={{ height: `${innerH}px` }}>
+              {hours.map(h => (
+                <div key={h} className="range-hour" style={{ top: `${yOf(h * 60)}px` }}>
+                  <span>{`${String(h % 24).padStart(2, '0')}:00`}</span>
+                </div>
+              ))}
+              <div className="range-block" style={{ top: `${yOf(start)}px`, height: `${yOf(end) - yOf(start)}px` }}
+                   onPointerDown={onHandleDown('move')}>
+                <div className="range-block-label">{fmt(start)} - {fmt(end)}<br /><span className="range-block-dur">{dur}</span></div>
+                <div className="range-handle range-handle--top" onPointerDown={onHandleDown('start')} />
+                <div className="range-handle range-handle--bot" onPointerDown={onHandleDown('end')} />
               </div>
-            ))}
-            <div className="range-block" style={{ top: `${yOf(start)}px`, height: `${yOf(end) - yOf(start)}px` }}
-                 onPointerDown={onHandleDown('move')} onPointerMove={onMove} onPointerUp={onUp}>
-              <div className="range-block-label">{fmt(start)} - {fmt(end)}<br /><span className="range-block-dur">{dur}</span></div>
-              <div className="range-handle range-handle--top" onPointerDown={onHandleDown('start')} />
-              <div className="range-handle range-handle--bot" onPointerDown={onHandleDown('end')} />
             </div>
           </div>
         ) : (
           <div className="range-wheel-wrap">
             {isRange && (
-              <div className="block-time-row">
+              <div className="block-time-row range-wheel-tabs">
                 <button type="button" className={`block-input block-time-btn${wheelSel === 'start' ? ' open' : ''}`} onClick={() => setWheelSel('start')}>{fmt(start)}</button>
                 <span className="block-time-sep">→</span>
                 <button type="button" className={`block-input block-time-btn${wheelSel === 'end' ? ' open' : ''}`} onClick={() => setWheelSel('end')}>{fmt(end)}</button>
               </div>
             )}
             <TimeWheelPicker
-              value={`${String(Math.floor(((wheelSel === 'end' ? end : start) % 1440) / 60)).padStart(2, '0')}:${String((wheelSel === 'end' ? end : start) % 60).padStart(2, '0')}`}
+              value={`${String(Math.floor(((wheelSel === 'end' ? end : start) % RS_DAY) / 60)).padStart(2, '0')}:${String((wheelSel === 'end' ? end : start) % 60).padStart(2, '0')}`}
               onChange={(v) => {
                 const [h, mi] = v.split(':').map(Number); const mins = h * 60 + mi;
-                if (wheelSel === 'end') setEnd(Math.max(start + 5, mins < start ? mins + 1440 : mins));
+                if (wheelSel === 'end') setEnd(Math.max(start + 5, mins <= start ? mins + RS_DAY : mins));
                 else setStart(mins);
               }}
             />
@@ -2315,6 +2344,7 @@ function App() {
   // 잡힌 시간대(밴드 또는 입력창 시각)를 눌러 조정 시트를 연다.
   const openBandEditor = () => {
     if (!pendingSpan) return;
+    inputRef.current?.blur(); // 시간 조정 중엔 키보드를 내린다 (시트가 키보드와 겹치지 않게)
     setRangeSheet({ isRange: pendingSpan.end != null, start: pendingSpan.start, end: pendingSpan.end, dayMs: pendingSpan.dayMs });
   };
   const applyRangeSheet = (startMin, endMin) => {
