@@ -3277,6 +3277,7 @@ body.keyboard-open .input-toolbar { display: flex; }
   position: absolute;
   left: 6px; right: 4px;
   background: rgba(74, 114, 255, 0.5);
+  z-index: 2; /* 참고 블록(range-other, z1) 위로 — 잡힌 블록이 제일 위 */
   border-radius: 10px;
   min-height: 26px;
   cursor: grab;
@@ -3293,6 +3294,7 @@ body.keyboard-open .input-toolbar { display: flex; }
 .range-block-dur { font-weight: 500; opacity: 0.92; }
 .range-handle {
   position: absolute;
+  z-index: 3;
   width: 22px; height: 22px;
   border-radius: 50%;
   background: var(--primary-color);
@@ -3330,7 +3332,7 @@ body.keyboard-open .input-toolbar { display: flex; }
   border-radius: 7px;
   overflow: hidden;
   pointer-events: none;
-  z-index: 1;
+  z-index: 1; /* 편집 블록(range-block, z2)·핸들 아래 */
 }
 .range-other span {
   display: block;

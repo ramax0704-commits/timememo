@@ -784,7 +784,7 @@ const TOUR_AI = {
     loops: [{ from: '기획서 초안 집중', to: '1차 완료, 팀 공유' }],
     energyWords: { up: ['여유롭게', '집중 잘 됨', '드디어 끝', '햇빛 좋았다'], down: [] },
     keywords: ['마무리', '회복', '몰입'],
-    rabbit: { type: 'moon', reason: '"드디어 끝"까지, 절구를 찧듯 묵묵히 과업을 끝낸 하루였어요.' },
+    rabbit: { type: 'moon_steady', reason: '"드디어 끝"까지, 절구를 찧듯 묵묵히 과업을 끝낸 하루였어요.' },
     segmentStates: [
       { segment: '오전', state: '집중이 붙어 있었어요' },
       { segment: '저녁', state: '끝내고 한숨 돌렸어요' },
@@ -3199,9 +3199,16 @@ function App() {
     setSelectedColor(memo.color || 'default');
     setInputText(prefix + memo.content);
     const el = inputRef.current;
-    if (el) { el.focus(); setTimeout(() => el.setSelectionRange(el.value.length, el.value.length), 0); }
+    if (el) { el.focus(); setTimeout(() => { fitInputHeight(); el.setSelectionRange(el.value.length, el.value.length); }, 0); }
   };
-  const cancelInlineEdit = () => { setEditingMemoId(null); setInputText(''); };
+  const cancelInlineEdit = () => { setEditingMemoId(null); setInputText(''); if (inputRef.current) inputRef.current.style.height = 'auto'; };
+  // 내용을 프로그램적으로 넣은 뒤 입력창 높이를 내용에 맞춘다 (onChange가 안 타므로 직접)
+  const fitInputHeight = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, Math.max(110, Math.round(window.innerHeight * 0.35)))}px`;
+  };
 
   const openBlockEditor = (memo) => {
     const range = isRangeMemo(memo);

@@ -1,83 +1,193 @@
-// 오늘의 토끼 — 하루 기록을 8가지 토끼 아키타입에 매핑한다.
+// 오늘의 토끼 — 하루 기록을 21종 토끼에 매핑한다. (회고-수정안.md §5)
 //
-// 숫자(기록 수·총 시간·연속 일수)는 하루를 이해하는 데 도움이 안 됐다.
-// 대신 "오늘의 나는 어떤 토끼였나"로 하루의 상태·감정을 비춰준다.
-// criteria는 AI 프롬프트에 그대로 들어가는 매칭 기준이고,
-// desc/trivia는 화면에 보여주는 문구다. 서버(api/summarize.js)와 화면이 같이 쓴다.
+// 토끼는 자유 선택이 아니라 고정된 순서 검사로 판정한다. 배열 순서가 곧 검사 순서이며,
+// criteria는 "이 조건에 먼저 걸리면 확정"이라는 판정 조건이다 (AI 프롬프트에 그대로 들어간다).
+// name/desc/trivia는 화면 문구. 서버(api/summarize.js)와 화면이 같이 쓴다.
+//
+// 이미지는 계열별로 하나씩만 있어서 같은 계열끼리 재사용한다. moondance는 hare 이미지를 임시로 쓴다.
+const IMG = {
+  fighter: '/rabbits/fighter.jpg',
+  arctic: '/rabbits/arctic.jpg',
+  burrow: '/rabbits/burrow.jpg',
+  clock: '/rabbits/clock.jpg',
+  race: '/rabbits/race.jpg',
+  hare: '/rabbits/hare.jpg',
+  moon: '/rabbits/moon.jpg',
+  lop: '/rabbits/lop.jpg',
+};
+
 export const RABBITS = [
+  // ── 북극토끼 계열 ──
   {
-    id: 'clock',
-    image: '/rabbits/clock.jpg',
-    name: '시계 토끼',
-    origin: '이상한 나라의 앨리스',
-    desc: '쉴 틈 없이 뛰어다니며 에너지를 쏟아부은, 분주하게 꽉 찬 하루예요.',
-    trivia: '시계 토끼는 늘 "아이코, 늦겠어!"를 외치며 뛰지만, 회중시계는 놓지 않아요. 바쁜 와중에도 시간을 쥐고 있는 건 대단한 거예요.',
-    criteria: '시간에 쫓기듯 바쁘고 정신없던 날. 일정·마감·미팅이 연달아 이어졌고 "바쁘다", "정신없다", "늦었다" 같은 흔적이 보인다.',
+    id: 'fighter', family: 'arctic', image: IMG.fighter,
+    name: '전투토끼',
+    desc: '부딪히고 소모하며 에너지를 쓴 하루예요.',
+    trivia: '순한 토끼도 물러설 수 없을 땐 뒷발로 서서 앞발을 씁니다. 오늘은 그런 자리가 있었나 봐요.',
+    criteria: '부정 감정 2건 이상 + 갈등·부딪힘 표현',
   },
   {
-    id: 'race',
-    image: '/rabbits/race.jpg',
-    name: '경주 토끼',
-    origin: '토끼와 거북이',
-    desc: '의욕적으로 몰아치다 후반에 힘이 빠진, 완급 조절이 아쉬웠던 하루예요.',
-    trivia: '경주 토끼는 낮잠 한숨에 역전당했지만, 그 초반 스퍼트는 아무도 못 따라와요. 내일은 페이스만 나누면 돼요.',
-    criteria: '초반에 몰아붙였다가 후반에 늘어지거나 집중이 흐트러진 날. 의욕적으로 시작했지만 에너지를 앞에서 다 써버린 흐름이 보인다.',
+    id: 'arctic_rise', family: 'arctic', image: IMG.arctic,
+    name: '다시 일어선 북극토끼',
+    desc: '주저앉을 뻔했지만 다시 몸을 일으킨 하루예요.',
+    trivia: '눈에 파묻혀도 앞발로 헤치고 다시 걸어 나옵니다. 오늘 다시 일어난 그 순간이 하루를 바꿨어요.',
+    criteria: '부정 감정 2건 이상 + 다잡음 라벨',
   },
   {
-    id: 'moon',
-    image: '/rabbits/moon.jpg',
-    name: '옥토끼',
-    origin: '달나라 방앗간',
-    desc: '자기 자리에서 묵묵히 할 일을 끝까지 해낸, 성실하고 평온한 하루예요.',
-    trivia: '옥토끼는 달빛 아래서 쉬지 않고 절구를 찧어요. 화려하지 않아도 밀도는 가장 높은 하루죠.',
-    criteria: '루틴을 지키며 맡은 일을 담담히 완수한 날. 큰 감정 기복 없이 과업이 안정적으로 이어졌다.',
+    id: 'arctic_alert', family: 'arctic', image: IMG.arctic,
+    name: '경계 중인 북극토끼',
+    desc: '사소한 것에도 날이 서 있던 하루예요.',
+    trivia: '위험을 느끼면 귀를 눕히고 사방을 살피며 시간을 보냅니다. 예민한 건 지키는 중이라는 뜻이에요.',
+    criteria: '부정 감정 2건 이상 + 짜증 라벨',
   },
   {
-    id: 'fighter',
-    image: '/rabbits/fighter.jpg',
-    name: '전투 토끼',
-    origin: '글러브를 낀 토끼',
-    desc: '감정 소모가 크거나 치열하게 부딪히며 에너지를 쓴 하루예요.',
-    trivia: '순한 토끼도 성나면 앞발 펀치가 매서워요. 오늘은 글러브를 꼈던 날 — 장갑을 벗을 시간도 필요해요.',
-    criteria: '트러블이 있었거나 예민하게 날이 선 날. 스트레스·짜증·갈등·소모의 흔적이 뚜렷하다.',
-  },
-  {
-    id: 'arctic',
-    name: '북극토끼',
-    origin: '설원의 생존자',
-    image: '/rabbits/arctic.jpg',
+    id: 'arctic_firm', family: 'arctic', image: IMG.arctic,
+    name: '단단한 북극토끼',
     desc: '힘든 상황을 단단하게 버텨낸, 고요하지만 강한 하루예요.',
-    trivia: '북극토끼는 웅크리면 눈덩이처럼 둥글다가 일어서면 다리가 길쭉한 반전 매력이 있어요. 버티는 동안에도 그 다리는 그대로예요.',
-    criteria: '역경이나 부담을 묵묵히 견딘 날. 혼자만의 고요한 시간 속에서 내면을 지켰다. 힘든 흔적은 있지만 무너진 흔적은 없다.',
+    trivia: '눈보라가 오면 다리를 접고 몸을 웅크린 채 그 자리에서 견딥니다. 조용히 버텨낸 하루처럼 보여요.',
+    criteria: '부정 감정 2건 이상 + 완료 기록 있음',
+  },
+
+  // ── 굴토끼 계열 ──
+  {
+    id: 'burrow_deep', family: 'burrow', image: IMG.burrow,
+    name: '땅굴 판 굴토끼',
+    desc: '마음이 안으로 파고든 채 하루가 닫혔어요.',
+    trivia: '굴토끼도 가끔은 굴 가장 안쪽에 혼자 머뭅니다. 오늘 판 굴이 내일 나오는 길이 되기도 해요.',
+    criteria: '부정 감정이 하루 끝까지 올라오지 않음',
   },
   {
-    id: 'burrow',
-    image: '/rabbits/burrow.jpg',
-    name: '굴토끼',
-    origin: '땅굴 마을',
-    desc: '사람들과 어울리며 관계 속에서 에너지를 주고받은 하루예요.',
-    trivia: '굴토끼는 무리 지어 굴을 파고 살아요. 다만 가끔은 그 굴에서 혼자 생각이 깊어지기도 하죠 — 땅굴을 파는 날도 굴토끼답습니다.',
-    criteria: '모임·수다·회식·협업처럼 사람과의 소통이 많았던 날. 관계에서 에너지를 얻었거나, 반대로 생각이 깊어져 마음의 굴을 판 날.',
+    id: 'burrow_wit', family: 'burrow', image: IMG.burrow,
+    name: '별주부 토끼',
+    desc: '막힌 자리에서 다른 길을 찾아낸 하루예요.',
+    trivia: '용궁에 끌려간 토끼는 기지를 발휘해 뭍으로 돌아왔습니다. 막다른 곳에서도 길은 나오더라고요.',
+    criteria: '막힘 뒤에 해결·우회가 이어짐',
   },
   {
-    id: 'hare',
-    image: '/rabbits/hare.jpg',
-    name: '산토끼',
-    origin: '들판의 질주자',
-    desc: '활동적인 에너지를 뿜어내며 역동적으로 내달린 하루예요.',
-    trivia: '산토끼는 시속 70km로 달리면서도 정작 늘 다니던 길로만 다녀요. 내달리는 것과 루틴은 공존할 수 있어요.',
-    criteria: '운동·이동·활동량이 많았던 날, 혹은 갑작스러운 변화가 많아 여기저기 뛰어다닌 역동적인 날.',
+    id: 'burrow_together', family: 'burrow', image: IMG.burrow,
+    name: '함께한 굴토끼',
+    desc: '사람들 사이에서 에너지를 주고받은 하루예요.',
+    trivia: '서로의 굴을 이어 붙이며 살아서 혼자 있는 시간이 길지 않아요. 오늘은 그 온기가 있던 날이네요.',
+    criteria: '사람 이름·모임·회식 표현',
   },
   {
-    id: 'lop',
-    image: '/rabbits/lop.jpg',
-    name: '롭이어 토끼',
-    origin: '늘어진 귀',
-    desc: '만사 내려놓고 온전히 쉼에 집중한, 느긋한 하루예요.',
-    trivia: '롭이어는 귀도 마음도 늘어져 있지만 사랑이 많아 가끔 급발진해요. 그리고 24시간 건초를 먹죠 — 오늘 뭔가 계속 먹었다면 그것도 롭이어답습니다.',
-    criteria: '푹 쉬었거나 느긋하게 보낸 날. 침대·휴식·먹는 것 위주의 기록. 아무것도 안 한 것이 오늘의 핵심이다.',
+    id: 'burrow_team', family: 'burrow', image: IMG.burrow,
+    name: '손발 맞춘 굴토끼',
+    desc: '누군가와 맞춰가며 일을 굴린 하루예요.',
+    trivia: '각자 다른 입구를 맡아 굴 하나를 완성합니다. 혼자 다 하지 않아도 되는 날이었네요.',
+    criteria: '협업·회의·같이 한 일',
+  },
+
+  // ── 산토끼 계열 ──
+  {
+    id: 'clock', family: 'hare', image: IMG.clock,
+    name: '시계토끼',
+    desc: '시간에 쫓기듯 이어 달린 하루예요.',
+    trivia: '회중시계를 들여다보며 늦었다고 되뇌던 그 토끼처럼, 오늘은 종일 바쁘게 움직인 하루였네요.',
+    criteria: '기록 간격이 촘촘하고 일정이 연달아 이어짐',
+  },
+  {
+    id: 'race', family: 'hare', image: IMG.race,
+    name: '경주토끼',
+    desc: '서두르지 않고 속도를 늦춘 하루예요.',
+    trivia: '거북이와 겨루던 토끼는 앞서 있다며 한숨 자고 갔습니다. 가끔은 그렇게 쉬어가도 괜찮아요.',
+    criteria: '하려던 일이 있었는데 쉼·미룸이 끼어들어 늦게 시작',
+  },
+  {
+    id: 'moondance', family: 'hare', image: IMG.hare,
+    name: '달 밤의 댄스파티',
+    desc: '밤이 깊을수록 신이 났던 하루예요.',
+    trivia: '달 밝은 밤이면 들판에 나와 서로 앞발을 맞대고 껑충거립니다. 사람들은 그 모습을 토끼들의 춤이라고 불렀어요.',
+    criteria: '기쁨 라벨 + 기록이 저녁·밤에 몰림',
+  },
+  {
+    id: 'hare_thrift', family: 'hare', image: IMG.hare,
+    name: '아껴 쓴 산토끼',
+    desc: '쓸 곳과 아낄 곳을 가려 쓴 하루예요.',
+    trivia: '먹을 만큼만 뜯고 나머지는 그대로 두고 갑니다. 남겨두는 것도 하나의 기술이에요.',
+    criteria: '금액·할인·절약 표현',
+  },
+  {
+    id: 'hare_night', family: 'hare', image: IMG.hare,
+    name: '밤을 걷는 산토끼',
+    desc: '해가 진 뒤에 움직임이 살아난 하루예요.',
+    trivia: '초저녁부터 새벽까지 움직이는 야행성이에요. 낮이 조용했다고 안 움직인 건 아니었어요.',
+    criteria: '기록이 저녁·밤 시간대에 몰림',
+  },
+  {
+    id: 'hare_run', family: 'hare', image: IMG.hare,
+    name: '뛰어다닌 산토끼',
+    desc: '활력이 넘치게 움직인 하루예요.',
+    trivia: '굴을 파는 대신 넓은 들판을 뛰어다니며 지냅니다. 오늘은 에너지가 밖으로 향한 날이네요.',
+    criteria: '이동·외출 기록 2건 이상',
+  },
+
+  // ── 옥토끼 계열 ──
+  {
+    id: 'moon_full', family: 'moon', image: IMG.moon,
+    name: '풍족한 옥토끼',
+    desc: '쌓아온 것이 결과로 돌아온 하루예요.',
+    trivia: '매일 찧은 것들은 어딘가에 차곡차곡 모입니다. 오늘 돌아온 것도 그렇게 모인 거예요.',
+    criteria: '월급·입금·정산·합격·통과·계약처럼 들어온 것을 적은 기록',
+  },
+  {
+    id: 'moon_proud', family: 'moon', image: IMG.moon,
+    name: '뿌듯한 옥토끼',
+    desc: '해낸 것이 스스로에게 남은 하루예요.',
+    trivia: '밤새 찧은 쌀이 아침이면 떡 한 접시가 되어 있어요. 오늘 해낸 것도 어딘가에 모양을 남겼을 거예요.',
+    criteria: '뿌듯함 라벨',
+  },
+  {
+    id: 'moon_steady', family: 'moon', image: IMG.moon,
+    name: '꾸준한 옥토끼',
+    desc: '기복 없이 할 일을 이어간 하루예요.',
+    trivia: '매일 같은 자리에서 같은 방아를 찧습니다. 쌓이는 건 대개 그런 날들이에요.',
+    criteria: '완료 기록 2건 이상 + 부정 감정 없음',
+  },
+
+  // ── 롭이어토끼 계열 ──
+  {
+    id: 'lop_love', family: 'lop', image: IMG.lop,
+    name: '사랑이 넘치는 롭이어토끼',
+    desc: '마음이 밖으로 향해 있던 하루예요.',
+    trivia: '사람이 다가오면 피하지 않고 곁을 내어줍니다. 오늘 건넨 마음도 그렇게 닿았을 거예요.',
+    criteria: '감사 라벨',
+  },
+  {
+    id: 'lop_quiet', family: 'lop', image: IMG.lop,
+    name: '고요했던 롭이어토끼',
+    desc: '곁이 조용했던 하루예요.',
+    trivia: '늘어진 귀 때문에 소리가 조금 늦게 닿습니다. 오늘은 그 조용함이 길게 느껴졌나 봐요.',
+    criteria: '외로움 라벨',
+  },
+  {
+    id: 'lop_full', family: 'lop', image: IMG.lop,
+    name: '배부른 롭이어토끼',
+    desc: '먹는 것으로 채운 하루예요.',
+    trivia: '토끼는 하루 종일 무언가를 씹고 있어야 합니다. 계속 먹는 게 그들에겐 정상이에요.',
+    criteria: '먹은 기록 2건 이상',
+  },
+  {
+    id: 'lop_rest', family: 'lop', image: IMG.lop,
+    name: '푹 쉰 롭이어토끼',
+    desc: '쉬는 데 시간을 내어준 하루예요.',
+    trivia: '서늘하고 조용한 자리를 찾아 몸을 길게 늘입니다. 오늘 찾은 자리도 그런 곳이었겠죠.',
+    criteria: '독서·영화·드라마·OTT·요가·산책·힐링·쉼·회복·낮잠 중 하나 이상',
+  },
+  {
+    id: 'lop', family: 'lop', image: IMG.lop,
+    name: '롭이어토끼',
+    desc: '크게 기울지 않고 지나간 하루예요.',
+    trivia: '늘어진 귀는 하루아침에 생긴 게 아니라 아주 오랜 시간이 만든 모습입니다. 눈에 띄지 않는 날들이 그렇게 쌓여요.',
+    criteria: '그 외',
   },
 ];
 
 export const RABBIT_IDS = RABBITS.map(r => r.id);
-export const rabbitById = (id) => RABBITS.find(r => r.id === id) || null;
+
+// 8종 시절에 저장된 옛 id(day_rabbits, 로컬 캐시)를 새 id로 읽는다. 데이터는 그대로 두고 조회만 매핑.
+const LEGACY_IDS = { moon: 'moon_steady', arctic: 'arctic_firm', burrow: 'burrow_together', hare: 'hare_run' };
+
+export const rabbitById = (id) => {
+  const key = LEGACY_IDS[id] || id;
+  return RABBITS.find(r => r.id === key) || null;
+};
