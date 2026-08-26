@@ -5294,7 +5294,7 @@ function App() {
               autoFocus={!IS_TOUCH_DEVICE}
             />
           </div>
-          {!inputActive && sendButton}
+          {sendButton}
           </div>
 
           {/* 활성화되면 버튼이 아래 한 줄에: 색 · 이어서 · 보내기 */}
@@ -5352,8 +5352,6 @@ function App() {
             >
               ↓ 다음 기록까지
             </button>
-
-            {sendButton}
           </div>
           )}
         </div>
