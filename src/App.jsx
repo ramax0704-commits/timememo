@@ -2391,17 +2391,6 @@ function App() {
       applyTimeToInput(startMin, endMin, rs.dayMs);
     }
   };
-  // 시간 조정 시트에 참고로 보여줄 '그 날의 다른 기록들'(분 단위 구간)
-  const rangeSheetOthers = (() => {
-    if (!rangeSheet) return [];
-    const day = new Date(rangeSheet.dayMs);
-    return timelineMemos
-      .filter(m => m.id !== rangeSheet.memoId && isSameDay(new Date(m.recordedAt), day))
-      .map(m => {
-        const { start, end } = blockRangeOf(m);
-        return { start: Math.round((start.getTime() - rangeSheet.dayMs) / 60000), end: Math.round((end.getTime() - rangeSheet.dayMs) / 60000), content: m.content };
-      });
-  })();
   // 시트에서 확인 — 그제야 입력창에 시각이 걸리고 포커스가 간다
   const confirmSlotPick = () => {
     const sp = slotPick;
@@ -3186,6 +3175,17 @@ function App() {
     };
   };
 
+  // 시간 조정 시트에 참고로 보여줄 '그 날의 다른 기록들'(분 단위 구간)
+  const rangeSheetOthers = (() => {
+    if (!rangeSheet) return [];
+    const day = new Date(rangeSheet.dayMs);
+    return timelineMemos
+      .filter(m => m.id !== rangeSheet.memoId && isSameDay(new Date(m.recordedAt), day))
+      .map(m => {
+        const { start, end } = blockRangeOf(m);
+        return { start: Math.round((start.getTime() - rangeSheet.dayMs) / 60000), end: Math.round((end.getTime() - rangeSheet.dayMs) / 60000), content: m.content };
+      });
+  })();
   const hhmm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
   // 등록된 기록을 탭 → 채팅창에 시각·내용을 다시 불러와 바로 수정한다.
