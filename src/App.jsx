@@ -2314,6 +2314,18 @@ function App() {
     const map = schedulePxMapRef.current;
     const badge = scheduleBadgeRef.current;
     if (!el || !map) return;
+    if (g.mode === 'armed') {
+      // 꾹 누른 직후(아직 안 움직임) — 그 시각에 얇은 마커만
+      el.style.display = 'block';
+      el.style.top = `${map.timeToPx(g.startMin)}px`;
+      el.style.height = '3px';
+      if (badge) {
+        badge.style.display = 'block';
+        badge.style.top = `${map.timeToPx(g.startMin)}px`;
+        badge.textContent = clockLabel(windowStartMs + g.startMin * 60000);
+      }
+      return;
+    }
     const a = Math.min(g.startMin, g.curMin);
     const b = Math.max(g.startMin, g.curMin, a + 5);
     el.style.display = 'block';
@@ -2374,9 +2386,11 @@ function App() {
       const a = Math.min(g.startMin, g.curMin);
       const b = Math.max(g.startMin, g.curMin, a + 5);
       pickSlot(a, b);
-    } else if (g.mode === 'pending') {
+    } else if (g.mode === 'armed') {
+      // 꾹 눌렀다 그냥 뗌 → 단일 시각
       pickSlot(g.startMin, null);
     }
+    // pending(꾹 누르지 않은 빠른 탭)은 아무것도 하지 않는다
   };
   const onScheduleGridPointerDown = (e) => {
     if (!e.isPrimary || e.target.closest('.schedule-block')) return;
@@ -2386,13 +2400,13 @@ function App() {
     const g = { id: e.pointerId, x: e.clientX, y: e.clientY, lastClientY: e.clientY, startMin, curMin: startMin, mode: 'pending', timer: null, prevent: null, raf: 0 };
     g.timer = setTimeout(() => {
       if (scheduleSlotRef.current !== g || g.mode !== 'pending') return;
-      g.mode = 'range';
+      g.mode = 'armed'; // 꾹 눌림 — 떼면 단일, 움직이면 구간
       try { el.setPointerCapture(g.id); } catch { /* 이미 떼었으면 무시 */ }
       navigator.vibrate?.(15);
       g.prevent = (ev) => ev.preventDefault();
       window.addEventListener('touchmove', g.prevent, { passive: false });
       paintSlotHighlight(g);
-      // 가장자리 자동 스크롤 — 화면 밖 시각까지 끌 수 있어야 한다 (3시에 눌러 7시까지)
+      // 가장자리 자동 스크롤 — 움직여 구간이 된 뒤에만 (화면 밖 시각까지 끌 수 있게)
       const step = () => {
         if (scheduleSlotRef.current !== g || g.mode !== 'range') return;
         const cont = scheduleViewRef.current;
@@ -2411,7 +2425,8 @@ function App() {
         }
         g.raf = requestAnimationFrame(step);
       };
-      g.raf = requestAnimationFrame(step);
+      // step은 실제로 움직여 range가 될 때(onMove) 건다. 여기선 안 건다.
+      void step;
     }, 450);
     scheduleSlotRef.current = g;
   };
@@ -2422,6 +2437,24 @@ function App() {
       // 꾹 누르기 전에 움직이면 스크롤이다
       if (Math.hypot(e.clientX - g.x, e.clientY - g.y) > 8) { clearTimeout(g.timer); g.mode = 'scroll'; }
       return;
+    }
+    if (g.mode === 'armed') {
+      // 꾹 누른 뒤 움직이기 시작 → 구간
+      if (Math.abs(e.clientY - g.y) < 4) { g.lastClientY = e.clientY; return; }
+      g.mode = 'range';
+      const step = () => {
+        if (scheduleSlotRef.current !== g || g.mode !== 'range') return;
+        const cont = scheduleViewRef.current;
+        if (cont) {
+          const r = cont.getBoundingClientRect();
+          let moved = false;
+          if (g.lastClientY < r.top + REORDER_EDGE) { cont.scrollTop -= Math.min(14, (r.top + REORDER_EDGE - g.lastClientY) / 3); moved = true; }
+          else if (g.lastClientY > r.bottom - REORDER_EDGE) { cont.scrollTop += Math.min(14, (g.lastClientY - (r.bottom - REORDER_EDGE)) / 3); moved = true; }
+          if (moved) { const m = gridMinuteAt(g.lastClientY); if (m != null) { g.curMin = m; paintSlotHighlight(g); } }
+        }
+        g.raf = requestAnimationFrame(step);
+      };
+      g.raf = requestAnimationFrame(step);
     }
     if (g.mode !== 'range') return;
     g.lastClientY = e.clientY;
