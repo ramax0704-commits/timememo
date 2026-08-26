@@ -542,14 +542,62 @@ body.keyboard-open .input-toolbar { display: flex; }
   display: block;
 }
 
-/* 이어서 기록 칩 — 입력창 위 한 줄 */
-.input-area { flex-wrap: wrap; }
-.link-chips {
-  flex-basis: 100%;
-  display: flex;
-  gap: 6px;
-  margin-bottom: -2px;
+/* 입력 영역: 위에는 글자만, 아래 한 줄에 버튼을 모은다 */
+.input-area {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
 }
+.input-box {
+  position: relative;
+  background-color: #f5f6f8;
+  border-radius: 16px;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+.input-box:focus-within {
+  background-color: #ffffff;
+  box-shadow: 0 0 0 2px var(--primary-color);
+}
+/* 거울과 textarea는 글자 자리가 1px도 어긋나면 안 된다 — 같은 치수를 공유한다 */
+.input-text-metrics {
+  padding: 12px 16px;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  font-family: inherit;
+  letter-spacing: normal;
+}
+.input-mirror {
+  position: absolute;
+  inset: 0;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  pointer-events: none;
+}
+.input-area .input-field--chat {
+  position: relative;
+  width: 100%;
+  background: transparent;
+  color: transparent; /* 글자는 거울이 그린다 */
+  caret-color: var(--text-main);
+  border-radius: 16px;
+}
+.input-area .input-field--chat:focus { background: transparent; box-shadow: none; }
+.input-area .input-field--chat::placeholder { color: #aaaaaa; }
+/* 앞머리 시각으로 인식된 부분 — "이 시각의 기록으로 남는다"는 표시 */
+.time-mark {
+  color: var(--primary-color);
+  font-weight: 700;
+  background-color: rgba(74, 114, 255, 0.1);
+  border-radius: 4px;
+}
+.input-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.input-tools .send-wrap { margin-left: auto; }
 .link-chip {
   display: inline-flex;
   align-items: center;
@@ -560,13 +608,14 @@ body.keyboard-open .input-toolbar { display: flex; }
   font: inherit;
   font-size: 0.78rem;
   font-weight: 600;
-  padding: 5px 11px;
+  padding: 6px 11px;
   border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
 }
 .link-chip:active { transform: scale(0.97); }
+.link-chip:disabled { opacity: 0.45; cursor: default; }
 .link-chip.active {
   background: #eef2ff;
   border-color: var(--primary-color);

@@ -2076,13 +2076,31 @@ function App() {
     }
   };
   const pickSlot = (startMin, endMin) => {
-    const startMs = windowStartMs + startMin * 60000;
-    const endMs = endMin != null ? windowStartMs + endMin * 60000 : null;
+    const dayMs = windowStartMs + Math.floor(startMin / DAY_MINUTES) * DAY_MINUTES * 60000;
+    const hm = (min) => `${String(Math.floor((min % DAY_MINUTES) / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+    setSlotPick({
+      isRange: endMin != null,
+      dayMs,
+      draftStart: hm(startMin),
+      draftEnd: hm(endMin != null ? endMin : startMin + 30),
+      wheel: 'start',
+    });
+  };
+  // 시트에서 확인 — 그제야 입력창에 시각이 걸리고 포커스가 간다
+  const confirmSlotPick = () => {
+    const sp = slotPick;
+    if (!sp) return;
+    setSlotPick(null);
+    const toMin = (str) => { const [h, mi] = str.split(':').map(Number); return h * 60 + mi; };
+    const startMin = toMin(sp.draftStart);
+    let endMin = sp.isRange ? toMin(sp.draftEnd) : null;
+    if (endMin != null && endMin <= startMin) endMin += DAY_MINUTES; // 자정을 넘긴 구간
+    const startMs = sp.dayMs + startMin * 60000;
+    const endMs = endMin != null ? sp.dayMs + endMin * 60000 : null;
     setTimeSlot({ startMs, endMs });
-    setLinkMode('single');
     // 고른 시각이 보고 있는 날짜가 아니면 그 날짜로 (기록은 보고 있는 날짜에 남으므로)
     if (!isSameDay(new Date(startMs), selectedDate)) setSelectedDate(new Date(startMs));
-    track('Schedule Slot Picked', { range: endMin != null, guest: isGuest });
+    track('Schedule Slot Picked', { range: sp.isRange, guest: isGuest });
     inputRef.current?.focus();
   };
   const endSlotGesture = (g, commit) => {
@@ -3189,7 +3207,7 @@ function App() {
 
   // ── 메모 추가 ────────────────────────────────────────────────
   // mode: 'single'(기본) | 'prev'(이전 기록부터) | 'next'(다음 기록까지)
-  const handleAddMemo = async (e, mode = linkMode) => {
+  const handleAddMemo = async (e, mode = 'single') => {
     e?.preventDefault();
     if (!inputText.trim()) return;
     const slot = timeSlot;
@@ -3230,7 +3248,6 @@ function App() {
       end_minutes: slot?.endMs ? Math.round((slot.endMs - slot.startMs) / 60000) : (timed?.kind === 'range' ? timed.durationMin : 0),
     };
     setInputText('');
-    setLinkMode('single');
     setTimeSlot(null);
     setPromptIdx(i => (i + 1) % INPUT_PROMPTS.length);
     // 여러 줄로 자라 있던 입력칸을 한 줄로 되돌린다
@@ -3433,9 +3450,22 @@ function App() {
   // 예전엔 보내기를 꾹 누른 채 위/아래로 끌어 골랐는데, 발견되지 않아 버튼으로 뺐다.
   // 입력창 위 칩에서 '이전 기록부터' 또는 '다음 기록까지'를 켜 두고 보내면 적용되고,
   // 보내고 나면 다시 단일로 돌아간다.
-  const [linkMode, setLinkMode] = useState('single'); // 'single' | 'prev' | 'next'
+  // 칩 자체가 보내기 버튼이다 — 누르면 그 방식으로 바로 저장된다.
+  // 입력창을 누르기 전(활성화 전)에는 칩을 숨겨 화면을 조용히 둔다.
+  const [inputFocused, setInputFocused] = useState(false);
   // 시간표에서 빈 자리를 눌러 고른 시각. { startMs, endMs|null } — 보내면 이 시각의 기록이 된다.
   const [timeSlot, setTimeSlot] = useState(null);
+  // 빈 자리를 누른 직후 뜨는 시각 조정 시트. 5분 눈금이 좁아 정확히 누르기 어려우니 휠로 맞춘다.
+  // { isRange, dayMs(그 날 자정), draftStart:'HH:mm', draftEnd, wheel:'start'|'end' }
+  const [slotPick, setSlotPick] = useState(null);
+  // 앞머리에 적은 시각이 인식되면 그 부분에 색을 입힌다 (입력창 뒤에 깔린 거울 글자가 담당)
+  const timePrefixLen = (() => {
+    if (timeSlot) return 0;
+    const m = inputText.match(RANGE_RE) || inputText.match(SINGLE_RE);
+    if (!m) return 0;
+    const content = m[m.length - 1];
+    return inputText.length - content.length;
+  })();
   const clockLabel = (ms) => {
     const d = new Date(ms);
     const h = d.getHours();
@@ -3472,7 +3502,6 @@ function App() {
   };
   const endTour = (action) => {
     setTour({ active: false, step: 0, aiStatus: 'idle', contIso: null });
-    setLinkMode('single');
     setTimeSlot(null);
     setInputText(''); // 미리 적어둔 시각이 남아 있으면 지운다
     // 샘플만 걷어낸다 — 사용자가 투어에서 직접 쓴 기록은 그대로 남아 첫 기록이 된다
@@ -4499,19 +4528,6 @@ function App() {
             {activeView === 'timeline' && (
               <div className="header-actions">
                 <button
-                  className={`header-nav-btn ${showTodoSheet ? 'active' : ''}`}
-                  // 할 일은 체험 범위 밖이다. 눌리면 막지 말고 로그인으로 안내한다
-                  onClick={() => isGuest ? setShowLogin(true) : setShowTodoSheet(v => !v)}
-                  title="할 일"
-                  style={{
-                    backgroundColor: showTodoSheet ? 'var(--primary-color)' : 'transparent',
-                    color: showTodoSheet ? 'white' : 'var(--text-muted)',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  <ListChecks size={20} />
-                </button>
-                <button
                   className={`header-nav-btn ${showScheduleView ? 'active' : ''}`}
                   onClick={toggleScheduleView}
                   title="일정 보기"
@@ -4848,25 +4864,6 @@ function App() {
         )}
       </div>
 
-      {/* 키보드가 올라와 있을 때만 뜨는 툴바.
-          할 일은 헤더 구석에 있어서 쓰려면 손을 위로 올려야 했다.
-          쓰는 중에 손가락이 닿는 자리인 입력창 바로 위에 둔다.
-          (iOS Safari가 그리는 ^ ∨ ✓ 바는 웹에서 손댈 수 없어, 그 아래에 우리 툴바를 붙인다) */}
-      {activeView === 'timeline' && (
-        <div className="input-toolbar">
-          <button
-            type="button"
-            className="input-toolbar-btn"
-            // 할 일은 체험 범위 밖이다. 눌리면 막지 말고 로그인으로 안내한다
-            onMouseDown={e => e.preventDefault()} // 눌러도 입력 포커스를 뺏지 않는다
-            onClick={() => isGuest ? setShowLogin(true) : setShowTodoSheet(true)}
-          >
-            <ListChecks size={16} />
-            <span>할 일</span>
-          </button>
-        </div>
-      )}
-
       {/* 기록이 이 기기에만 있다는 안내.
           몇 줄 써서 아까워질 때쯤(3개) 한 번만 뜨고, 닫으면 다시 안 뜬다.
           겁주지 않는다 — 사실 한 줄과 남기는 방법만 준다. */}
@@ -4900,96 +4897,120 @@ function App() {
       {/* Input Area (타임라인 뷰에서만) */}
       {activeView === 'timeline' && (
         <div className="input-area">
-          {/* 이어서 기록 칩 / 시간표에서 고른 시각 — 입력창 위 한 줄 */}
-          <div className="link-chips">
+          {/* 글자만 위에 — 뒤에 깔린 거울이 앞머리 시각에 색을 입힌다 */}
+          <div className="input-box">
+            <div className="input-mirror input-text-metrics" aria-hidden="true">
+              {timePrefixLen > 0 && <span className="time-mark">{inputText.slice(0, timePrefixLen)}</span>}
+              {inputText.slice(timePrefixLen)}{'\n'}
+            </div>
+            {/* 여러 줄을 쓸 수 있는 textarea. 모바일 엔터는 줄바꿈, 전송은 버튼.
+                (PC는 엔터로 저장, Shift+엔터로 줄바꿈) */}
+            <textarea
+              ref={inputRef}
+              rows={1}
+              className="input-field input-field--chat input-text-metrics"
+              // 첫 기록 전에는 온보딩 문구로 — 여기 적는 것이 곧 첫 기록이다
+              placeholder={memos.length === 0
+                ? '지금 한 일을 적어보세요'
+                : (IS_TOUCH_DEVICE ? INPUT_PROMPTS[promptIdx] : `${INPUT_PROMPTS[promptIdx]} (엔터로 저장)`)}
+              value={inputText}
+              onChange={e => {
+                setInputText(e.target.value);
+                // 줄 수만큼 자라고, 너무 길면 안에서 스크롤
+                e.target.style.height = 'auto';
+                e.target.style.height = `${Math.min(e.target.scrollHeight, 110)}px`;
+              }}
+              onScroll={e => { const m = e.target.previousSibling; if (m) m.scrollTop = e.target.scrollTop; }}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
+              onKeyDown={handleKeyDown}
+              autoFocus={!IS_TOUCH_DEVICE}
+            />
+          </div>
+
+          {/* 버튼은 전부 아래 한 줄에: 색 · 이어서(활성화 때만) · 보내기 */}
+          <div className="input-tools">
+            <div className="color-picker-wrapper">
+              {/* 빈 동그라미만 있으면 할 일 체크로 오해받는다 — 팔레트 아이콘을 넣어
+                  '색을 고르는 버튼'임이 보이게 한다 */}
+              <button
+                type="button"
+                className="color-trigger-btn"
+                style={{
+                  backgroundColor: COLOR_PALETTE.find(c => c.id === selectedColor)?.bg || '#f9f9fb',
+                  borderColor: COLOR_BORDER[selectedColor] || '#ddd'
+                }}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => setShowColorPicker(p => !p)}
+                title="메모 색상 선택"
+                aria-label="메모 색상 선택"
+              >
+                <Palette size={15} strokeWidth={2.2} />
+              </button>
+              {showColorPicker && (
+                <div className="color-palette-popup">
+                  {COLOR_PALETTE.map(c => (
+                    <button
+                      key={c.id}
+                      className={`color-swatch ${selectedColor === c.id ? 'selected' : ''}`}
+                      style={{ backgroundColor: c.bg, borderColor: COLOR_BORDER[c.id] }}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => { setSelectedColor(c.id); setShowColorPicker(false); }}
+                      title={c.label}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
             {timeSlot ? (
-              <button type="button" className="link-chip link-chip--slot active" onClick={() => setTimeSlot(null)} title="고른 시각 지우기">
+              <button
+                type="button"
+                className="link-chip link-chip--slot active"
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => setTimeSlot(null)}
+                title="고른 시각 지우기"
+              >
                 <Clock size={13} strokeWidth={2.4} />
                 {clockLabel(timeSlot.startMs)}{timeSlot.endMs ? ` → ${clockLabel(timeSlot.endMs)}` : ''}
                 <X size={13} strokeWidth={2.4} />
               </button>
-            ) : (
+            ) : (inputFocused || inputText.trim() || tour.active) ? (
               <>
+                {/* 누르면 그 방식으로 바로 저장된다 (보내기를 또 누를 필요 없음) */}
                 <button
                   type="button"
-                  className={`link-chip link-chip--prev${linkMode === 'prev' ? ' active' : ''}`}
-                  onClick={() => setLinkMode(m => (m === 'prev' ? 'single' : 'prev'))}
-                  aria-pressed={linkMode === 'prev'}
+                  className="link-chip link-chip--prev"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => handleAddMemo(null, 'prev')}
+                  disabled={!inputText.trim()}
                 >
                   ↑ 이전 기록부터
                 </button>
                 <button
                   type="button"
-                  className={`link-chip link-chip--next${linkMode === 'next' ? ' active' : ''}`}
-                  onClick={() => setLinkMode(m => (m === 'next' ? 'single' : 'next'))}
-                  aria-pressed={linkMode === 'next'}
+                  className="link-chip link-chip--next"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => handleAddMemo(null, 'next')}
+                  disabled={!inputText.trim()}
                 >
                   ↓ 다음 기록까지
                 </button>
               </>
-            )}
-          </div>
-          {/* 컬러 팔레트 */}
-          <div className="color-picker-wrapper">
-            {/* 빈 동그라미만 있으면 할 일 체크로 오해받는다 — 팔레트 아이콘을 넣어
-                '색을 고르는 버튼'임이 보이게 한다 */}
-            <button
-              className="color-trigger-btn"
-              style={{
-                backgroundColor: COLOR_PALETTE.find(c => c.id === selectedColor)?.bg || '#f9f9fb',
-                borderColor: COLOR_BORDER[selectedColor] || '#ddd'
-              }}
-              onClick={() => setShowColorPicker(p => !p)}
-              title="메모 색상 선택"
-              aria-label="메모 색상 선택"
-            >
-              <Palette size={15} strokeWidth={2.2} />
-            </button>
-            {showColorPicker && (
-              <div className="color-palette-popup">
-                {COLOR_PALETTE.map(c => (
-                  <button
-                    key={c.id}
-                    className={`color-swatch ${selectedColor === c.id ? 'selected' : ''}`}
-                    style={{ backgroundColor: c.bg, borderColor: COLOR_BORDER[c.id] }}
-                    onClick={() => { setSelectedColor(c.id); setShowColorPicker(false); }}
-                    title={c.label}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+            ) : null}
 
-          {/* 여러 줄을 쓸 수 있는 textarea. 모바일 엔터는 줄바꿈, 전송은 버튼.
-              (PC는 엔터로 저장, Shift+엔터로 줄바꿈) */}
-          <textarea
-            ref={inputRef}
-            rows={1}
-            className="input-field input-field--chat"
-            // 첫 기록 전에는 온보딩 문구로 — 여기 적는 것이 곧 첫 기록이다
-            placeholder={memos.length === 0
-              ? '지금 한 일을 적어보세요'
-              : (IS_TOUCH_DEVICE ? INPUT_PROMPTS[promptIdx] : `${INPUT_PROMPTS[promptIdx]} (엔터로 저장)`)}
-            value={inputText}
-            onChange={e => {
-              setInputText(e.target.value);
-              // 줄 수만큼 자라고, 너무 길면 안에서 스크롤
-              e.target.style.height = 'auto';
-              e.target.style.height = `${Math.min(e.target.scrollHeight, 110)}px`;
-            }}
-            onKeyDown={handleKeyDown}
-            autoFocus={!IS_TOUCH_DEVICE}
-          />
-          <div className="send-wrap">
-            <button
-              type="button"
-              className="send-btn"
-              onClick={() => handleAddMemo(null)}
-              disabled={!inputText.trim()}
-              aria-label="보내기"
-            >
-              <Send size={18} />
-            </button>
+            <div className="send-wrap">
+              <button
+                type="button"
+                className="send-btn"
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => handleAddMemo(null)}
+                disabled={!inputText.trim()}
+                aria-label="보내기"
+              >
+                <Send size={18} />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -5028,6 +5049,63 @@ function App() {
         </button>
       </nav>
 
+
+      {/* 시간표 빈 자리를 누른 직후: 휠로 시각을 맞춘 뒤 입력창으로 간다 */}
+      {slotPick && (
+        <div className="block-sheet-overlay" onClick={() => setSlotPick(null)}>
+          <div className="block-sheet move-confirm-sheet" onClick={e => e.stopPropagation()}>
+            <div className="block-sheet-handle" />
+            <div className="block-sheet-head">
+              <h3>{slotPick.isRange ? '언제부터 언제까지 한 일인가요?' : '몇 시에 한 일인가요?'}</h3>
+            </div>
+            <p className="move-confirm-prev">{format(new Date(slotPick.dayMs), 'M월 d일 (E)', { locale: ko })}</p>
+            {slotPick.isRange && (
+              <div className="block-time-row">
+                <button
+                  type="button"
+                  className={`block-input block-time-btn${slotPick.wheel === 'start' ? ' open' : ''}`}
+                  onClick={() => setSlotPick(sp => (sp ? { ...sp, wheel: 'start' } : sp))}
+                >
+                  {timeLabel12(slotPick.draftStart)}
+                </button>
+                <span className="block-time-sep">→</span>
+                <button
+                  type="button"
+                  className={`block-input block-time-btn${slotPick.wheel === 'end' ? ' open' : ''}`}
+                  onClick={() => setSlotPick(sp => (sp ? { ...sp, wheel: 'end' } : sp))}
+                >
+                  {timeLabel12(slotPick.draftEnd)}
+                </button>
+              </div>
+            )}
+            <TimeWheelPicker
+              value={slotPick.isRange && slotPick.wheel === 'end' ? slotPick.draftEnd : slotPick.draftStart}
+              onChange={v => setSlotPick(sp => {
+                if (!sp) return sp;
+                return sp.isRange && sp.wheel === 'end' ? { ...sp, draftEnd: v } : { ...sp, draftStart: v };
+              })}
+            />
+            {slotPick.isRange && (() => {
+              const toMin = (str) => { const [h, mi] = str.split(':').map(Number); return h * 60 + mi; };
+              const startMin = toMin(slotPick.draftStart);
+              let endMin = toMin(slotPick.draftEnd);
+              const crossed = endMin <= startMin;
+              if (crossed) endMin += 1440;
+              const dur = formatDuration(endMin - startMin);
+              return (
+                <p className="move-confirm-range">
+                  {timeLabel12(slotPick.draftStart)} → {timeLabel12(slotPick.draftEnd)}
+                  {crossed ? ' (다음날)' : ''}{dur ? ` · ${dur}` : ''}
+                </p>
+              );
+            })()}
+            <div className="block-sheet-actions">
+              <button className="btn-cancel" onClick={() => setSlotPick(null)}>취소</button>
+              <button className="btn-save" onClick={confirmSlotPick}>이 시각으로 쓰기</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 꾹 눌러 옮긴 직후: 휠로 시각을 확인/수정해야 옮기기가 끝난다.
           바깥을 누르면 시간을 정하지 않겠다는 뜻 — 되돌리기와 같다 */}
