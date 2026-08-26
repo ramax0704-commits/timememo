@@ -870,17 +870,16 @@ body.keyboard-open .input-toolbar { display: flex; }
   pointer-events: none;
 }
 .schedule-day-line span {
-  /* 블록이 없는 왼쪽 시간 눈금 자리에 둔다 — 자정 넘는 블록 내용과 안 겹친다 */
+  /* 왼쪽 시간 눈금 자리, 시간 라벨과 같은 오른쪽 끝에 맞춘다(박스 없이 글자만).
+     자정 넘는 블록 내용과 안 겹치고 시간 표기와 정렬이 맞는다. */
   position: absolute;
-  left: -44px;
-  transform: translateY(-50%);
-  font-size: 0.6rem;
+  left: 0;
+  transform: translate(-100%, -50%);
+  margin-left: -6px;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #ffffff;
-  background-color: #97a2ce;
-  padding: 1px 5px;
-  border-radius: 6px;
+  color: #7a86c2;
   white-space: nowrap;
 }
 
@@ -908,7 +907,7 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 
 /* 맨 위 날짜 배지는 선 위로 절반 올리면 스크롤 끝에서 잘린다. 아래로 붙인다 */
-.schedule-day-line--first span { transform: translateY(2px); }
+.schedule-day-line--first span { transform: translate(-100%, calc(-50% + 2px)); }
 
 .schedule-grid {
   flex: 1;
