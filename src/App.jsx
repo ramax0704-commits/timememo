@@ -1149,6 +1149,7 @@ function App() {
   const timelineRef = useRef(null);
   const inputRef = useRef(null);
   const scrollPositionRef = useRef(null);
+  const justAddedRef = useRef(null); // 방금 등록한 기록의 recorded_at — 그 자리로 화면을 옮긴다
 
 
   // ── 순서 옮기는 동안 화면 스크롤을 멈춘다 ────────────────────
@@ -1419,12 +1420,25 @@ function App() {
       return;
     }
     if (memos.length > prevCount) {
+      // 방금 등록한 기록이면 그 자리로 화면을 옮긴다 (시간 지정·시간표 등록은 맨 아래가 아닐 수 있다).
+      // 채팅뷰·시간표뷰 모두 요소에 data-at(=recorded_at)이 있어 같은 방식으로 찾는다.
+      const iso = justAddedRef.current;
+      justAddedRef.current = null;
+      const scroller = showScheduleView ? scheduleViewRef.current : el;
+      const target = iso && scroller?.querySelector(`[data-at="${iso}"]`);
+      if (target && scroller) {
+        // 화면 가운데쯤 오게. 스크롤 컨테이너 기준으로 직접 계산한다(부모가 여럿이라 offsetTop은 못 쓴다).
+        const sr = scroller.getBoundingClientRect();
+        const tr = target.getBoundingClientRect();
+        scroller.scrollTop += (tr.top - sr.top) - scroller.clientHeight / 2 + tr.height / 2;
+        return;
+      }
       // 마지막 기록이 입력창에 딱 붙지 않게, 바닥 여백을 조금(28px) 보이는 자리까지 내린다.
       // 여백 전체까지 내리면 키보드가 열린 좁은 화면에서 기록이 위로 밀려 숨는다.
       const spacer = el.querySelector('.timeline-bottom-space');
       el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - (spacer?.offsetHeight ?? 0) + 28);
     }
-  }, [memos]);
+  }, [memos, showScheduleView]);
 
   // ── 모바일 Visual Viewport ───────────────────────────────────
   useEffect(() => {
@@ -3270,6 +3284,7 @@ function App() {
       // 구간으로 적었으면 끝 시각을 직접 정한 것과 같다
       end_minutes: timed?.kind === 'range' ? timed.durationMin : 0,
     };
+    justAddedRef.current = newMemoData.recorded_at;
     setInputText('');
     setPromptIdx(i => (i + 1) % INPUT_PROMPTS.length);
     // 여러 줄로 자라 있던 입력칸을 한 줄로 되돌린다
