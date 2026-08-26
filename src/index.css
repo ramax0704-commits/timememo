@@ -3312,3 +3312,10 @@ body.keyboard-open .input-toolbar { display: flex; }
   color: var(--primary-color);
   font-variant-numeric: tabular-nums;
 }
+
+/* 수정 중 삭제 칩 */
+.link-chip--delete {
+  color: #e5484d;
+  border-color: #f3c0c2;
+}
+.link-chip--delete:active { background: #fff0f0; }

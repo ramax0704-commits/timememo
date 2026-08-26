@@ -1173,6 +1173,8 @@ function App() {
   const [slotPick, setSlotPick] = useState(null);
   // 잡힌 시간대를 눌러 여는 조정 시트 (드래그 핸들 + 고급선택 휠). { isRange, start, end, dayMs }
   const [rangeSheet, setRangeSheet] = useState(null);
+  // 등록된 기록을 탭해 인라인 수정 중일 때 그 id. 채팅창에 시각·내용을 불러와 바로 고친다.
+  const [editingMemoId, setEditingMemoId] = useState(null);
   const [selectedColor, setSelectedColor] = useState('default');
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeView, setActiveView] = useState('timeline'); // 'timeline' | 'settings'
@@ -3172,6 +3174,21 @@ function App() {
 
   const hhmm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
+  // 등록된 기록을 탭 → 채팅창에 시각·내용을 다시 불러와 바로 수정한다.
+  const editMemoInline = (memo) => {
+    const range = isRangeMemo(memo);
+    const { start, end } = blockRangeOf(memo);
+    const prefix = range
+      ? `${clockLabel(start.getTime())}~${clockLabel(end.getTime())} `
+      : `${clockLabel(new Date(memo.recordedAt).getTime())} `;
+    setEditingMemoId(memo.id);
+    setSelectedColor(memo.color || 'default');
+    setInputText(prefix + memo.content);
+    const el = inputRef.current;
+    if (el) { el.focus(); setTimeout(() => el.setSelectionRange(el.value.length, el.value.length), 0); }
+  };
+  const cancelInlineEdit = () => { setEditingMemoId(null); setInputText(''); };
+
   const openBlockEditor = (memo) => {
     const range = isRangeMemo(memo);
     const { start, end } = blockRangeOf(memo);
@@ -3529,6 +3546,33 @@ function App() {
   const handleAddMemo = async (e, mode = 'single') => {
     e?.preventDefault();
     if (!inputText.trim()) return;
+    // ── 등록된 기록 수정 ──
+    if (editingMemoId) {
+      const nowE = new Date();
+      const timedE = parseTimePrefix(inputText.trim(), nowE);
+      const base = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+      let iso, endMin = 0, content = inputText;
+      if (timedE) {
+        base.setMinutes(timedE.startMin);
+        iso = base.toISOString();
+        endMin = timedE.kind === 'range' ? timedE.durationMin : 0;
+        content = timedE.content;
+      } else {
+        // 시각 표기를 지웠으면 시각은 그대로 두고 내용만 바꾼다
+        const cur = memos.find(m => m.id === editingMemoId);
+        iso = cur ? cur.recordedAt : base.toISOString();
+        endMin = cur?.endMinutes || 0;
+      }
+      const db = { recorded_at: iso, end_minutes: endMin, content, color: selectedColor, spans_from_prev: false, spans_to_next: false, back_minutes: 0 };
+      const local = { recordedAt: iso, endMinutes: endMin, content, color: selectedColor, spansFromPrev: false, spansToNext: false, backMinutes: 0 };
+      await writeMemoFields(editingMemoId, db, local);
+      justAddedRef.current = iso;
+      setEditingMemoId(null);
+      setInputText('');
+      if (inputRef.current) inputRef.current.style.height = 'auto';
+      track('Memo Edited', { via: 'inline' });
+      return;
+    }
     // 투어 중에도 진짜로 저장한다 — 온보딩에서 쓴 것이 곧 첫 기록이다
     const now = new Date();
     // 글 앞머리에 시각을 적으면 그 시각의 기록으로 남긴다.
@@ -3774,7 +3818,7 @@ function App() {
     return m ? m[0].trimEnd().length : 0;
   })();
   // 입력창이 '활성' = 눌렀거나 글자가 있거나 투어 중. 이때만 버튼 줄이 펼쳐진다.
-  const inputActive = inputFocused || !!inputText.trim() || tour.active;
+  const inputActive = inputFocused || !!inputText.trim() || tour.active || !!editingMemoId;
   const sendButton = (
     <div className="send-wrap">
       <button
@@ -4476,7 +4520,7 @@ function App() {
                   key={idx}
                   className={`schedule-block${isCompact ? ' schedule-block--compact' : ''}${schedule.isInner ? ' schedule-block--inner' : ''}${schedule.colCount > 1 ? ' schedule-block--narrow' : ''}`}
                   data-at={schedule.memo.recordedAt}
-                  onClick={() => openBlockEditor(schedule.memo)}
+                  onClick={() => editMemoInline(schedule.memo)}
                   // 꾹 누르면(0.45초) 이동 모드 — 파란 테두리가 생기고 끌어서 시각을 옮긴다
                   onPointerDown={(e) => onScheduleBlockPointerDown(e, schedule)}
                   onPointerMove={onScheduleBlockPointerMove}
@@ -5334,25 +5378,49 @@ function App() {
               )}
             </div>
 
-            {/* 누르면 그 방식으로 바로 저장된다 (보내기를 또 누를 필요 없음) */}
-            <button
-              type="button"
-              className="link-chip link-chip--prev"
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => handleAddMemo(null, 'prev')}
-              disabled={!inputText.trim()}
-            >
-              ↑ 이전 기록부터
-            </button>
-            <button
-              type="button"
-              className="link-chip link-chip--next"
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => handleAddMemo(null, 'next')}
-              disabled={!inputText.trim()}
-            >
-              ↓ 다음 기록까지
-            </button>
+            {editingMemoId ? (
+              <>
+                {/* 등록된 기록 수정 중 — 삭제·취소 */}
+                <button
+                  type="button"
+                  className="link-chip link-chip--delete"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => { const m = memos.find(x => x.id === editingMemoId); setEditingMemoId(null); setInputText(''); if (m) handleDeleteWithUndo(m); }}
+                >
+                  <Trash2 size={13} strokeWidth={2.2} /> 삭제
+                </button>
+                <button
+                  type="button"
+                  className="link-chip"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={cancelInlineEdit}
+                >
+                  취소
+                </button>
+              </>
+            ) : (
+              <>
+                {/* 누르면 그 방식으로 바로 저장된다 (보내기를 또 누를 필요 없음) */}
+                <button
+                  type="button"
+                  className="link-chip link-chip--prev"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => handleAddMemo(null, 'prev')}
+                  disabled={!inputText.trim()}
+                >
+                  ↑ 이전 기록부터
+                </button>
+                <button
+                  type="button"
+                  className="link-chip link-chip--next"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => handleAddMemo(null, 'next')}
+                  disabled={!inputText.trim()}
+                >
+                  ↓ 다음 기록까지
+                </button>
+              </>
+            )}
           </div>
           )}
         </div>
