@@ -866,7 +866,9 @@ body.keyboard-open .input-toolbar { display: flex; }
   right: 0;
   height: 0;
   border-top: 1px solid #ccd2e8;
-  z-index: 6;
+  /* 블록보다 뒤(z 2 미만)로 — 자정 넘는 블록의 내용을 라벨이 가리지 않게.
+     빈 시간대에서는 그대로 보이고, 날짜는 헤더가 항상 알려준다. */
+  z-index: 1;
   pointer-events: none;
 }
 .schedule-day-line span {
