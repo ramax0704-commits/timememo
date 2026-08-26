@@ -628,8 +628,8 @@ function TimeRangeSheet({ init, onDone, onCancel }) {
 
   const onHandleDown = (type) => (e) => {
     e.stopPropagation();
-    e.currentTarget.setPointerCapture?.(e.pointerId);
     dragRef.current = { type, id: e.pointerId, y: e.clientY, s0: start, e0: end };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 캡처 불가여도 드래그는 진행 */ }
   };
   const onMove = (e) => {
     const g = dragRef.current;
