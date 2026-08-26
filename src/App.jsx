@@ -1761,6 +1761,10 @@ function App() {
       const rr = el.getBoundingClientRect();
       if (pinnedY < rr.top + rr.height / 2) { drop = el.dataset.id; break; }
     }
+    // 화면 표시용 상태와 별개로 ref에도 담는다 — 손을 떼는 순간 React가 아직
+    // 마지막 이동을 반영하기 전이면 상태는 한 칸 전 자리를 가리키고 있어서,
+    // 그대로 쓰면 엉뚱한 시각으로 옮겨진다.
+    st.drop = drop;
     setReorderDrop(prev => (prev === drop ? prev : drop));
   };
 
@@ -1807,7 +1811,7 @@ function App() {
 
   const endMemoReorder = async (commit) => {
     const st = reorderRef.current;
-    const drop = reorderDrop;
+    const drop = st?.drop ?? reorderDrop;
     reorderRef.current = null;
     setDraggingMemoId(null);
     setReorderDrop(null);
