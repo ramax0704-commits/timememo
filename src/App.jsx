@@ -1422,15 +1422,19 @@ function App() {
     if (memos.length > prevCount) {
       // 방금 등록한 기록이면 그 자리로 화면을 옮긴다 (시간 지정·시간표 등록은 맨 아래가 아닐 수 있다).
       // 채팅뷰·시간표뷰 모두 요소에 data-at(=recorded_at)이 있어 같은 방식으로 찾는다.
+      // 다음 프레임에 옮긴다 — 시간표는 이 기록으로 시간축이 늘어나며 레이아웃이 한 번 더 바뀌므로,
+      // 그 자리 계산은 정착된 뒤라야 맞다.
       const iso = justAddedRef.current;
       justAddedRef.current = null;
-      const scroller = showScheduleView ? scheduleViewRef.current : el;
-      const target = iso && scroller?.querySelector(`[data-at="${iso}"]`);
-      if (target && scroller) {
-        // 화면 가운데쯤 오게. 스크롤 컨테이너 기준으로 직접 계산한다(부모가 여럿이라 offsetTop은 못 쓴다).
-        const sr = scroller.getBoundingClientRect();
-        const tr = target.getBoundingClientRect();
-        scroller.scrollTop += (tr.top - sr.top) - scroller.clientHeight / 2 + tr.height / 2;
+      if (iso) {
+        requestAnimationFrame(() => {
+          const scroller = showScheduleView ? scheduleViewRef.current : timelineRef.current;
+          const target = scroller?.querySelector(`[data-at="${iso}"]`);
+          if (!target || !scroller) return;
+          const sr = scroller.getBoundingClientRect();
+          const tr = target.getBoundingClientRect();
+          scroller.scrollTop += (tr.top - sr.top) - scroller.clientHeight / 2 + tr.height / 2;
+        });
         return;
       }
       // 마지막 기록이 입력창에 딱 붙지 않게, 바닥 여백을 조금(28px) 보이는 자리까지 내린다.
