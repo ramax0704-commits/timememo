@@ -3194,3 +3194,105 @@ body.keyboard-open .input-toolbar { display: flex; }
   cursor: pointer;
   pointer-events: auto;
 }
+
+/* ── 잡힌 시각 위 투명 히트버튼 (눌러서 시간 조정) ─────────────── */
+.input-time-hit {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: none;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  z-index: 3;
+  white-space: pre;
+  overflow: hidden;
+  /* input-text-metrics의 padding/폰트를 그대로 받아 시각 글자와 폭이 정확히 겹친다 */
+}
+
+/* ── 시간 범위 조정 시트 (드래그 핸들 + 고급선택) ───────────────── */
+.range-sheet { }
+.range-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 6px 0 14px;
+}
+.range-sheet-head h3 { margin: 0; font-size: 1rem; font-weight: 700; }
+.range-adv-btn {
+  position: absolute;
+  right: 0;
+  top: 2px;
+  border: none;
+  background: var(--primary-color);
+  color: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.range-timeline {
+  position: relative;
+  margin: 0 4px 8px 44px;
+  border-left: 1px solid var(--border-color);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.range-hour {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  background: #f0f0f0;
+}
+.range-hour span {
+  position: absolute;
+  left: -44px;
+  top: -8px;
+  width: 40px;
+  text-align: right;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.range-block {
+  position: absolute;
+  left: 6px; right: 4px;
+  background: rgba(74, 114, 255, 0.5);
+  border-radius: 10px;
+  min-height: 26px;
+  cursor: grab;
+  touch-action: none;
+}
+.range-block-label {
+  padding: 8px 12px;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.range-block-dur { font-weight: 500; opacity: 0.92; }
+.range-handle {
+  position: absolute;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  touch-action: none;
+}
+.range-handle--top { top: -11px; left: 8px; cursor: ns-resize; }
+.range-handle--bot { bottom: -11px; right: 8px; cursor: ns-resize; }
+.range-wheel-wrap { padding: 4px 0 8px; }
+.range-dur-line {
+  text-align: center;
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--primary-color);
+  font-variant-numeric: tabular-nums;
+}

@@ -596,6 +596,122 @@ const timeLabel12 = (str) => {
   return `${ampm} ${h12}:${String(m).padStart(2, '0')}`;
 };
 
+// ── 시간 범위 조정 시트 (드래그 핸들 + 고급선택 휠) ──────────────
+// 잡힌 시간대를 세부 조정한다. 캘린더처럼 위/아래 핸들로 시작·끝을,
+// 가운데를 잡아 통째로 이동. '고급선택'을 누르면 다이얼(휠)로 바뀐다.
+// 단일 시각은 드래그가 의미 없어 바로 휠로 연다.
+const RS_PX_PER_MIN = 1;      // 기본 배율 (분당 픽셀)
+const RS_VIEW_H = 300;        // 타임라인 표시 높이
+function TimeRangeSheet({ init, onDone, onCancel }) {
+  const isRange = init.isRange;
+  const [start, setStart] = useState(init.start);
+  const [end, setEnd] = useState(init.end != null ? init.end : init.start + 30);
+  const [mode, setMode] = useState(isRange ? 'drag' : 'wheel');
+  const [wheelSel, setWheelSel] = useState('start');
+  const areaRef = useRef(null);
+  const dragRef = useRef(null);
+
+  const fmt = (min) => {
+    const d = new Date(init.dayMs + min * 60000);
+    const h = d.getHours();
+    return `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+  const snap = (v) => Math.round(v / 5) * 5;
+
+  // 타임라인 창: 범위 앞뒤 90분 여유. 화면 높이에 맞춰 배율을 줄인다.
+  const winStart = Math.max(0, Math.min(start, init.start) - 90);
+  const winEnd = Math.min(1440, Math.max(end, init.start + 30) + 90);
+  const ppm = Math.min(RS_PX_PER_MIN, RS_VIEW_H / Math.max(60, winEnd - winStart));
+  const yOf = (min) => (min - winStart) * ppm;
+  const hours = [];
+  for (let h = Math.ceil(winStart / 60); h <= Math.floor(winEnd / 60); h++) hours.push(h);
+
+  const onHandleDown = (type) => (e) => {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    dragRef.current = { type, id: e.pointerId, y: e.clientY, s0: start, e0: end };
+  };
+  const onMove = (e) => {
+    const g = dragRef.current;
+    if (!g || e.pointerId !== g.id) return;
+    const dMin = snap((e.clientY - g.y) / ppm);
+    if (g.type === 'start') setStart(Math.max(winStart, Math.min(g.s0 + dMin, end - 5)));
+    else if (g.type === 'end') setEnd(Math.min(winEnd, Math.max(g.e0 + dMin, start + 5)));
+    else if (g.type === 'move') {
+      const len = g.e0 - g.s0;
+      let ns = g.s0 + dMin;
+      ns = Math.max(winStart, Math.min(ns, winEnd - len));
+      setStart(ns); setEnd(ns + len);
+    }
+  };
+  const onUp = () => { dragRef.current = null; };
+
+  const dur = (() => {
+    const t = end - start;
+    const h = Math.floor(t / 60), m = t % 60;
+    return `${h > 0 ? `${h}시간 ` : ''}${m > 0 ? `${m}분` : (h > 0 ? '' : '0분')}`.trim();
+  })();
+
+  const done = () => onDone(start, isRange ? end : null);
+
+  return (
+    <div className="block-sheet-overlay block-sheet-overlay--peek" onClick={onCancel}>
+      <div className="block-sheet range-sheet" onClick={e => e.stopPropagation()}>
+        <div className="block-sheet-handle" />
+        <div className="range-sheet-head">
+          <h3>시간</h3>
+          {isRange && (
+            <button type="button" className="range-adv-btn" onClick={() => setMode(m => (m === 'drag' ? 'wheel' : 'drag'))}>
+              {mode === 'drag' ? '고급선택' : '드래그'}
+            </button>
+          )}
+        </div>
+
+        {mode === 'drag' ? (
+          <div className="range-timeline" ref={areaRef} style={{ height: `${(winEnd - winStart) * ppm}px` }}
+               onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+            {hours.map(h => (
+              <div key={h} className="range-hour" style={{ top: `${yOf(h * 60)}px` }}>
+                <span>{`${String(h % 24).padStart(2, '0')}:00`}</span>
+              </div>
+            ))}
+            <div className="range-block" style={{ top: `${yOf(start)}px`, height: `${yOf(end) - yOf(start)}px` }}
+                 onPointerDown={onHandleDown('move')} onPointerMove={onMove} onPointerUp={onUp}>
+              <div className="range-block-label">{fmt(start)} - {fmt(end)}<br /><span className="range-block-dur">{dur}</span></div>
+              <div className="range-handle range-handle--top" onPointerDown={onHandleDown('start')} />
+              <div className="range-handle range-handle--bot" onPointerDown={onHandleDown('end')} />
+            </div>
+          </div>
+        ) : (
+          <div className="range-wheel-wrap">
+            {isRange && (
+              <div className="block-time-row">
+                <button type="button" className={`block-input block-time-btn${wheelSel === 'start' ? ' open' : ''}`} onClick={() => setWheelSel('start')}>{fmt(start)}</button>
+                <span className="block-time-sep">→</span>
+                <button type="button" className={`block-input block-time-btn${wheelSel === 'end' ? ' open' : ''}`} onClick={() => setWheelSel('end')}>{fmt(end)}</button>
+              </div>
+            )}
+            <TimeWheelPicker
+              value={`${String(Math.floor(((wheelSel === 'end' ? end : start) % 1440) / 60)).padStart(2, '0')}:${String((wheelSel === 'end' ? end : start) % 60).padStart(2, '0')}`}
+              onChange={(v) => {
+                const [h, mi] = v.split(':').map(Number); const mins = h * 60 + mi;
+                if (wheelSel === 'end') setEnd(Math.max(start + 5, mins < start ? mins + 1440 : mins));
+                else setStart(mins);
+              }}
+            />
+            {isRange && <p className="range-dur-line">{fmt(start)} → {fmt(end)} · {dur}</p>}
+          </div>
+        )}
+
+        <div className="block-sheet-actions">
+          <button className="btn-cancel" onClick={onCancel}>취소</button>
+          <button className="btn-save" onClick={done}>완료</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── 온보딩 ───────────────────────────────────────────────────
 // 처음 온 사람에게 핵심 사용법을 카드 몇 장으로. 닫으면 다시 안 뜨고,
 // 마이페이지 '사용법 다시 보기'로 언제든 다시 볼 수 있다.
@@ -1026,6 +1142,8 @@ function App() {
   const [inputFocused, setInputFocused] = useState(false);
   // 빈 자리를 누른 직후 뜨는 시각 조정 시트. { isRange, dayMs, draftStart, draftEnd, wheel }
   const [slotPick, setSlotPick] = useState(null);
+  // 잡힌 시간대를 눌러 여는 조정 시트 (드래그 핸들 + 고급선택 휠). { isRange, start, end, dayMs }
+  const [rangeSheet, setRangeSheet] = useState(null);
   const [selectedColor, setSelectedColor] = useState('default');
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [activeView, setActiveView] = useState('timeline'); // 'timeline' | 'settings'
@@ -2194,17 +2312,14 @@ function App() {
     applyTimeToInput(startMin - dayOff, endMin != null ? endMin - dayOff : null, dayMs);
     track('Schedule Slot Picked', { range: endMin != null, guest: isGuest });
   };
-  // 잡힌 밴드를 눌러 시각을 조정한다 (지금은 휠 — 드래그 핸들 에디터는 다음 단계).
+  // 잡힌 시간대(밴드 또는 입력창 시각)를 눌러 조정 시트를 연다.
   const openBandEditor = () => {
     if (!pendingSpan) return;
-    const hm = (min) => { const m = ((min % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
-    setSlotPick({
-      isRange: pendingSpan.end != null,
-      dayMs: pendingSpan.dayMs,
-      draftStart: hm(pendingSpan.start),
-      draftEnd: hm(pendingSpan.end ?? pendingSpan.start + 30),
-      wheel: 'start',
-    });
+    setRangeSheet({ isRange: pendingSpan.end != null, start: pendingSpan.start, end: pendingSpan.end, dayMs: pendingSpan.dayMs });
+  };
+  const applyRangeSheet = (startMin, endMin) => {
+    setRangeSheet(null);
+    if (rangeSheet) applyTimeToInput(startMin, endMin, rangeSheet.dayMs);
   };
   // 시트에서 확인 — 그제야 입력창에 시각이 걸리고 포커스가 간다
   const confirmSlotPick = () => {
@@ -5081,6 +5196,17 @@ function App() {
               {timePrefixLen > 0 && <span className="time-mark">{inputText.slice(0, timePrefixLen)}</span>}
               {inputText.slice(timePrefixLen)}{'\n'}
             </div>
+            {/* 앞머리 시각 위에 얹는 투명 버튼 — 눌러서 시간 조정 시트를 연다.
+                시각 부분만 덮어 뒤쪽 본문 타이핑은 방해하지 않는다. */}
+            {showScheduleView && pendingSpan && timePrefixLen > 0 && (
+              <button
+                type="button"
+                className="input-time-hit input-text-metrics"
+                aria-label="시간 조정"
+                onMouseDown={e => e.preventDefault()}
+                onClick={openBandEditor}
+              >{inputText.slice(0, timePrefixLen)}</button>
+            )}
             {/* 여러 줄을 쓸 수 있는 textarea. 모바일 엔터는 줄바꿈, 전송은 버튼.
                 (PC는 엔터로 저장, Shift+엔터로 줄바꿈) */}
             <textarea
@@ -5204,6 +5330,15 @@ function App() {
         </button>
       </nav>
 
+
+      {/* 잡힌 시간대 조정 — 드래그 핸들 + 고급선택 휠 */}
+      {rangeSheet && (
+        <TimeRangeSheet
+          init={rangeSheet}
+          onDone={applyRangeSheet}
+          onCancel={() => setRangeSheet(null)}
+        />
+      )}
 
       {/* 시간표 빈 자리를 누른 직후: 휠로 시각을 맞춘 뒤 입력창으로 간다 */}
       {slotPick && (
