@@ -3984,10 +3984,11 @@ function App() {
       // (순간 기록마다 열을 주면 4~5칸으로 쪼개져 글자가 한 자도 안 보인다)
       if (c.useColumns) {
         const compacts = c.items.filter(s => s.isCompact);
-        if (compacts.length >= 2) {
+        if (compacts.length >= 1) {
           const from = compacts[0].startPos;
           const to = Math.max(compacts[compacts.length - 1].startPos, from + 5);
-          const needPx = compacts.length * MIN_COMPACT_PX;
+          // 열로 나뉘면 좁아서 시각·내용이 두 줄이 된다 — 두 줄 높이로 잡는다
+          const needPx = compacts.length * MIN_BLOCK_PX;
           const naturalPx = (to - from) * PX_PER_MIN;
           if (needPx > naturalPx) expansions.push({ from, to, extra: needPx - naturalPx });
         }
@@ -4035,8 +4036,8 @@ function App() {
           for (const s of compacts) {
             s.col = ci;
             s.top = Math.max(y, timeToPx(s.startPos));
-            s.height = MIN_COMPACT_PX - BLOCK_GAP_PX;
-            y = s.top + MIN_COMPACT_PX;
+            s.height = MIN_BLOCK_PX - BLOCK_GAP_PX; // 좁은 열은 두 줄 높이
+            y = s.top + MIN_BLOCK_PX;
           }
         }
         for (const s of spans) {
