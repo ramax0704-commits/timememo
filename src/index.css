@@ -912,6 +912,31 @@ body.keyboard-open .input-toolbar { display: flex; }
   position: relative;
 }
 
+/* 등록 전, 입력창에 잡힌 시간 영역을 미리 보여주는 띠 */
+.schedule-pending-band {
+  position: absolute;
+  left: 14px;
+  right: 4px;
+  background: rgba(74, 114, 255, 0.1);
+  border: 1.5px dashed var(--primary-color);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 4;
+  min-height: 22px;
+}
+.schedule-pending-label {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  font-variant-numeric: tabular-nums;
+  background: rgba(255,255,255,0.75);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
 /* 빈 자리를 꾹 누르고 끄는 동안 고르는 구간 */
 .schedule-slot-highlight {
   position: absolute;

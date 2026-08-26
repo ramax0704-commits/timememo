@@ -172,6 +172,27 @@ function resolveClock(ampm, h, m, nowMin) {
 }
 // 앞머리가 시각으로 읽히는지 — 내용이 아직 없어도(시각 뒤 스페이스 한 번) 색을 입힌다
 const PREFIX_RE = new RegExp(`^${TIME_TOKEN}(?:\\s*[~\\-]\\s*${TIME_TOKEN})?\\s`);
+// 입력 앞머리의 시각(범위)을 분 단위로 뽑는다. 내용이 아직 없어도(시각 뒤 공백) 잡아
+// 시간표에 '잡힌 영역'을 미리 보여주는 데 쓴다. content는 안 본다.
+const SPAN_RANGE_RE = new RegExp(`^${TIME_TOKEN}\\s*[~\\-]\\s*${TIME_TOKEN}\\s`);
+const SPAN_SINGLE_RE = new RegExp(`^${TIME_TOKEN}\\s`);
+function parseTimeSpan(text, now) {
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const rd = (am, hh, cm, km) => { const h = parseInt(hh, 10); const m = parseInt(cm ?? km ?? '0', 10); if (h > 24 || m > 59) return null; return { am, h, m }; };
+  let x = text.match(SPAN_RANGE_RE);
+  if (x) {
+    const a = rd(x[1], x[2], x[3], x[4]); const b = rd(x[5], x[6], x[7], x[8]);
+    if (a && b) {
+      const start = resolveClock(a.am, a.h, a.m, nowMin);
+      let end = b.am ? resolveClock(b.am, b.h, b.m, nowMin) : (b.h > 12 ? b.h * 60 + b.m : (b.h % 12) * 60 + b.m);
+      while (end <= start) end += 12 * 60;
+      return { start, end };
+    }
+  }
+  x = text.match(SPAN_SINGLE_RE);
+  if (x) { const a = rd(x[1], x[2], x[3], x[4]); if (a) return { start: resolveClock(a.am, a.h, a.m, nowMin), end: null }; }
+  return null;
+}
 
 function parseTimePrefix(text, now) {
   const nowMin = now.getHours() * 60 + now.getMinutes();
@@ -1467,6 +1488,24 @@ function App() {
     }
   }, [memos, showScheduleView]);
 
+  // 잡힌 시간 영역이 생기거나 바뀌면 그 띠를 화면에 보여준다 (등록 전에).
+  // 이러면 등록해도 블록이 이미 보이던 자리에 나타나 화면이 안 튄다.
+  useEffect(() => {
+    if (!showScheduleView || !pendingKey) return;
+    const t = setTimeout(() => {
+      const sc = scheduleViewRef.current;
+      const band = sc?.querySelector('.schedule-pending-band');
+      if (!sc || !band) return;
+      const sr = sc.getBoundingClientRect();
+      const br = band.getBoundingClientRect();
+      // 이미 화면에 충분히 보이면 건드리지 않는다 (타이핑 중 계속 튕기지 않게)
+      if (br.top >= sr.top + 40 && br.top <= sr.bottom - 80) return;
+      sc.scrollTop = Math.max(0, sc.scrollTop + (br.top - sr.top) - 96);
+    }, 60);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showScheduleView, pendingKey]);
+
   // ── 모바일 Visual Viewport ───────────────────────────────────
   useEffect(() => {
     // 키보드가 올라오는 '도중'에도 이벤트가 오는데, 그때 값으로 높이를 잡으면
@@ -1514,6 +1553,9 @@ function App() {
   const displayedMemos = memos.filter(m => isSameDay(new Date(m.recordedAt), selectedDate));
 
   // 다음날 자정~새벽 2시 메모: 전날 채팅창에도 흐리게 함께 표시
+  // 입력창 앞머리에 잡힌 시간 영역 — 시간표뷰에서 등록 전에 미리 띠로 보여준다
+  const pendingSpan = showScheduleView ? parseTimeSpan(inputText, nowTime) : null;
+  const pendingKey = pendingSpan ? `${pendingSpan.start}-${pendingSpan.end}` : null;
   const selectedDayStartMs = new Date(
     selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()
   ).getTime();
@@ -2674,7 +2716,7 @@ function App() {
         const r = centerTarget.getBoundingClientRect();
         // 긴 블록은 가운데 맞추면 시각·내용(맨 위)이 위로 잘려 아래만 보인다.
         // 화면 높이의 60%보다 크면 상단을 96px 아래에 두고, 아니면 가운데.
-        const tall = r.height > el.clientHeight * 0.6;
+        const tall = r.height > el.clientHeight * 0.45;
         const delta = tall
           ? (r.top - el.getBoundingClientRect().top) - 96
           : (r.top + r.height / 2 - el.getBoundingClientRect().top) - el.clientHeight / 2;
@@ -4188,6 +4230,21 @@ function App() {
             )}
             {/* 블록을 끌고 있는 동안 놓일 시각을 보여주는 배지 (드래그 핸들러가 직접 채운다) */}
             <div className="schedule-drag-badge" ref={scheduleBadgeRef} style={{ display: 'none' }} />
+            {/* 아직 등록 전 — 입력창에 잡힌 시간 영역을 미리 띠로 보여준다 */}
+            {pendingSpan && (() => {
+              const dayOff = (selectedDayStartMs - windowStartMs) / 60000;
+              const a = dayOff + pendingSpan.start;
+              const b = dayOff + (pendingSpan.end ?? pendingSpan.start + 30);
+              const top = timeToPx(a);
+              const label = pendingSpan.end != null
+                ? `${clockLabel(windowStartMs + a * 60000)} → ${clockLabel(windowStartMs + b * 60000)}`
+                : clockLabel(windowStartMs + a * 60000);
+              return (
+                <div className="schedule-pending-band" style={{ top: `${top}px`, height: `${timeToPx(b) - top}px` }}>
+                  <span className="schedule-pending-label">{label}</span>
+                </div>
+              );
+            })()}
             <div className="schedule-blocks-layer">
             {schedules.map((schedule, idx) => {
               // 습관 키워드 포함 시 키워드 색으로 (직접 고른 색이 있으면 그대로)
