@@ -542,7 +542,38 @@ body.keyboard-open .input-toolbar { display: flex; }
   display: block;
 }
 
-/* 전송 버튼: 누른 채 위/아래로 끌면 이어서 표시 방식이 바뀐다 */
+/* 이어서 기록 칩 — 입력창 위 한 줄 */
+.input-area { flex-wrap: wrap; }
+.link-chips {
+  flex-basis: 100%;
+  display: flex;
+  gap: 6px;
+  margin-bottom: -2px;
+}
+.link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-color);
+  background: #fff;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.link-chip:active { transform: scale(0.97); }
+.link-chip.active {
+  background: #eef2ff;
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+.link-chip--slot { font-variant-numeric: tabular-nums; }
+
 .send-wrap {
   position: relative;
   display: flex;
@@ -819,6 +850,18 @@ body.keyboard-open .input-toolbar { display: flex; }
 .schedule-grid {
   flex: 1;
   position: relative;
+}
+
+/* 빈 자리를 꾹 누르고 끄는 동안 고르는 구간 */
+.schedule-slot-highlight {
+  position: absolute;
+  left: 14px;
+  right: 4px;
+  background: rgba(74, 114, 255, 0.14);
+  border: 1.5px dashed var(--primary-color);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 30;
 }
 
 .schedule-hour-slot {

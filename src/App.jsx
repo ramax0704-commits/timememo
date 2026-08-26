@@ -2045,6 +2045,101 @@ function App() {
     });
   };
 
+  // ── 시간표 빈 자리 눌러 시각 고르기 ────────────────────────
+  // 탭: 그 시각(5분 단위)이 입력창에 걸린다. 꾹 누르고 끌다 떼기: 누른 시각부터 뗀 시각까지 구간.
+  // 블록 위에서 시작한 건 블록 제스처(옮기기)라 여기서 받지 않는다.
+  const scheduleGridRef = useRef(null);
+  const scheduleSlotRef = useRef(null);
+  const scheduleSlotHighlightRef = useRef(null);
+  const gridMinuteAt = (clientY) => {
+    const grid = scheduleGridRef.current;
+    const map = schedulePxMapRef.current;
+    if (!grid || !map) return null;
+    const r = grid.getBoundingClientRect();
+    const min = schedulePxToTime(clientY - r.top);
+    return Math.max(0, Math.min(map.gridMinutes, Math.round(min / 5) * 5));
+  };
+  const paintSlotHighlight = (g) => {
+    const el = scheduleSlotHighlightRef.current;
+    const map = schedulePxMapRef.current;
+    const badge = scheduleBadgeRef.current;
+    if (!el || !map) return;
+    const a = Math.min(g.startMin, g.curMin);
+    const b = Math.max(g.startMin, g.curMin, a + 5);
+    el.style.display = 'block';
+    el.style.top = `${map.timeToPx(a)}px`;
+    el.style.height = `${map.timeToPx(b) - map.timeToPx(a)}px`;
+    if (badge) {
+      badge.style.display = 'block';
+      badge.style.top = `${map.timeToPx(g.curMin)}px`;
+      badge.textContent = `${clockLabel(windowStartMs + a * 60000)} → ${clockLabel(windowStartMs + b * 60000)}`;
+    }
+  };
+  const pickSlot = (startMin, endMin) => {
+    const startMs = windowStartMs + startMin * 60000;
+    const endMs = endMin != null ? windowStartMs + endMin * 60000 : null;
+    setTimeSlot({ startMs, endMs });
+    setLinkMode('single');
+    // 고른 시각이 보고 있는 날짜가 아니면 그 날짜로 (기록은 보고 있는 날짜에 남으므로)
+    if (!isSameDay(new Date(startMs), selectedDate)) setSelectedDate(new Date(startMs));
+    track('Schedule Slot Picked', { range: endMin != null, guest: isGuest });
+    inputRef.current?.focus();
+  };
+  const endSlotGesture = (g, commit) => {
+    clearTimeout(g.timer);
+    if (g.prevent) window.removeEventListener('touchmove', g.prevent);
+    if (scheduleSlotHighlightRef.current) scheduleSlotHighlightRef.current.style.display = 'none';
+    if (scheduleBadgeRef.current) scheduleBadgeRef.current.style.display = 'none';
+    scheduleSlotRef.current = null;
+    if (!commit) return;
+    if (g.mode === 'range') {
+      const a = Math.min(g.startMin, g.curMin);
+      const b = Math.max(g.startMin, g.curMin, a + 5);
+      pickSlot(a, b);
+    } else if (g.mode === 'pending') {
+      pickSlot(g.startMin, null);
+    }
+  };
+  const onScheduleGridPointerDown = (e) => {
+    if (!e.isPrimary || e.target.closest('.schedule-block')) return;
+    const startMin = gridMinuteAt(e.clientY);
+    if (startMin == null) return;
+    const el = e.currentTarget; // 타이머 안에서는 currentTarget이 비어 있다
+    const g = { id: e.pointerId, x: e.clientX, y: e.clientY, startMin, curMin: startMin, mode: 'pending', timer: null, prevent: null };
+    g.timer = setTimeout(() => {
+      if (scheduleSlotRef.current !== g || g.mode !== 'pending') return;
+      g.mode = 'range';
+      try { el.setPointerCapture(g.id); } catch { /* 이미 떼었으면 무시 */ }
+      navigator.vibrate?.(15);
+      g.prevent = (ev) => ev.preventDefault();
+      window.addEventListener('touchmove', g.prevent, { passive: false });
+      paintSlotHighlight(g);
+    }, 450);
+    scheduleSlotRef.current = g;
+  };
+  const onScheduleGridPointerMove = (e) => {
+    const g = scheduleSlotRef.current;
+    if (!g || e.pointerId !== g.id) return;
+    if (g.mode === 'pending') {
+      // 꾹 누르기 전에 움직이면 스크롤이다
+      if (Math.hypot(e.clientX - g.x, e.clientY - g.y) > 8) { clearTimeout(g.timer); g.mode = 'scroll'; }
+      return;
+    }
+    if (g.mode !== 'range') return;
+    const m = gridMinuteAt(e.clientY);
+    if (m != null) { g.curMin = m; paintSlotHighlight(g); }
+  };
+  const onScheduleGridPointerUp = (e) => {
+    const g = scheduleSlotRef.current;
+    if (!g || e.pointerId !== g.id) return;
+    endSlotGesture(g, true);
+  };
+  const onScheduleGridPointerCancel = (e) => {
+    const g = scheduleSlotRef.current;
+    if (!g || e.pointerId !== g.id) return;
+    endSlotGesture(g, false);
+  };
+
   const onScheduleBlockPointerDown = (e, schedule) => {
     scheduleSuppressClickRef.current = false;
     if (!e.isPrimary) return;
@@ -3094,9 +3189,10 @@ function App() {
 
   // ── 메모 추가 ────────────────────────────────────────────────
   // mode: 'single'(기본) | 'prev'(이전 기록부터) | 'next'(다음 기록까지)
-  const handleAddMemo = async (e, mode = 'single') => {
+  const handleAddMemo = async (e, mode = linkMode) => {
     e?.preventDefault();
     if (!inputText.trim()) return;
+    const slot = timeSlot;
     // 투어 중에도 진짜로 저장한다 — 온보딩에서 쓴 것이 곧 첫 기록이다
     const now = new Date();
     // 글 앞머리에 시각을 적으면 그 시각의 기록으로 남긴다.
@@ -3107,7 +3203,10 @@ function App() {
     // 예외: 자정~새벽 2시에 어제 페이지에서 쓰는 건 아직 '그 밤'을 쓰는 것이라
     // 실제 시각(오늘 새벽)으로 남긴다. 어제 화면에도 새벽 기록으로 이어 보인다.
     let recordAt = now;
-    if (timed) {
+    if (slot) {
+      // 시간표에서 고른 자리 — 그 시각(과 구간)의 기록. 이어서 모드는 의미가 없어 무시한다.
+      recordAt = new Date(slot.startMs);
+    } else if (timed) {
       // 시각을 직접 적었으면 보고 있는 날짜의 그 시각으로. (새벽 예외보다 명시가 우선)
       recordAt = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
       recordAt.setMinutes(timed.startMin);
@@ -3122,15 +3221,17 @@ function App() {
     }
     const newMemoData = {
       user_id: currentUser?.id,
-      content: timed ? timed.content : inputText,
+      content: !slot && timed ? timed.content : inputText,
       color: selectedColor,
       recorded_at: recordAt.toISOString(),
-      spans_from_prev: !timed && mode === 'prev',
-      spans_to_next: !timed && mode === 'next',
-      // 구간으로 적었으면 끝 시각을 직접 정한 것과 같다
-      end_minutes: timed?.kind === 'range' ? timed.durationMin : 0,
+      spans_from_prev: !slot && !timed && mode === 'prev',
+      spans_to_next: !slot && !timed && mode === 'next',
+      // 구간으로 적었으면(또는 시간표에서 끌어 골랐으면) 끝 시각을 직접 정한 것과 같다
+      end_minutes: slot?.endMs ? Math.round((slot.endMs - slot.startMs) / 60000) : (timed?.kind === 'range' ? timed.durationMin : 0),
     };
     setInputText('');
+    setLinkMode('single');
+    setTimeSlot(null);
     setPromptIdx(i => (i + 1) % INPUT_PROMPTS.length);
     // 여러 줄로 자라 있던 입력칸을 한 줄로 되돌린다
     if (inputRef.current) inputRef.current.style.height = 'auto';
@@ -3328,21 +3429,21 @@ function App() {
     if (!todo.done) handleToggleTodo(todo, { silent: true });
   };
 
-  // ── 전송 버튼 제스처 ─────────────────────────────────────────
-  // 짧게 누르면 단일 기록, 누른 채 위로 올리면 '이전 기록부터',
-  // 아래로 내리면 '다음 기록까지'로 저장한다.
-  const SEND_DRAG_THRESHOLD = 24;
-  const sendDragRef = useRef(null);
-  const [sendMode, setSendMode] = useState(null); // 누르고 있는 동안의 선택 표시
-
-  const modeFromDy = (dy) => {
-    if (dy <= -SEND_DRAG_THRESHOLD) return 'prev';
-    if (dy >= SEND_DRAG_THRESHOLD) return 'next';
-    return 'single';
+  // ── 이어서 기록 (버튼) ───────────────────────────────────────
+  // 예전엔 보내기를 꾹 누른 채 위/아래로 끌어 골랐는데, 발견되지 않아 버튼으로 뺐다.
+  // 입력창 위 칩에서 '이전 기록부터' 또는 '다음 기록까지'를 켜 두고 보내면 적용되고,
+  // 보내고 나면 다시 단일로 돌아간다.
+  const [linkMode, setLinkMode] = useState('single'); // 'single' | 'prev' | 'next'
+  // 시간표에서 빈 자리를 눌러 고른 시각. { startMs, endMs|null } — 보내면 이 시각의 기록이 된다.
+  const [timeSlot, setTimeSlot] = useState(null);
+  const clockLabel = (ms) => {
+    const d = new Date(ms);
+    const h = d.getHours();
+    return `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
   // ── 투어 (움직이는 온보딩) ───────────────────────────────────
-  // 사용자의 '진짜 입력'으로 진행한다: 첫 기록을 직접 쓰고 → 이어서(위로 끌어) 하나 더 쓰고 →
+  // 사용자의 '진짜 입력'으로 진행한다: 첫 기록을 직접 쓰고 → 이어서('이전 기록부터' 칩) 하나 더 쓰고 →
   // 시간표에서 이어진 블록을 확인 → 샘플 3개가 얹혀 하루가 차면 → 회고 토스트 → 회고 탭 → AI 회고.
   // 여기서 쓴 두 기록은 진짜로 저장되어 첫 기록이 되고, 샘플만 끝나면 걷힌다.
   const startTour = (source) => {
@@ -3371,7 +3472,8 @@ function App() {
   };
   const endTour = (action) => {
     setTour({ active: false, step: 0, aiStatus: 'idle', contIso: null });
-    setSendMode(null);
+    setLinkMode('single');
+    setTimeSlot(null);
     setInputText(''); // 미리 적어둔 시각이 남아 있으면 지운다
     // 샘플만 걷어낸다 — 사용자가 투어에서 직접 쓴 기록은 그대로 남아 첫 기록이 된다
     setMemos(prev => prev.filter(m => !String(m.id).startsWith('tour-')));
@@ -3398,10 +3500,9 @@ function App() {
       caption: `${tour.prefillLabel ?? '조금 전'}쯤엔 뭘 하고 있었나요? 적어둔 시간 뒤에 이어서 쓰고 보내보세요. 그 시각의 기록이 됩니다.`,
     },
     {
-      // 이번엔 직접 적어야 하므로 입력 영역 전체를 열어두고, 드래그 포인터만 보내기 버튼 위에 앉힌다.
-      // 말풍선은 버튼 위에 뜨는 '이전 기록부터 / 단일 / 다음 기록까지' 힌트를 가리지 않게 더 위로 올린다
-      key: 'cont', target: '.input-area', pointerTarget: '.send-btn', place: 'above', offset: 74, pointer: 'drag-up', advance: 'send',
-      caption: '그다음부터 지금까지는 뭘 했나요? 적은 다음, 보내기를 꾹 누른 채 위로 올려보세요. 앞 기록부터 지금까지 이어진 시간으로 저장돼요.',
+      // 이번엔 직접 적어야 하므로 입력 영역 전체를 열어두고, 탭 포인터만 '이전 기록부터' 칩 위에 앉힌다.
+      key: 'cont', target: '.input-area', pointerTarget: '.link-chip--prev', place: 'above', offset: 12, pointer: 'tap', advance: 'send',
+      caption: '그다음부터 지금까지는 뭘 했나요? 적은 다음, 「이전 기록부터」를 켜고 보내보세요. 앞 기록부터 지금까지 이어진 시간으로 저장돼요.',
     },
     {
       key: 'tab-schedule', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', pointer: 'tap', advance: 'tap-target',
@@ -3501,34 +3602,6 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading]);
 
-
-  const onSendPointerDown = (e) => {
-    if (!inputText.trim()) return;
-    sendDragRef.current = { startY: e.clientY, mode: 'single' };
-    setSendMode('single');
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-  };
-
-  const onSendPointerMove = (e) => {
-    if (!sendDragRef.current) return;
-    const mode = modeFromDy(e.clientY - sendDragRef.current.startY);
-    if (mode !== sendDragRef.current.mode) {
-      sendDragRef.current.mode = mode;
-      setSendMode(mode);
-    }
-  };
-
-  const onSendPointerUp = () => {
-    const drag = sendDragRef.current;
-    sendDragRef.current = null;
-    setSendMode(null);
-    if (drag) handleAddMemo(null, drag.mode);
-  };
-
-  const onSendPointerCancel = () => {
-    sendDragRef.current = null;
-    setSendMode(null);
-  };
 
   const handleKeyDown = (e) => {
     // 229 = IME가 조합 중에 흘려보내는 키 — 진짜 키입력이 아니다
@@ -3934,7 +4007,17 @@ function App() {
               </div>
             ))}
           </div>
-          <div className="schedule-grid" style={{ height: `${totalPx}px` }}>
+          <div
+            className="schedule-grid"
+            ref={scheduleGridRef}
+            style={{ height: `${totalPx}px` }}
+            onPointerDown={onScheduleGridPointerDown}
+            onPointerMove={onScheduleGridPointerMove}
+            onPointerUp={onScheduleGridPointerUp}
+            onPointerCancel={onScheduleGridPointerCancel}
+          >
+            {/* 꾹 누르고 끄는 동안 고르는 구간 */}
+            <div className="schedule-slot-highlight" ref={scheduleSlotHighlightRef} style={{ display: 'none' }} />
             {/* 오전(자정~12시)에만 아주 옅은 회색을 깔아 오전/오후가 한눈에 구분되게 */}
             {windowDays.map((_, i) => (
               <div
@@ -4817,6 +4900,35 @@ function App() {
       {/* Input Area (타임라인 뷰에서만) */}
       {activeView === 'timeline' && (
         <div className="input-area">
+          {/* 이어서 기록 칩 / 시간표에서 고른 시각 — 입력창 위 한 줄 */}
+          <div className="link-chips">
+            {timeSlot ? (
+              <button type="button" className="link-chip link-chip--slot active" onClick={() => setTimeSlot(null)} title="고른 시각 지우기">
+                <Clock size={13} strokeWidth={2.4} />
+                {clockLabel(timeSlot.startMs)}{timeSlot.endMs ? ` → ${clockLabel(timeSlot.endMs)}` : ''}
+                <X size={13} strokeWidth={2.4} />
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={`link-chip link-chip--prev${linkMode === 'prev' ? ' active' : ''}`}
+                  onClick={() => setLinkMode(m => (m === 'prev' ? 'single' : 'prev'))}
+                  aria-pressed={linkMode === 'prev'}
+                >
+                  ↑ 이전 기록부터
+                </button>
+                <button
+                  type="button"
+                  className={`link-chip link-chip--next${linkMode === 'next' ? ' active' : ''}`}
+                  onClick={() => setLinkMode(m => (m === 'next' ? 'single' : 'next'))}
+                  aria-pressed={linkMode === 'next'}
+                >
+                  ↓ 다음 기록까지
+                </button>
+              </>
+            )}
+          </div>
           {/* 컬러 팔레트 */}
           <div className="color-picker-wrapper">
             {/* 빈 동그라미만 있으면 할 일 체크로 오해받는다 — 팔레트 아이콘을 넣어
@@ -4869,20 +4981,12 @@ function App() {
             autoFocus={!IS_TOUCH_DEVICE}
           />
           <div className="send-wrap">
-            {sendMode && (
-              <div className="send-hint">
-                <span className={`send-hint-item ${sendMode === 'prev' ? 'active' : ''}`}>↑ 이전 기록부터</span>
-                <span className={`send-hint-item ${sendMode === 'single' ? 'active' : ''}`}>단일 기록</span>
-                <span className={`send-hint-item ${sendMode === 'next' ? 'active' : ''}`}>↓ 다음 기록까지</span>
-              </div>
-            )}
             <button
-              className={`send-btn${sendMode && sendMode !== 'single' ? ' send-btn--dragging' : ''}`}
-              onPointerDown={onSendPointerDown}
-              onPointerMove={onSendPointerMove}
-              onPointerUp={onSendPointerUp}
-              onPointerCancel={onSendPointerCancel}
+              type="button"
+              className="send-btn"
+              onClick={() => handleAddMemo(null)}
               disabled={!inputText.trim()}
+              aria-label="보내기"
             >
               <Send size={18} />
             </button>
