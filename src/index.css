@@ -866,22 +866,21 @@ body.keyboard-open .input-toolbar { display: flex; }
   right: 0;
   height: 0;
   border-top: 1px solid #ccd2e8;
-  /* 블록보다 뒤(z 2 미만)로 — 자정 넘는 블록의 내용을 라벨이 가리지 않게.
-     빈 시간대에서는 그대로 보이고, 날짜는 헤더가 항상 알려준다. */
-  z-index: 1;
+  z-index: 6; /* 선은 블록 위(1px라 내용을 안 가림) */
   pointer-events: none;
 }
 .schedule-day-line span {
+  /* 블록이 없는 왼쪽 시간 눈금 자리에 둔다 — 자정 넘는 블록 내용과 안 겹친다 */
   position: absolute;
-  right: 0;
+  left: -44px;
   transform: translateY(-50%);
-  font-size: 0.66rem;
+  font-size: 0.6rem;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   color: #ffffff;
   background-color: #97a2ce;
-  padding: 1px 7px;
-  border-radius: 999px;
+  padding: 1px 5px;
+  border-radius: 6px;
   white-space: nowrap;
 }
 

@@ -4419,7 +4419,7 @@ function App() {
                 data-day-index={i}
                 style={{ top: `${timeToPx(i * DAY_MINUTES)}px` }}
               >
-                <span>{format(day, 'M월 d일 (E)', { locale: ko })}</span>
+                <span>{format(day, 'M/d (E)', { locale: ko })}</span>
               </div>
             ))}
             {/* 현재 시간 빨간 줄 */}
