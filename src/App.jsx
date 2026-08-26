@@ -90,6 +90,19 @@ const HABIT_BORDER = {
 };
 
 // 체험 모드에서 브라우저에 담아둔 기록을 화면에 쓸 모양으로 꺼낸다
+// 앱을 켠 직후 첫 요청은 토큰 갱신 중이거나 네트워크가 아직 안 붙어 실패할 수 있다.
+// 한 번 실패했다고 포기하면 기록이 다 날아간 것처럼 빈 화면이 남으므로 몇 번 더 시도한다.
+async function fetchWithRetry(run, tries = 4) {
+  let last = null;
+  for (let i = 0; i < tries; i++) {
+    const res = await run();
+    if (!res.error) return res;
+    last = res;
+    await new Promise(r => setTimeout(r, 500 * 2 ** i));
+  }
+  return last;
+}
+
 function loadGuestMemos() {
   return loadGuestRows()
     .map(rowToMemo)
@@ -979,6 +992,8 @@ function App() {
   // Global States
   // 로그인 전이면 브라우저에 담아둔 체험 기록으로 시작한다
   const [memos, setMemos] = useState(loadGuestMemos);
+  // 토큰이 갱신되면 서버 데이터를 다시 읽는다 (첫 로드가 만료 토큰으로 실패했을 수 있다)
+  const [refetchTick, setRefetchTick] = useState(0);
   const [selectedDate, setSelectedDate] = useState(new Date());
   // 타임블럭이 이어서 그려둔 날짜 창의 기준일. selectedDate가 창을 벗어날 때만 따라온다.
   // (헤더 날짜는 스크롤을 따라 계속 바뀌는데, 그때마다 창을 다시 잡으면 화면이 튄다)
@@ -1218,6 +1233,7 @@ function App() {
       } else if (event === 'SIGNED_OUT') {
         resetUser();
       }
+      if (event === 'TOKEN_REFRESHED') setRefetchTick(t => t + 1);
       setCurrentUser(session?.user ?? null);
       // 로그아웃하면 체험 모드로 돌아간다 (보통은 비어 있다)
       if (!session?.user) setMemos(loadGuestMemos());
@@ -1256,10 +1272,10 @@ function App() {
     const sortByTime = (list) => [...list].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
 
     const fetchMemos = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await fetchWithRetry(() => supabase
         .from('memos')
         .select('*')
-        .order('recorded_at', { ascending: true });
+        .order('recorded_at', { ascending: true }));
       if (error) {
         console.error('Error fetching memos:', error);
         return;
@@ -1284,7 +1300,7 @@ function App() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [userId]);
+  }, [userId, refetchTick]);
 
   // ── 체험 기록을 계정으로 옮기기 ──────────────────────────────
   // 로그인하고 나서 써둔 게 사라지면 로그인 벽보다 나쁜 경험이 된다.
@@ -1352,7 +1368,7 @@ function App() {
     if (!userId) return;
 
     const fetchTodos = async () => {
-      const { data, error } = await supabase.from('todos').select('*');
+      const { data, error } = await fetchWithRetry(() => supabase.from('todos').select('*'));
       if (error) {
         console.error('Error fetching todos:', error);
         return;
@@ -1375,7 +1391,7 @@ function App() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [userId]);
+  }, [userId, refetchTick]);
 
   // ── 입력 포커스 (터치 기기에서는 키보드가 멋대로 안 뜨게 제외) ─
   useEffect(() => {
