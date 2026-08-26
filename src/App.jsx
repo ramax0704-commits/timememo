@@ -1433,13 +1433,14 @@ function App() {
           if (!target || !scroller) return;
           const sr = scroller.getBoundingClientRect();
           const tr = target.getBoundingClientRect();
-          // 긴 구간 블록은 가운데 두면 위아래가 다 잘린다 — 시작이 살짝 위에 오게 둔다.
-          const anchor = tr.height > scroller.clientHeight * 0.7 ? 24 : (scroller.clientHeight / 2 - tr.height / 2);
-          scroller.scrollTop += (tr.top - sr.top) - anchor;
+          // 시각·내용은 블록(또는 말풍선) 맨 위에 있다. 그 위쪽이 화면 상단 근처에 오게 해야
+          // 긴 구간이어도 "몇 시에 뭘 했는지"가 잘리지 않고 보인다. 위에 약간의 여백(72px)만 남긴다.
+          const topGap = 72;
+          scroller.scrollTop += (tr.top - sr.top) - topGap;
         };
-        // 시간표뷰는 키보드가 내려가며 판 높이가 바뀌므로, 정착된 뒤(≈350ms)에 옮긴다.
-        // 채팅뷰는 키보드가 그대로라 다음 프레임이면 된다.
-        if (showScheduleView) setTimeout(doScroll, 350);
+        // 시간표뷰는 등록과 동시에 키보드가 내려가며 판 높이가 계속 바뀐다.
+        // 정착 시점을 하나로 못 잡으므로 몇 번에 걸쳐 다시 맞춘다(같은 자리로 가는 것이라 안전).
+        if (showScheduleView) [120, 320, 520].forEach(d => setTimeout(doScroll, d));
         else requestAnimationFrame(doScroll);
         return;
       }
