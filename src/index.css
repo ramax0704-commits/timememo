@@ -62,8 +62,7 @@ body {
 }
 
 /* ── Header ──────────────────────────────────────────────────── */
-.header--recording { display: none; }
-.header {
+".header {
   padding: 20px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -73,6 +72,8 @@ body {
   z-index: 10;
   flex-shrink: 0;
 }
+/* 시간표뷰에서 기록 중이면 상단 요일·날짜 헤더를 접는다 (화면을 넓게) */
+.header.header--recording { display: none; }
 
 .header h1 {
   font-size: 1.25rem;

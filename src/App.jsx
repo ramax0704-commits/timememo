@@ -1514,17 +1514,19 @@ function App() {
   // 이러면 등록해도 블록이 이미 보이던 자리에 나타나 화면이 안 튄다.
   useEffect(() => {
     if (!showScheduleView || !pendingKey) return;
-    const t = setTimeout(() => {
+    const doScroll = () => {
       const sc = scheduleViewRef.current;
       const band = sc?.querySelector('.schedule-pending-band');
       if (!sc || !band) return;
       const sr = sc.getBoundingClientRect();
       const br = band.getBoundingClientRect();
-      // 이미 화면에 충분히 보이면 건드리지 않는다 (타이핑 중 계속 튕기지 않게)
-      if (br.top >= sr.top + 40 && br.top <= sr.bottom - 80) return;
+      // 이미 위쪽에 잘 보이면 건드리지 않는다 (타이핑 중 계속 튕기지 않게)
+      if (br.top >= sr.top + 72 && br.top <= sr.bottom - 100) return;
       sc.scrollTop = Math.max(0, sc.scrollTop + (br.top - sr.top) - 96);
-    }, 60);
-    return () => clearTimeout(t);
+    };
+    // 헤더 접힘·키보드 오르내림으로 판 높이가 바뀌므로 몇 번에 걸쳐 맞춘다
+    const timers = [60, 260, 500].map(d => setTimeout(doScroll, d));
+    return () => timers.forEach(clearTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showScheduleView, pendingKey]);
 
