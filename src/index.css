@@ -994,10 +994,11 @@ body.keyboard-open .input-toolbar { display: flex; }
 /* 이어지지 않은 짧은 블록: 시간과 내용을 한 줄로 붙여 낮은 높이에 맞춘다 */
 .schedule-block--compact {
   flex-direction: row;
-  align-items: baseline;
+  align-items: center; /* 한 줄 블록은 시간·내용 세로 가운데 정렬 */
   gap: 6px;
   padding: 6px 8px;
 }
+.schedule-block--compact .schedule-block-time { line-height: 1; }
 
 .schedule-block--compact .schedule-block-time {
   flex: none;
