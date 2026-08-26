@@ -1488,9 +1488,24 @@ function App() {
     }
   }, [memos, showScheduleView]);
 
-  // 입력창 앞머리에 잡힌 시간 영역 — 시간표뷰에서 등록 전에 미리 띠로 보여준다
-  const pendingSpan = showScheduleView ? parseTimeSpan(inputText, nowTime) : null;
-  const pendingKey = pendingSpan ? `${pendingSpan.start}-${pendingSpan.end}` : null;
+  const selectedDayStartMs = new Date(
+    selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()
+  ).getTime();
+  // 잡힌 시간 영역 — 시간표뷰에서 등록 전에 미리 띠로 보여준다.
+  // 시간 조정 시트(slotPick)가 열려 있으면 그 휠 값으로 라이브 표시, 아니면 입력창 앞머리에서.
+  const hmToMin = (str) => { const [h, mi] = str.split(':').map(Number); return h * 60 + mi; };
+  const pendingSpan = (() => {
+    if (!showScheduleView) return null;
+    if (slotPick) {
+      const start = hmToMin(slotPick.draftStart);
+      let end = slotPick.isRange ? hmToMin(slotPick.draftEnd) : null;
+      if (end != null && end <= start) end += 1440;
+      return { start, end, dayMs: slotPick.dayMs };
+    }
+    const t = parseTimeSpan(inputText, nowTime);
+    return t ? { ...t, dayMs: selectedDayStartMs } : null;
+  })();
+  const pendingKey = pendingSpan ? `${pendingSpan.start}-${pendingSpan.end}-${pendingSpan.dayMs}` : null;
   // 잡힌 시간 영역이 생기거나 바뀌면 그 띠를 화면에 보여준다 (등록 전에).
   // 이러면 등록해도 블록이 이미 보이던 자리에 나타나 화면이 안 튄다.
   useEffect(() => {
@@ -1556,9 +1571,6 @@ function App() {
   const displayedMemos = memos.filter(m => isSameDay(new Date(m.recordedAt), selectedDate));
 
   // 다음날 자정~새벽 2시 메모: 전날 채팅창에도 흐리게 함께 표시
-  const selectedDayStartMs = new Date(
-    selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()
-  ).getTime();
   const lateNightMemos = memos.filter(m => {
     const min = (new Date(m.recordedAt).getTime() - selectedDayStartMs) / 60000;
     return min >= DAY_MINUTES && min < DAY_MINUTES + 120; // 다음날 00:00 ~ 01:59
@@ -4232,7 +4244,7 @@ function App() {
             <div className="schedule-drag-badge" ref={scheduleBadgeRef} style={{ display: 'none' }} />
             {/* 아직 등록 전 — 입력창에 잡힌 시간 영역을 미리 띠로 보여준다 */}
             {pendingSpan && (() => {
-              const dayOff = (selectedDayStartMs - windowStartMs) / 60000;
+              const dayOff = ((pendingSpan.dayMs ?? selectedDayStartMs) - windowStartMs) / 60000;
               const a = dayOff + pendingSpan.start;
               const b = dayOff + (pendingSpan.end ?? pendingSpan.start + 30);
               const top = timeToPx(a);
@@ -4664,7 +4676,7 @@ function App() {
       )}
       {/* Header — 날짜 한 줄 + 요일 띠. 타임라인과 회고가 같은 모양을 쓴다 */}
       {activeView !== 'settings' && (
-        <header className="header header--week">
+        <header className={`header header--week${showScheduleView && (inputFocused || slotPick) ? ' header--recording' : ''}`}>
           <div className="header-row">
             <div
               className="header-title-container"
@@ -5181,7 +5193,7 @@ function App() {
 
       {/* 시간표 빈 자리를 누른 직후: 휠로 시각을 맞춘 뒤 입력창으로 간다 */}
       {slotPick && (
-        <div className="block-sheet-overlay" onClick={() => setSlotPick(null)}>
+        <div className="block-sheet-overlay block-sheet-overlay--peek" onClick={() => setSlotPick(null)}>
           <div className="block-sheet move-confirm-sheet" onClick={e => e.stopPropagation()}>
             <div className="block-sheet-handle" />
             <div className="block-sheet-head">

@@ -62,6 +62,7 @@ body {
 }
 
 /* ── Header ──────────────────────────────────────────────────── */
+.header--recording { display: none; }
 .header {
   padding: 20px;
   border-bottom: 1px solid var(--border-color);
@@ -917,24 +918,26 @@ body.keyboard-open .input-toolbar { display: flex; }
   position: absolute;
   left: 14px;
   right: 4px;
-  background: rgba(74, 114, 255, 0.1);
-  border: 1.5px dashed var(--primary-color);
+  background: rgba(74, 114, 255, 0.22);
+  border: 2px solid var(--primary-color);
   border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(74, 114, 255, 0.3);
   pointer-events: none;
-  z-index: 4;
-  min-height: 22px;
+  z-index: 6;
+  min-height: 24px;
 }
 .schedule-pending-label {
   position: absolute;
-  top: 4px;
+  top: 5px;
   left: 8px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--primary-color);
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: #fff;
   font-variant-numeric: tabular-nums;
-  background: rgba(255,255,255,0.75);
-  padding: 1px 5px;
-  border-radius: 5px;
+  background: var(--primary-color);
+  padding: 2px 8px;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(74, 114, 255, 0.4);
 }
 
 /* 빈 자리를 꾹 누르고 끄는 동안 고르는 구간 */
@@ -1048,6 +1051,10 @@ body.keyboard-open .input-toolbar { display: flex; }
   position: absolute;
   inset: 0;
   background-color: rgba(0, 0, 0, 0.5);
+}
+/* 시간 조정 시트: 위쪽 시간표의 '잡힌 영역' 띠가 뒤로 비쳐 보이게 딤을 옅게 */
+.block-sheet-overlay--peek {
+  background-color: rgba(0, 0, 0, 0.18);
   display: flex;
   align-items: flex-end;
   z-index: 1000;
