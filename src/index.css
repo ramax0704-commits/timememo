@@ -1052,14 +1052,14 @@ body.keyboard-open .input-toolbar { display: flex; }
   position: absolute;
   inset: 0;
   background-color: rgba(0, 0, 0, 0.5);
-}
-/* 시간 조정 시트: 위쪽 시간표의 '잡힌 영역' 띠가 뒤로 비쳐 보이게 딤을 옅게 */
-.block-sheet-overlay--peek {
-  background-color: rgba(0, 0, 0, 0.18);
   display: flex;
   align-items: flex-end;
   z-index: 1000;
   animation: fadeIn 0.2s;
+}
+/* 시간 조정 시트: 위쪽 시간표의 '잡힌 영역' 띠가 뒤로 비쳐 보이게 딤을 옅게 */
+.block-sheet-overlay--peek {
+  background-color: rgba(0, 0, 0, 0.18);
 }
 
 .block-sheet {
