@@ -604,7 +604,7 @@ const RS_PPM = 0.8;             // 분당 픽셀(고정)
 const RS_DAY = 1440;
 const RS_VIEW_H = 420;          // 스크롤 영역 높이
 const RS_EDGE = 48;             // 가장자리 자동 스크롤 감지 폭
-function TimeRangeSheet({ init, onDone, onCancel }) {
+function TimeRangeSheet({ init, others = [], onDone, onCancel }) {
   const isRange = init.isRange;
   const [start, setStart] = useState(init.start);
   const [end, setEnd] = useState(init.end != null ? init.end : init.start + 30);
@@ -701,6 +701,11 @@ function TimeRangeSheet({ init, onDone, onCancel }) {
               {hours.map(h => (
                 <div key={h} className="range-hour" style={{ top: `${yOf(h * 60)}px` }}>
                   <span>{`${String(h % 24).padStart(2, '0')}:00`}</span>
+                </div>
+              ))}
+              {others.map((o, i) => (
+                <div key={i} className="range-other" style={{ top: `${yOf(o.start)}px`, height: `${Math.max(14, yOf(o.end) - yOf(o.start))}px` }}>
+                  <span>{o.content}</span>
                 </div>
               ))}
               <div className="range-block" style={{ top: `${yOf(start)}px`, height: `${yOf(end) - yOf(start)}px` }}
@@ -5474,6 +5479,7 @@ function App() {
       {rangeSheet && (
         <TimeRangeSheet
           init={rangeSheet}
+          others={rangeSheetOthers}
           onDone={applyRangeSheet}
           onCancel={() => setRangeSheet(null)}
         />
