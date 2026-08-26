@@ -160,16 +160,18 @@ const SINGLE_RE = new RegExp(`^${TIME_TOKEN}\\s+([\\s\\S]+)$`);
 
 // 오전/오후 없이 적힌 1~12시는 하루에 두 번 있다. "지금보다 과거이면서 가장 가까운 쪽"으로
 // 읽는다 — 기록은 방금 한 일을 적는 것이기 때문이다. 둘 다 미래면 이른 쪽(오전)으로.
+// 오전/오후가 없으면 오전으로 읽는다 ("7시" = 아침 7시). 저녁은 "오후 7시" 또는 "19시".
+// 예전엔 '지금보다 과거인 가장 가까운 쪽'으로 읽었는데, 같은 글자가 시각에 따라 다르게
+// 저장돼 헷갈렸다. 규칙이 하나면 외울 게 없다. (12시는 정오)
+// eslint-disable-next-line no-unused-vars
 function resolveClock(ampm, h, m, nowMin) {
   if (ampm === '오전') return (h % 12) * 60 + m;
   if (ampm === '오후') return ((h % 12) + 12) * 60 + m;
-  if (h > 12) return h * 60 + m; // 24시간 표기
-  const early = (h % 12) * 60 + m;
-  const late = early + 12 * 60;
-  if (late <= nowMin) return late;
-  if (early <= nowMin) return early;
-  return early;
+  if (h >= 12) return h * 60 + m; // 12시(정오)와 24시간 표기
+  return h * 60 + m;
 }
+// 앞머리가 시각으로 읽히는지 — 내용이 아직 없어도(시각 뒤 스페이스 한 번) 색을 입힌다
+const PREFIX_RE = new RegExp(`^${TIME_TOKEN}(?:\\s*[~\\-]\\s*${TIME_TOKEN})?\\s`);
 
 function parseTimePrefix(text, now) {
   const nowMin = now.getHours() * 60 + now.getMinutes();
@@ -2096,12 +2098,15 @@ function App() {
     let endMin = sp.isRange ? toMin(sp.draftEnd) : null;
     if (endMin != null && endMin <= startMin) endMin += DAY_MINUTES; // 자정을 넘긴 구간
     const startMs = sp.dayMs + startMin * 60000;
-    const endMs = endMin != null ? sp.dayMs + endMin * 60000 : null;
-    setTimeSlot({ startMs, endMs });
+    // 칩이 아니라 글자로 넣는다 — 채팅창에 "오후 9시 밥"이라 적는 것과 같은 모양이어야
+    // 한 가지 방식만 익히면 되고, 지웠다 고쳐 쓰기도 쉽다.
+    const prefix = clockLabel(startMs) + (endMin != null ? `~${clockLabel(sp.dayMs + endMin * 60000)}` : '') + ' ';
+    setInputText(prev => prefix + prev.replace(PREFIX_RE, ''));
     // 고른 시각이 보고 있는 날짜가 아니면 그 날짜로 (기록은 보고 있는 날짜에 남으므로)
     if (!isSameDay(new Date(startMs), selectedDate)) setSelectedDate(new Date(startMs));
     track('Schedule Slot Picked', { range: sp.isRange, guest: isGuest });
-    inputRef.current?.focus();
+    const el = inputRef.current;
+    if (el) { el.focus(); setTimeout(() => el.setSelectionRange(el.value.length, el.value.length), 0); }
   };
   const endSlotGesture = (g, commit) => {
     clearTimeout(g.timer);
@@ -3210,7 +3215,6 @@ function App() {
   const handleAddMemo = async (e, mode = 'single') => {
     e?.preventDefault();
     if (!inputText.trim()) return;
-    const slot = timeSlot;
     // 투어 중에도 진짜로 저장한다 — 온보딩에서 쓴 것이 곧 첫 기록이다
     const now = new Date();
     // 글 앞머리에 시각을 적으면 그 시각의 기록으로 남긴다.
@@ -3221,10 +3225,7 @@ function App() {
     // 예외: 자정~새벽 2시에 어제 페이지에서 쓰는 건 아직 '그 밤'을 쓰는 것이라
     // 실제 시각(오늘 새벽)으로 남긴다. 어제 화면에도 새벽 기록으로 이어 보인다.
     let recordAt = now;
-    if (slot) {
-      // 시간표에서 고른 자리 — 그 시각(과 구간)의 기록. 이어서 모드는 의미가 없어 무시한다.
-      recordAt = new Date(slot.startMs);
-    } else if (timed) {
+    if (timed) {
       // 시각을 직접 적었으면 보고 있는 날짜의 그 시각으로. (새벽 예외보다 명시가 우선)
       recordAt = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
       recordAt.setMinutes(timed.startMin);
@@ -3239,16 +3240,15 @@ function App() {
     }
     const newMemoData = {
       user_id: currentUser?.id,
-      content: !slot && timed ? timed.content : inputText,
+      content: timed ? timed.content : inputText,
       color: selectedColor,
       recorded_at: recordAt.toISOString(),
-      spans_from_prev: !slot && !timed && mode === 'prev',
-      spans_to_next: !slot && !timed && mode === 'next',
-      // 구간으로 적었으면(또는 시간표에서 끌어 골랐으면) 끝 시각을 직접 정한 것과 같다
-      end_minutes: slot?.endMs ? Math.round((slot.endMs - slot.startMs) / 60000) : (timed?.kind === 'range' ? timed.durationMin : 0),
+      spans_from_prev: !timed && mode === 'prev',
+      spans_to_next: !timed && mode === 'next',
+      // 구간으로 적었으면 끝 시각을 직접 정한 것과 같다
+      end_minutes: timed?.kind === 'range' ? timed.durationMin : 0,
     };
     setInputText('');
-    setTimeSlot(null);
     setPromptIdx(i => (i + 1) % INPUT_PROMPTS.length);
     // 여러 줄로 자라 있던 입력칸을 한 줄로 되돌린다
     if (inputRef.current) inputRef.current.style.height = 'auto';
@@ -3453,19 +3453,30 @@ function App() {
   // 칩 자체가 보내기 버튼이다 — 누르면 그 방식으로 바로 저장된다.
   // 입력창을 누르기 전(활성화 전)에는 칩을 숨겨 화면을 조용히 둔다.
   const [inputFocused, setInputFocused] = useState(false);
-  // 시간표에서 빈 자리를 눌러 고른 시각. { startMs, endMs|null } — 보내면 이 시각의 기록이 된다.
-  const [timeSlot, setTimeSlot] = useState(null);
   // 빈 자리를 누른 직후 뜨는 시각 조정 시트. 5분 눈금이 좁아 정확히 누르기 어려우니 휠로 맞춘다.
   // { isRange, dayMs(그 날 자정), draftStart:'HH:mm', draftEnd, wheel:'start'|'end' }
   const [slotPick, setSlotPick] = useState(null);
   // 앞머리에 적은 시각이 인식되면 그 부분에 색을 입힌다 (입력창 뒤에 깔린 거울 글자가 담당)
   const timePrefixLen = (() => {
-    if (timeSlot) return 0;
-    const m = inputText.match(RANGE_RE) || inputText.match(SINGLE_RE);
-    if (!m) return 0;
-    const content = m[m.length - 1];
-    return inputText.length - content.length;
+    const m = inputText.match(PREFIX_RE);
+    return m ? m[0].trimEnd().length : 0;
   })();
+  // 입력창이 '활성' = 눌렀거나 글자가 있거나 투어 중. 이때만 버튼 줄이 펼쳐진다.
+  const inputActive = inputFocused || !!inputText.trim() || tour.active;
+  const sendButton = (
+    <div className="send-wrap">
+      <button
+        type="button"
+        className="send-btn"
+        onMouseDown={e => e.preventDefault()}
+        onClick={() => handleAddMemo(null)}
+        disabled={!inputText.trim()}
+        aria-label="보내기"
+      >
+        <Send size={18} />
+      </button>
+    </div>
+  );
   const clockLabel = (ms) => {
     const d = new Date(ms);
     const h = d.getHours();
@@ -3502,7 +3513,6 @@ function App() {
   };
   const endTour = (action) => {
     setTour({ active: false, step: 0, aiStatus: 'idle', contIso: null });
-    setTimeSlot(null);
     setInputText(''); // 미리 적어둔 시각이 남아 있으면 지운다
     // 샘플만 걷어낸다 — 사용자가 투어에서 직접 쓴 기록은 그대로 남아 첫 기록이 된다
     setMemos(prev => prev.filter(m => !String(m.id).startsWith('tour-')));
@@ -4525,22 +4535,6 @@ function App() {
                 <h1>{format(headerDate, 'M월 d일 (E)', { locale: ko })}</h1>
               )}
             </div>
-            {activeView === 'timeline' && (
-              <div className="header-actions">
-                <button
-                  className={`header-nav-btn ${showScheduleView ? 'active' : ''}`}
-                  onClick={toggleScheduleView}
-                  title="일정 보기"
-                  style={{
-                    backgroundColor: showScheduleView ? 'var(--primary-color)' : 'transparent',
-                    color: showScheduleView ? 'white' : 'var(--text-muted)',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  <LayoutGrid size={20} />
-                </button>
-              </div>
-            )}
           </div>
           <WeekStrip
             selected={headerDate}
@@ -4896,8 +4890,10 @@ function App() {
 
       {/* Input Area (타임라인 뷰에서만) */}
       {activeView === 'timeline' && (
-        <div className="input-area">
-          {/* 글자만 위에 — 뒤에 깔린 거울이 앞머리 시각에 색을 입힌다 */}
+        <div className={`input-area${inputActive ? ' input-area--active' : ''}`}>
+          {/* 대기 중엔 [입력창][보내기] 한 줄. 활성화되면 글자가 위, 버튼이 아래 한 줄 */}
+          <div className="input-row">
+          {/* 글자만 — 뒤에 깔린 거울이 앞머리 시각에 색을 입힌다 */}
           <div className="input-box">
             <div className="input-mirror input-text-metrics" aria-hidden="true">
               {timePrefixLen > 0 && <span className="time-mark">{inputText.slice(0, timePrefixLen)}</span>}
@@ -4927,8 +4923,11 @@ function App() {
               autoFocus={!IS_TOUCH_DEVICE}
             />
           </div>
+          {!inputActive && sendButton}
+          </div>
 
-          {/* 버튼은 전부 아래 한 줄에: 색 · 이어서(활성화 때만) · 보내기 */}
+          {/* 활성화되면 버튼이 아래 한 줄에: 색 · 이어서 · 보내기 */}
+          {inputActive && (
           <div className="input-tools">
             <div className="color-picker-wrapper">
               {/* 빈 동그라미만 있으면 할 일 체크로 오해받는다 — 팔레트 아이콘을 넣어
@@ -4963,55 +4962,29 @@ function App() {
               )}
             </div>
 
-            {timeSlot ? (
-              <button
-                type="button"
-                className="link-chip link-chip--slot active"
-                onMouseDown={e => e.preventDefault()}
-                onClick={() => setTimeSlot(null)}
-                title="고른 시각 지우기"
-              >
-                <Clock size={13} strokeWidth={2.4} />
-                {clockLabel(timeSlot.startMs)}{timeSlot.endMs ? ` → ${clockLabel(timeSlot.endMs)}` : ''}
-                <X size={13} strokeWidth={2.4} />
-              </button>
-            ) : (inputFocused || inputText.trim() || tour.active) ? (
-              <>
-                {/* 누르면 그 방식으로 바로 저장된다 (보내기를 또 누를 필요 없음) */}
-                <button
-                  type="button"
-                  className="link-chip link-chip--prev"
-                  onMouseDown={e => e.preventDefault()}
-                  onClick={() => handleAddMemo(null, 'prev')}
-                  disabled={!inputText.trim()}
-                >
-                  ↑ 이전 기록부터
-                </button>
-                <button
-                  type="button"
-                  className="link-chip link-chip--next"
-                  onMouseDown={e => e.preventDefault()}
-                  onClick={() => handleAddMemo(null, 'next')}
-                  disabled={!inputText.trim()}
-                >
-                  ↓ 다음 기록까지
-                </button>
-              </>
-            ) : null}
+            {/* 누르면 그 방식으로 바로 저장된다 (보내기를 또 누를 필요 없음) */}
+            <button
+              type="button"
+              className="link-chip link-chip--prev"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => handleAddMemo(null, 'prev')}
+              disabled={!inputText.trim()}
+            >
+              ↑ 이전 기록부터
+            </button>
+            <button
+              type="button"
+              className="link-chip link-chip--next"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => handleAddMemo(null, 'next')}
+              disabled={!inputText.trim()}
+            >
+              ↓ 다음 기록까지
+            </button>
 
-            <div className="send-wrap">
-              <button
-                type="button"
-                className="send-btn"
-                onMouseDown={e => e.preventDefault()}
-                onClick={() => handleAddMemo(null)}
-                disabled={!inputText.trim()}
-                aria-label="보내기"
-              >
-                <Send size={18} />
-              </button>
-            </div>
+            {sendButton}
           </div>
+          )}
         </div>
       )}
 
