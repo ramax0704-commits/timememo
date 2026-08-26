@@ -538,7 +538,7 @@ body.keyboard-open .input-toolbar { display: flex; }
 .input-field--chat {
   resize: none;
   line-height: 1.4;
-  max-height: 110px;
+  max-height: 35vh;
   overflow-y: auto;
   font-family: inherit;
   display: block;
@@ -3319,3 +3319,25 @@ body.keyboard-open .input-toolbar { display: flex; }
   border-color: #f3c0c2;
 }
 .link-chip--delete:active { background: #fff0f0; }
+
+
+/* 시간 조정 시트: 참고용 기존 기록 블록(옅게) */
+.range-other {
+  position: absolute;
+  left: 4px; right: 4px;
+  background: #eceef4;
+  border: 1px solid #dfe3ee;
+  border-radius: 7px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+.range-other span {
+  display: block;
+  padding: 3px 7px;
+  font-size: 0.68rem;
+  color: #9aa0b4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

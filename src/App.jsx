@@ -2361,10 +2361,42 @@ function App() {
     inputRef.current?.blur(); // 시간 조정 중엔 키보드를 내린다 (시트가 키보드와 겹치지 않게)
     setRangeSheet({ isRange: pendingSpan.end != null, start: pendingSpan.start, end: pendingSpan.end, dayMs: pendingSpan.dayMs });
   };
-  const applyRangeSheet = (startMin, endMin) => {
-    setRangeSheet(null);
-    if (rangeSheet) applyTimeToInput(startMin, endMin, rangeSheet.dayMs);
+  // 등록된 블록을 꾹 눌러 시간만 조정 (시트 확인 시 그 기록을 바로 업데이트)
+  const openBlockTimeEditor = (memo) => {
+    const range = isRangeMemo(memo);
+    const { start, end } = blockRangeOf(memo);
+    const dayMs = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
+    const toMin = (dt) => Math.round((dt.getTime() - dayMs) / 60000);
+    setRangeSheet({ isRange: range, start: toMin(start), end: range ? toMin(end) : null, dayMs, memoId: memo.id });
   };
+  const applyRangeSheet = (startMin, endMin) => {
+    const rs = rangeSheet;
+    setRangeSheet(null);
+    if (!rs) return;
+    if (rs.memoId) {
+      // 등록된 기록의 시간만 업데이트
+      const startMs = rs.dayMs + startMin * 60000;
+      const endMinutes = endMin != null ? Math.max(0, endMin - startMin) : 0;
+      const iso = new Date(startMs).toISOString();
+      writeMemoFields(rs.memoId,
+        { recorded_at: iso, end_minutes: endMinutes, spans_from_prev: false, spans_to_next: false, back_minutes: 0 },
+        { recordedAt: iso, endMinutes, spansFromPrev: false, spansToNext: false, backMinutes: 0 });
+      justAddedRef.current = iso;
+    } else {
+      applyTimeToInput(startMin, endMin, rs.dayMs);
+    }
+  };
+  // 시간 조정 시트에 참고로 보여줄 '그 날의 다른 기록들'(분 단위 구간)
+  const rangeSheetOthers = (() => {
+    if (!rangeSheet) return [];
+    const day = new Date(rangeSheet.dayMs);
+    return timelineMemos
+      .filter(m => m.id !== rangeSheet.memoId && isSameDay(new Date(m.recordedAt), day))
+      .map(m => {
+        const { start, end } = blockRangeOf(m);
+        return { start: Math.round((start.getTime() - rangeSheet.dayMs) / 60000), end: Math.round((end.getTime() - rangeSheet.dayMs) / 60000), content: m.content };
+      });
+  })();
   // 시트에서 확인 — 그제야 입력창에 시각이 걸리고 포커스가 간다
   const confirmSlotPick = () => {
     const sp = slotPick;
@@ -2485,34 +2517,11 @@ function App() {
     };
     g.timer = setTimeout(() => {
       if (scheduleDragRef.current !== g || g.mode !== 'pending') return;
-      g.mode = 'drag';
-      scheduleSuppressClickRef.current = true;
-      // 이전 이동의 되돌리기 토스트는 정리한다 (되돌릴 대상이 섞이면 안 된다)
-      setMoveUndoToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return null; });
-      // 마우스는 커서가 블록 밖으로 나가면 이벤트가 끊긴다 — 캡처로 붙잡아둔다
-      try { el.setPointerCapture(g.id); } catch { /* 이미 떼었으면 무시 */ }
+      g.mode = 'longpress';
+      scheduleSuppressClickRef.current = true; // 롱프레스 뒤 click(수정 시트)이 안 열리게
       navigator.vibrate?.(15);
-      // '이동 가능 상태'가 눈에 보이게 — 살짝 줄어들며 들리고, 시각 배지가 뜬다
-      el.classList.add('schedule-block--moving');
-      g.prevent = (ev) => ev.preventDefault();
-      window.addEventListener('touchmove', g.prevent, { passive: false });
-      applyScheduleDrag(g);
-      // 가장자리 자동 스크롤 — 위로 쭉 끌면 헤더에 가려지는 대신 판이 넘어간다
-      const step = () => {
-        if (scheduleDragRef.current !== g || g.mode !== 'drag') return;
-        const cont = scheduleViewRef.current;
-        if (cont) {
-          const r = cont.getBoundingClientRect();
-          if (g.lastClientY < r.top + REORDER_EDGE) {
-            cont.scrollTop -= Math.min(14, (r.top + REORDER_EDGE - g.lastClientY) / 3);
-          } else if (g.lastClientY > r.bottom - REORDER_EDGE) {
-            cont.scrollTop += Math.min(14, (g.lastClientY - (r.bottom - REORDER_EDGE)) / 3);
-          }
-          applyScheduleDrag(g);
-        }
-        g.raf = requestAnimationFrame(step);
-      };
-      g.raf = requestAnimationFrame(step);
+      // 등록된 블록 꾹 누름 → 시간 조정 시트
+      openBlockTimeEditor(g.schedule.memo);
     }, 450);
     scheduleDragRef.current = g;
   };
@@ -5330,7 +5339,7 @@ function App() {
                 setInputText(e.target.value);
                 // 줄 수만큼 자라고, 너무 길면 안에서 스크롤
                 e.target.style.height = 'auto';
-                e.target.style.height = `${Math.min(e.target.scrollHeight, 110)}px`;
+                e.target.style.height = `${Math.min(e.target.scrollHeight, Math.max(110, Math.round(window.innerHeight * 0.35)))}px`;
               }}
               onScroll={e => { const m = e.target.previousSibling; if (m) m.scrollTop = e.target.scrollTop; }}
               onFocus={() => setInputFocused(true)}
