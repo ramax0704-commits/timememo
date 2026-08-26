@@ -602,7 +602,7 @@ const timeLabel12 = (str) => {
 // 좌표계는 '하루 전체(고정 배율)'라 드래그 중에 창이 바뀌며 길이가 쪼그라들던 문제가 없다.
 const RS_PPM = 0.8;             // 분당 픽셀(고정)
 const RS_DAY = 1440;
-const RS_VIEW_H = 300;          // 스크롤 영역 높이
+const RS_VIEW_H = 420;          // 스크롤 영역 높이
 const RS_EDGE = 48;             // 가장자리 자동 스크롤 감지 폭
 function TimeRangeSheet({ init, onDone, onCancel }) {
   const isRange = init.isRange;
