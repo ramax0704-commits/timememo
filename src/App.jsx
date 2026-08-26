@@ -1410,12 +1410,16 @@ function App() {
   // 스크롤을 따라 바뀌므로, 그대로 두면 위로 훑을 때마다 아래로 되돌려버린다.
   const prevMemoCount = useRef(memos.length);
   useEffect(() => {
-    const el = timelineRef.current;
+    // 보고 있는 뷰의 스크롤 상자. 채팅뷰는 timelineRef, 시간표뷰는 scheduleViewRef.
+    // (채팅 상자는 시간표뷰에서 렌더되지 않아 null이다 — 여기서 걸러 return하면
+    //  시간표뷰에선 등록 후 스크롤이 아예 안 돌던 버그가 있었다)
+    const chatEl = timelineRef.current;
+    const el = showScheduleView ? scheduleViewRef.current : chatEl;
     const prevCount = prevMemoCount.current;
     prevMemoCount.current = memos.length;
     if (!el) return;
-    if (scrollPositionRef.current !== null) {
-      el.scrollTop = scrollPositionRef.current; // 삭제 후 위치 복원
+    if (scrollPositionRef.current !== null && chatEl) {
+      chatEl.scrollTop = scrollPositionRef.current; // 삭제 후 위치 복원 (채팅뷰)
       scrollPositionRef.current = null;
       return;
     }
@@ -1427,27 +1431,28 @@ function App() {
       const iso = justAddedRef.current;
       justAddedRef.current = null;
       if (iso) {
+        // 시각·내용은 블록(또는 말풍선) 맨 위에 있다. 블록의 '위 가장자리'를 화면 상단 근처로
+        // 올려야 긴 구간이어도 "몇 시에 뭘 했는지"가 잘리지 않는다.
+        // scrollTop 직접 계산은 판 높이가 바뀌는 도중에 어긋나므로, 위 가장자리를 기준으로
+        // 스크롤하는 scrollIntoView(block:'start')에 맡기고, 아래로 조금(64px) 여백을 준다.
         const doScroll = () => {
           const scroller = showScheduleView ? scheduleViewRef.current : timelineRef.current;
           const target = scroller?.querySelector(`[data-at="${iso}"]`);
           if (!target || !scroller) return;
-          const sr = scroller.getBoundingClientRect();
-          const tr = target.getBoundingClientRect();
-          // 시각·내용은 블록(또는 말풍선) 맨 위에 있다. 그 위쪽이 화면 상단 근처에 오게 해야
-          // 긴 구간이어도 "몇 시에 뭘 했는지"가 잘리지 않고 보인다. 위에 약간의 여백(72px)만 남긴다.
-          const topGap = 72;
-          scroller.scrollTop += (tr.top - sr.top) - topGap;
+          target.scrollIntoView({ block: 'start', behavior: 'auto' });
+          scroller.scrollTop = Math.max(0, scroller.scrollTop - 64); // 위 여백 (시각이 딱 붙지 않게)
         };
         // 시간표뷰는 등록과 동시에 키보드가 내려가며 판 높이가 계속 바뀐다.
         // 정착 시점을 하나로 못 잡으므로 몇 번에 걸쳐 다시 맞춘다(같은 자리로 가는 것이라 안전).
-        if (showScheduleView) [120, 320, 520].forEach(d => setTimeout(doScroll, d));
+        if (showScheduleView) [150, 400, 650].forEach(d => setTimeout(doScroll, d));
         else requestAnimationFrame(doScroll);
         return;
       }
-      // 마지막 기록이 입력창에 딱 붙지 않게, 바닥 여백을 조금(28px) 보이는 자리까지 내린다.
-      // 여백 전체까지 내리면 키보드가 열린 좁은 화면에서 기록이 위로 밀려 숨는다.
-      const spacer = el.querySelector('.timeline-bottom-space');
-      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - (spacer?.offsetHeight ?? 0) + 28);
+      // (여기까지 왔으면 iso가 없는 경우 — 이론상 잘 안 온다) 채팅뷰면 맨 아래로.
+      if (!showScheduleView && chatEl) {
+        const spacer = chatEl.querySelector('.timeline-bottom-space');
+        chatEl.scrollTop = Math.max(0, chatEl.scrollHeight - chatEl.clientHeight - (spacer?.offsetHeight ?? 0) + 28);
+      }
     }
   }, [memos, showScheduleView]);
 
