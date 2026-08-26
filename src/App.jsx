@@ -2178,14 +2178,31 @@ function App() {
       badge.textContent = `${clockLabel(windowStartMs + a * 60000)} → ${clockLabel(windowStartMs + b * 60000)}`;
     }
   };
+  // 잡힌 시각을 입력창 앞머리에 글자로 넣고 포커스 — 채팅에 "오전 9시 밥"이라 적는 것과 같은 모양.
+  const applyTimeToInput = (localStartMin, localEndMin, dayMs) => {
+    const startMs = dayMs + localStartMin * 60000;
+    const prefix = clockLabel(startMs) + (localEndMin != null ? `~${clockLabel(dayMs + localEndMin * 60000)}` : '') + ' ';
+    setInputText(prev => prefix + prev.replace(PREFIX_RE, ''));
+    if (!isSameDay(new Date(startMs), selectedDate)) setSelectedDate(new Date(startMs));
+    const el = inputRef.current;
+    if (el) { el.focus(); setTimeout(() => el.setSelectionRange(el.value.length, el.value.length), 0); }
+  };
+  // 드래그/터치로 잡으면 휠 시트 없이 바로 입력할 수 있게 한다 (시각은 밴드로 보이고, 눌러 조정 가능).
   const pickSlot = (startMin, endMin) => {
-    const dayMs = windowStartMs + Math.floor(startMin / DAY_MINUTES) * DAY_MINUTES * 60000;
-    const hm = (min) => `${String(Math.floor((min % DAY_MINUTES) / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+    const dayOff = Math.floor(startMin / DAY_MINUTES) * DAY_MINUTES;
+    const dayMs = windowStartMs + dayOff * 60000;
+    applyTimeToInput(startMin - dayOff, endMin != null ? endMin - dayOff : null, dayMs);
+    track('Schedule Slot Picked', { range: endMin != null, guest: isGuest });
+  };
+  // 잡힌 밴드를 눌러 시각을 조정한다 (지금은 휠 — 드래그 핸들 에디터는 다음 단계).
+  const openBandEditor = () => {
+    if (!pendingSpan) return;
+    const hm = (min) => { const m = ((min % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
     setSlotPick({
-      isRange: endMin != null,
-      dayMs,
-      draftStart: hm(startMin),
-      draftEnd: hm(endMin != null ? endMin : startMin + 30),
+      isRange: pendingSpan.end != null,
+      dayMs: pendingSpan.dayMs,
+      draftStart: hm(pendingSpan.start),
+      draftEnd: hm(pendingSpan.end ?? pendingSpan.start + 30),
       wheel: 'start',
     });
   };
@@ -2198,16 +2215,7 @@ function App() {
     const startMin = toMin(sp.draftStart);
     let endMin = sp.isRange ? toMin(sp.draftEnd) : null;
     if (endMin != null && endMin <= startMin) endMin += DAY_MINUTES; // 자정을 넘긴 구간
-    const startMs = sp.dayMs + startMin * 60000;
-    // 칩이 아니라 글자로 넣는다 — 채팅창에 "오후 9시 밥"이라 적는 것과 같은 모양이어야
-    // 한 가지 방식만 익히면 되고, 지웠다 고쳐 쓰기도 쉽다.
-    const prefix = clockLabel(startMs) + (endMin != null ? `~${clockLabel(sp.dayMs + endMin * 60000)}` : '') + ' ';
-    setInputText(prev => prefix + prev.replace(PREFIX_RE, ''));
-    // 고른 시각이 보고 있는 날짜가 아니면 그 날짜로 (기록은 보고 있는 날짜에 남으므로)
-    if (!isSameDay(new Date(startMs), selectedDate)) setSelectedDate(new Date(startMs));
-    track('Schedule Slot Picked', { range: sp.isRange, guest: isGuest });
-    const el = inputRef.current;
-    if (el) { el.focus(); setTimeout(() => el.setSelectionRange(el.value.length, el.value.length), 0); }
+    applyTimeToInput(startMin, endMin, sp.dayMs);
   };
   const endSlotGesture = (g, commit) => {
     clearTimeout(g.timer);
@@ -4252,7 +4260,13 @@ function App() {
                 ? `${clockLabel(windowStartMs + a * 60000)} → ${clockLabel(windowStartMs + b * 60000)}`
                 : clockLabel(windowStartMs + a * 60000);
               return (
-                <div className="schedule-pending-band" style={{ top: `${top}px`, height: `${timeToPx(b) - top}px` }}>
+                <div
+                  className="schedule-pending-band"
+                  style={{ top: `${top}px`, height: `${timeToPx(b) - top}px` }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={openBandEditor}
+                  title="시각 조정"
+                >
                   <span className="schedule-pending-label">{label}</span>
                 </div>
               );
