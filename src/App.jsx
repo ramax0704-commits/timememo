@@ -1439,8 +1439,11 @@ function App() {
           const scroller = showScheduleView ? scheduleViewRef.current : timelineRef.current;
           const target = scroller?.querySelector(`[data-at="${iso}"]`);
           if (!target || !scroller) return;
-          target.scrollIntoView({ block: 'start', behavior: 'auto' });
-          scroller.scrollTop = Math.max(0, scroller.scrollTop - 64); // 위 여백 (시각이 딱 붙지 않게)
+          const sr = scroller.getBoundingClientRect();
+          const tr = target.getBoundingClientRect();
+          // 블록 위 가장자리를 상자 위에서 96px 아래에 둔다 — 시각·내용 줄이 경계에 잘리지 않게
+          // 넉넉히 띄운다. (scrollIntoView는 iOS에서 바깥 컨테이너까지 밀어 잘렸다)
+          scroller.scrollTop = Math.max(0, scroller.scrollTop + (tr.top - sr.top) - 96);
         };
         // 시간표뷰는 등록과 동시에 키보드가 내려가며 판 높이가 계속 바뀐다.
         // 정착 시점을 하나로 못 잡으므로 몇 번에 걸쳐 다시 맞춘다(같은 자리로 가는 것이라 안전).
