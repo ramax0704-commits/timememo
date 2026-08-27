@@ -72,7 +72,7 @@ body {
   z-index: 10;
   flex-shrink: 0;
 }
-/* 시간표뷰에서 기록 중이면 상단 요일·날짜 헤더를 접는다 (화면을 넓게) */
+/* 시간표뷰에서 기록 중이거나, 등록된 기록을 수정 중이면 상단 요일·날짜 헤더를 접는다 (화면을 넓게) */
 .header.header--recording { display: none; }
 
 .header h1 {

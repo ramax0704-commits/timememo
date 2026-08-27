@@ -2178,8 +2178,16 @@ function App() {
     const isRange = isRangeMemo(st.memo);
     const before = blockRangeOf(st.memo);
     let after = blockRangeOf(st.memo, { recordedAt: iso });
-    // '다음 기록까지'·'이전 기록부터' 자동 잇기 구간은 옮긴 자리에서 이웃에 걸려 길이가 0이 될 수 있다.
-    // 그대로 굳히면 단일 기록이 돼버리므로(8/27 버그) 옮기기 전 길이를 그대로 가져간다.
+    // '이전 기록부터'·'다음 기록까지' 자동 잇기 구간은 recordedAt만 옮기면 시작(또는 끝)이 여전히 이웃 기록에
+    // 붙어 있어서, 손가락으로 놓은 자리와 다른 시각이 확인 시트에 뜬다 (8/27 "설정하지 않은 시간으로 바뀜").
+    // 놓은 자리를 시작으로, 옮기기 전 길이를 그대로 써서 명시적인 구간으로 만든다.
+    const autoLinked = (st.memo.spansFromPrev && !st.memo.backMinutes) || (st.memo.spansToNext && !st.memo.endMinutes);
+    if (isRange && autoLinked) {
+      const startMs = selectedDayStartMs + st.snapMin * 60000;
+      const durMs = Math.max(MIN_BLOCK_MINUTES * 60000, before.end.getTime() - before.start.getTime());
+      after = { start: new Date(startMs), end: new Date(startMs + durMs) };
+    }
+    // 그 밖에도 옮긴 자리에서 이웃에 걸려 길이가 0이 되면 단일 기록이 돼버리므로 옮기기 전 길이를 가져간다.
     if (isRange && after.end.getTime() <= after.start.getTime()) {
       const durMs = Math.max(MIN_BLOCK_MINUTES * 60000, before.end.getTime() - before.start.getTime());
       after = { start: after.start, end: new Date(after.start.getTime() + durMs) };
@@ -2259,8 +2267,8 @@ function App() {
       }
     }
 
-    // 확정한 뒤에도 잠깐은 마음을 바꿀 수 있게 되돌리기 토스트를 띄운다
-    const timer = setTimeout(() => setMoveUndoToast(null), 6000);
+    // 확정한 뒤에도 잠깐은 마음을 바꿀 수 있게 되돌리기 토스트를 띄운다 (8/27: 6초는 못 보고 지나갔다 → 10초)
+    const timer = setTimeout(() => setMoveUndoToast(null), 10000);
     setMoveUndoToast(prevT => {
       if (prevT?.timer) clearTimeout(prevT.timer);
       return { memoId: m.memoId, prev: m.prev, timer };
@@ -3314,6 +3322,18 @@ function App() {
     setInputText(prefix + memo.content);
     const el = inputRef.current;
     if (el) { el.focus(); setTimeout(() => { fitInputHeight(); el.setSelectionRange(el.value.length, el.value.length); }, 0); }
+    // 고치는 기록이 입력창 바로 위에 보이게 — 키보드가 올라와 화면이 줄어든 뒤에 맞춘다 (8/27 요청)
+    const reveal = () => {
+      const cont = showScheduleView ? scheduleViewRef.current : timelineRef.current;
+      const target = cont?.querySelector(showScheduleView ? `.schedule-block[data-at="${memo.recordedAt}"]` : `.memo-swipe-wrapper[data-id="${memo.id}"]`);
+      if (!cont || !target) return;
+      // scrollIntoView는 바깥 컨테이너까지 같이 밀어 엉뚱한 데로 간다 — 스크롤 컨테이너 안에서만 맞춘다
+      const c = cont.getBoundingClientRect(), t = target.getBoundingClientRect();
+      const wantBottom = c.bottom - 12;
+      if (t.bottom > wantBottom || t.top < c.top) cont.scrollTop += t.bottom - wantBottom;
+    };
+    setTimeout(reveal, 350);
+    setTimeout(reveal, 900); // iOS는 키보드 애니메이션이 끝난 뒤에야 viewport가 줄어든다
   };
   const cancelInlineEdit = () => { setEditingMemoId(null); setInputText(''); if (inputRef.current) inputRef.current.style.height = 'auto'; };
   // 내용을 프로그램적으로 넣은 뒤 입력창 높이를 내용에 맞춘다 (onChange가 안 타므로 직접)
@@ -3698,14 +3718,19 @@ function App() {
         iso = cur ? cur.recordedAt : base.toISOString();
         endMin = cur?.endMinutes || 0;
       }
-      const db = { recorded_at: iso, end_minutes: endMin, content, color: selectedColor, spans_from_prev: false, spans_to_next: false, back_minutes: 0 };
-      const local = { recordedAt: iso, endMinutes: endMin, content, color: selectedColor, spansFromPrev: false, spansToNext: false, backMinutes: 0 };
+      // 잇기 칩으로 저장하면: '이전 기록부터'는 이 기록 시각이 구간의 끝(적은 시각까지), '다음 기록까지'는 시작.
+      // 직접 적은 구간(~)이 있으면 그 끝/시작을 기준 시각으로 쓰고, 명시 길이는 지운다 (자동 잇기가 이긴다).
+      if (mode === 'prev' && timedE?.kind === 'range') { base.setMinutes(base.getMinutes() + timedE.durationMin); iso = base.toISOString(); }
+      const linkPrev = mode === 'prev', linkNext = mode === 'next';
+      if (linkPrev || linkNext) endMin = 0;
+      const db = { recorded_at: iso, end_minutes: endMin, content, color: selectedColor, spans_from_prev: linkPrev, spans_to_next: linkNext, back_minutes: 0 };
+      const local = { recordedAt: iso, endMinutes: endMin, content, color: selectedColor, spansFromPrev: linkPrev, spansToNext: linkNext, backMinutes: 0 };
       await writeMemoFields(editingMemoId, db, local);
       justAddedRef.current = iso;
       setEditingMemoId(null);
       setInputText('');
       if (inputRef.current) inputRef.current.style.height = 'auto';
-      track('Memo Edited', { via: 'inline' });
+      track('Memo Edited', { via: 'inline', link: mode });
       return;
     }
     // 투어 중에도 진짜로 저장한다 — 온보딩에서 쓴 것이 곧 첫 기록이다
@@ -5120,7 +5145,7 @@ function App() {
       )}
       {/* Header — 날짜 한 줄 + 요일 띠. 타임라인과 회고가 같은 모양을 쓴다 */}
       {activeView !== 'settings' && (
-        <header className={`header header--week${showScheduleView && (inputFocused || slotPick) ? ' header--recording' : ''}`}>
+        <header className={`header header--week${(showScheduleView && (inputFocused || slotPick)) || editingMemoId ? ' header--recording' : ''}`}>
           <div className="header-row">
             <div
               className="header-title-container"
@@ -5594,7 +5619,25 @@ function App() {
 
             {editingMemoId ? (
               <>
-                {/* 등록된 기록 수정 중 — 삭제·취소 */}
+                {/* 등록된 기록 수정 중 — 잇기 방식 바꾸기·삭제·취소. 잇기 칩은 새 기록과 똑같이 누르면 바로 저장된다 */}
+                <button
+                  type="button"
+                  className="link-chip link-chip--prev"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => handleAddMemo(null, 'prev')}
+                  disabled={!inputText.trim()}
+                >
+                  ↑ 이전 기록부터
+                </button>
+                <button
+                  type="button"
+                  className="link-chip link-chip--next"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => handleAddMemo(null, 'next')}
+                  disabled={!inputText.trim()}
+                >
+                  ↓ 다음 기록까지
+                </button>
                 <button
                   type="button"
                   className="link-chip link-chip--delete"
