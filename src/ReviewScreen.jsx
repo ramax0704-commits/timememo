@@ -664,10 +664,11 @@ function binsOf(items) {
   for (const m of items) b[Math.floor(minuteInReviewDay(m.recordedAt) / BIN)] += (m.content || '').length;
   return b;
 }
-// 30분 칸 그대로 그리면 바늘처럼 뾰족해서 '언제쯤'이 안 읽힌다 — 앞뒤 칸으로 번지게 한다 (±1시간)
-const KERNEL = [0.06, 0.24, 0.4, 0.24, 0.06];
+// 30분 칸 그대로 그리면 바늘처럼 뾰족해서 '언제쯤'이 안 읽힌다 — 앞뒤 한 칸(±30분)만 살짝 번지게 한다.
+// 더 넓히면 봉우리가 전부 같은 종 모양이 돼 꾸며낸 그래프처럼 보인다 (8/27 피드백).
+const KERNEL = [0.2, 0.6, 0.2];
 function smooth(bins) {
-  return bins.map((_, i) => KERNEL.reduce((acc, w, k) => acc + w * (bins[i + k - 2] || 0), 0));
+  return bins.map((_, i) => KERNEL.reduce((acc, w, k) => acc + w * (bins[i + k - 1] || 0), 0));
 }
 function binsToPoints(bins, max) {
   return bins.map((v, i) => ({ t: i * BIN + BIN / 2, y: max > 0 ? v / max : 0 }));
@@ -685,6 +686,12 @@ function WeekTalkCurve({ week }) {
   const peakLabel = ampmLabel(Math.floor((DAY_START_MIN + peakMin) / 60) % 24).replace(/시$/, `시${(peakMin % 60) ? ' 30분' : ''}`);
   const peakX = ((peakMin + BIN / 2) / 1440) * 100;
   const { line, area } = monotonePath(binsToPoints(total, totalMax));
+  // 실제 기록 시각마다 점 — 봉우리가 어느 기록에서 왔는지 눈으로 맞춰볼 수 있게
+  const dots = days.flatMap(d => d.items.map(m => {
+    const t = minuteInReviewDay(m.recordedAt);
+    const v = total[Math.floor(t / BIN)];
+    return { key: m.id, x: (t / 1440) * 100, y: ((CURVE_H - 3 - (v / totalMax) * (CURVE_H - 8)) / CURVE_H) * 100 };
+  }));
   return (
     <div className="day-curve talk-curve" role="img" aria-label={`이번 주 기록 길이 곡선. ${peakLabel}쯤 가장 길게`}>
       <div className="day-curve-plot">
@@ -704,6 +711,7 @@ function WeekTalkCurve({ week }) {
           ))}
           <path d={line} className="day-curve-line" vectorEffect="non-scaling-stroke" />
         </svg>
+        {dots.map(d => <span key={d.key} className="week-talk-dot" style={{ left: `${d.x}%`, top: `${d.y}%` }} />)}
         <span className={`day-curve-peak${peakX > 70 ? ' day-curve-peak--left' : peakX < 14 ? ' day-curve-peak--start' : ''}`} style={{ left: `${peakX}%` }}>
           {peakLabel}쯤 말이 길었어요
         </span>
@@ -711,7 +719,7 @@ function WeekTalkCurve({ week }) {
       <div className="day-curve-axis">
         {[0, 6, 12, 18].map(h => <span key={h}>{ampmLabel(h + DAY_START_MIN / 60)}</span>)}
       </div>
-      <p className="week-talk-legend">흐린 선은 하루하루, 굵은 선은 이번 주 합</p>
+      <p className="week-talk-legend">점은 기록 하나하나, 흐린 선은 하루하루, 굵은 선은 이번 주 합</p>
     </div>
   );
 }

@@ -2723,6 +2723,10 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 .day-curve-peak--left { transform: translateX(-100%); }
 .week-talk-day { fill: none; stroke: #4a72ff; stroke-opacity: 0.32; stroke-width: 1px; }
+.week-talk-dot {
+  position: absolute; width: 6px; height: 6px; border-radius: 50%;
+  background-color: #fff; border: 2px solid var(--primary-color); transform: translate(-50%, -50%); pointer-events: none;
+}
 .week-talk-legend { margin: 2px 0 0; font-size: 0.68rem; color: var(--text-muted); }
 .talk-curve-peak {
   position: absolute;
