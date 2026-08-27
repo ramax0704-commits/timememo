@@ -563,9 +563,9 @@ const timeLabel12 = (str) => {
   return `${ampm} ${h12}:${String(m).padStart(2, '0')}`;
 };
 
-// ── 시간 범위 조정 시트 (드래그 핸들 + 고급선택 휠) ──────────────
+// ── 시간 범위 조정 시트 (드래그 핸들 + 다이얼) ──────────────
 // 잡힌 시간대를 세부 조정한다. 위/아래 핸들로 시작·끝을, 가운데를 잡아 통째로 이동.
-// '고급선택'을 누르면 다이얼(휠)로 바뀐다. 단일 시각은 바로 휠로 연다.
+// '다이얼'을 누르면 휠로 바뀐다. 단일 시각은 바로 휠로 연다.
 // 좌표계는 '하루 전체(고정 배율)'라 드래그 중에 창이 바뀌며 길이가 쪼그라들던 문제가 없다.
 const RS_PPM = 0.8;             // 분당 픽셀(고정)
 const RS_DAY = 1440;
@@ -656,7 +656,7 @@ function TimeRangeSheet({ init, others = [], onDone, onCancel }) {
           <h3>시간</h3>
           {isRange && (
             <button type="button" className="range-adv-btn" onClick={() => setMode(m => (m === 'drag' ? 'wheel' : 'drag'))}>
-              {mode === 'drag' ? '고급선택' : '드래그'}
+              {mode === 'drag' ? '다이얼' : '드래그'}
             </button>
           )}
         </div>
@@ -1147,7 +1147,7 @@ function App() {
   const [inputFocused, setInputFocused] = useState(false);
   // 빈 자리를 누른 직후 뜨는 시각 조정 시트. { isRange, dayMs, draftStart, draftEnd, wheel }
   const [slotPick, setSlotPick] = useState(null);
-  // 잡힌 시간대를 눌러 여는 조정 시트 (드래그 핸들 + 고급선택 휠). { isRange, start, end, dayMs }
+  // 잡힌 시간대를 눌러 여는 조정 시트 (드래그 핸들 + 다이얼). { isRange, start, end, dayMs }
   const [rangeSheet, setRangeSheet] = useState(null);
   // 등록된 기록을 탭해 인라인 수정 중일 때 그 id. 채팅창에 시각·내용을 불러와 바로 고친다.
   const [editingMemoId, setEditingMemoId] = useState(null);
