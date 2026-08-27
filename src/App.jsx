@@ -2122,6 +2122,7 @@ function App() {
     const winStart = r ? memoMin - (startY - r.top) / pxPerMin : 0;
     const timeEl = el?.querySelector('.memo-time') || null;
     const st = { memo, el, timeEl, timeText: timeEl?.textContent ?? '', startY, lastY: startY, winStart, pxPerMin, snapMin: memoMin, ownOffsetMin, raf: 0 };
+    if (tip?.page === 'memo') endTips('done'); // 팁이 시킨 대로 꾹 눌렀다 — 안내는 여기까지
     reorderRef.current = st;
     setDraggingMemoId(memo.id);
     applyChatDrag();
@@ -2339,9 +2340,10 @@ function App() {
     g.el.style.transform = '';
     if (scheduleBadgeRef.current) scheduleBadgeRef.current.style.display = 'none';
     scheduleDragRef.current = null;
-    if (!commit || g.mode !== 'drag' || g.newStartPos == null) return;
-    const shift = g.newStartPos - g.schedule.startPos;
-    if (!shift) return;
+    if (!commit || g.mode !== 'drag') return;
+    const shift = g.newStartPos == null ? 0 : g.newStartPos - g.schedule.startPos;
+    // 꾹 누르고 안 움직인 채 놓았다 → 시간 조정 시트 (시작·끝을 직접 고친다)
+    if (!shift) { openBlockTimeEditor(g.schedule.memo); return; }
     // 블록의 시작을 옮긴 만큼 기록 시각도 같이 민다 (구간 길이는 그대로)
     const oldIso = g.schedule.memo.recordedAt;
     const iso = new Date(new Date(oldIso).getTime() + shift * 60000).toISOString();
@@ -2585,11 +2587,29 @@ function App() {
     };
     g.timer = setTimeout(() => {
       if (scheduleDragRef.current !== g || g.mode !== 'pending') return;
-      g.mode = 'longpress';
-      scheduleSuppressClickRef.current = true; // 롱프레스 뒤 click(수정 시트)이 안 열리게
+      // 꾹 누르면 이동 모드 (8/27: 시간 조정 시트가 바로 떠서 끌 수가 없었다 — 시트는 안 움직이고 놓았을 때만)
+      g.mode = 'drag';
+      scheduleSuppressClickRef.current = true; // 롱프레스 뒤 click(수정)이 안 열리게
+      setMoveUndoToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return null; });
+      try { el.setPointerCapture(g.id); } catch { /* 이미 떼었으면 무시 */ }
       navigator.vibrate?.(15);
-      // 등록된 블록 꾹 누름 → 시간 조정 시트
-      openBlockTimeEditor(g.schedule.memo);
+      el.classList.add('schedule-block--moving');
+      g.prevent = (ev) => ev.preventDefault();
+      window.addEventListener('touchmove', g.prevent, { passive: false });
+      applyScheduleDrag(g);
+      // 가장자리 자동 스크롤 — 위로 쭉 끌면 헤더에 가려지는 대신 판이 넘어간다
+      const step = () => {
+        if (scheduleDragRef.current !== g || g.mode !== 'drag') return;
+        const cont = scheduleViewRef.current;
+        if (cont) {
+          const r = cont.getBoundingClientRect();
+          if (g.lastClientY < r.top + REORDER_EDGE) cont.scrollTop -= Math.min(14, (r.top + REORDER_EDGE - g.lastClientY) / 3);
+          else if (g.lastClientY > r.bottom - REORDER_EDGE) cont.scrollTop += Math.min(14, (g.lastClientY - (r.bottom - REORDER_EDGE)) / 3);
+          applyScheduleDrag(g);
+        }
+        g.raf = requestAnimationFrame(step);
+      };
+      g.raf = requestAnimationFrame(step);
     }, 450);
     scheduleDragRef.current = g;
   };
@@ -3746,6 +3766,7 @@ function App() {
         during_onboarding: tour.active,
       });
       if (tour.active) afterTourSend(memo, mode);
+    if (tip?.page === 'timeline' && tipStep?.advance === 'send') setTimeout(nextTip, 400);
       return;
     }
 
@@ -3766,6 +3787,7 @@ function App() {
     const memo = rowToMemo(data);
     setMemos(prev => prev.some(m => m.id === memo.id) ? prev : [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
     if (tour.active) afterTourSend(memo, mode);
+    if (tip?.page === 'timeline' && tipStep?.advance === 'send') setTimeout(nextTip, 400);
   };
 
   // 기록 하나가 만들어질 때 보내는 공통 이벤트.
@@ -3994,11 +4016,11 @@ function App() {
   // 한 번에 한 문장. 페이지마다 처음 들어왔을 때 한 번만. 건너뛰면 그 페이지 것만 끝.
   const TIP_STEPS = {
     timeline: [
-      { key: 'time', target: '.input-area', place: 'above', caption: '"9시 30분 밥"처럼 시간을 앞에 적으면 그 시각에 기록돼요.' },
-      { key: 'tab', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', caption: '타임라인 탭을 한 번 더 누르면 시간표로 바뀌어요.' },
+      { key: 'time', target: '.input-area', place: 'above', advance: 'send', caption: '"9시 30분 밥"처럼 시간을 앞에 적어 보내보세요.' },
+      { key: 'tab', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', advance: 'tap-target', pointer: 'tap', caption: '타임라인 탭을 한 번 더 누르면 시간표로 바뀌어요.' },
     ],
     memo: [
-      { key: 'hold', target: '.memo-swipe-wrapper', place: 'below', caption: '기록을 꾹 누르면 시간을 옮길 수 있어요.' },
+      { key: 'hold', target: '.memo-swipe-wrapper', place: 'below', advance: 'hold', caption: '기록을 꾹 눌러 시간을 옮겨보세요.' },
     ],
     today: [
       { key: 'curve', target: '.review-screen .shape', place: 'below', caption: '기록이 길었던 시간이 이 곡선에 나타나요.', preview: <SampleCurve /> },
@@ -4017,7 +4039,9 @@ function App() {
     if (!tip) return null;
     const base = TIP_STEPS[tip.page][tip.idx];
     const has = base.target && typeof document !== 'undefined' && document.querySelector(base.target);
-    return { ...base, target: has ? base.target : null, place: has ? base.place : 'bottom', free: true, advance: 'button' };
+    // 사용자가 직접 해야 넘어가는 단계(send/tap-target/hold)는 '다음' 없이. 나머지는 '다음'. 전부 딤.
+    const advance = base.advance || 'button';
+    return { ...base, target: has ? base.target : null, place: has ? base.place : 'bottom', free: false, dim: true, advance: has ? advance : 'button' };
   })();
   const markTipsSeen = (page) => {
     setTipsSeen(prev => {
@@ -6225,7 +6249,7 @@ function App() {
           step={tipStep}
           index={`${tip.page}-${tip.idx}`}
           containerRef={appContainerRef}
-          onTargetTap={() => {}}
+          onTargetTap={() => setTimeout(nextTip, 350)}
           onNext={nextTip}
           onFinish={nextTip}
           onSkip={() => endTips('skipped')}

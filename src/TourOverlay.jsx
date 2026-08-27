@@ -103,8 +103,10 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
       tail = 'up';
     }
   } else {
-    // 대상이 없으면 탭바 위쪽에 가운데로
-    bubbleStyle = { left: (W - bubbleW) / 2, width: bubbleW, bottom: 96 };
+    // 대상이 없으면 화면 가운데 (딤 위에 카드처럼)
+    bubbleStyle = step.dim
+      ? { left: (W - bubbleW) / 2, width: bubbleW, top: '50%', transform: 'translateY(-50%)' }
+      : { left: (W - bubbleW) / 2, width: bubbleW, bottom: 96 };
   }
 
   // 대상이 있는 단계인데 아직 자리를 못 쟀거나(스크롤 중) 자리 잡히기 전이면 아무것도 보여주지 않는다.
@@ -117,7 +119,7 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
 
   if (!ready) {
     return (
-      <div className="tour" aria-live="polite">
+      <div className={`tour${step.dim ? ' tour--dim' : ''}`} aria-live="polite">
         {!step.free && <div className="tour-block" style={{ left: 0, top: 0, width: W, height: H }} />}
         {skipBtn}
       </div>
@@ -125,7 +127,7 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
   }
 
   return (
-    <div className="tour" aria-live="polite">
+    <div className={`tour${step.dim ? ' tour--dim' : ''}`} aria-live="polite">
       {blocks.map((b, i) => <div key={i} className="tour-block" style={b} />)}
       {skipBtn}
       {spot && (

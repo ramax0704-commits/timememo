@@ -3035,6 +3035,9 @@ body.keyboard-open .input-toolbar { display: flex; }
   pointer-events: none;
 }
 .tour-block { position: absolute; pointer-events: auto; }
+/* 페이지 팁: 강조한 곳만 남기고 어둡게 — 딤이 없으니 어디를 보라는 건지 집중이 안 됐다 (8/27) */
+.tour--dim .tour-block { background-color: rgba(20, 22, 34, 0.55); }
+.tour--dim .tour-spot { box-shadow: 0 0 0 3px rgba(74, 114, 255, 0.9), 0 0 0 8px rgba(74, 114, 255, 0.25); animation: none; }
 .tour-spot {
   position: absolute;
   box-shadow: 0 0 0 3px rgba(74, 114, 255, 0.18), 0 6px 22px rgba(74, 114, 255, 0.45);
@@ -3542,7 +3545,8 @@ body.keyboard-open .input-toolbar { display: flex; }
 .ob-sample--review .reflection-narrative { font-size: 0.84rem; }
 .ob-sample--monthly .monthly-grid { gap: 4px; }
 .ob-sample--monthly-compact .monthly-cell { aspect-ratio: 1; }
-.ob-sample--habits { padding: 0; border: none; box-shadow: none; margin: 0; }
+.ob-sample--habits { padding: 0; border: none; box-shadow: none; margin: 0; background: none; }
+.ob-sample--habits .habit-week { font-size: 0.86rem; }
 .ob-sample--curve .day-summary { padding: 0; border: none; box-shadow: none; margin: 0; }
 
 /* 페이지 팁 말풍선 안의 예시 미리보기 */
