@@ -50,6 +50,30 @@ if (analyticsEnabled) {
   try {
     mixpanel.register({ env: window.location.hostname === 'timememo-hazel.vercel.app' ? 'production' : 'preview' });
   } catch { /* 무시 */ }
+
+  // 신규/재방문을 모든 이벤트에 달아 보낸다 (8/28). 퍼널에서 App Opened[visit_type=new]로 걸면
+  // "처음 온 사람이 기록까지 갔는지"가 한 번에 나온다. 기기 localStorage 기준이라 로그인 여부와 무관.
+  // 이미 쓰던 기기(온보딩 완료·마지막 방문 키가 있음)는 첫 실행에도 returning으로 본다.
+  try {
+    const FIRST = 'timememo-first-seen';
+    const COUNT = 'timememo-visit-count';
+    const today = new Date().toISOString().slice(0, 10);
+    let first = localStorage.getItem(FIRST);
+    const knownDevice = localStorage.getItem('timememo-onboarding-done') === '1' || !!localStorage.getItem('timememo-last-visit');
+    let visitType;
+    if (!first) {
+      // 키가 없어도 예전부터 쓰던 기기면 재방문 — 날짜는 모르므로 'unknown'
+      first = knownDevice ? 'unknown' : today;
+      localStorage.setItem(FIRST, first);
+      visitType = knownDevice ? 'returning' : 'new';
+    } else {
+      visitType = first === today ? 'new' : 'returning';
+    }
+    const count = (Number(localStorage.getItem(COUNT)) || 0) + 1;
+    localStorage.setItem(COUNT, String(count));
+    const daysSince = first === 'unknown' ? null : Math.round((Date.now() - new Date(first).getTime()) / 86400000);
+    mixpanel.register({ visit_type: visitType, first_seen: first, visit_count: count, days_since_first_visit: daysSince });
+  } catch { /* 무시 */ }
 }
 
 // 절대 보내지 않는 것: 메모 내용, 할 일 내용, 키워드 이름, 이메일.
