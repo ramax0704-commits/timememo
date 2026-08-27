@@ -3,6 +3,7 @@
 // 이미지 파일 대신 실제 화면 클래스를 그대로 써서 렌더한다 — 에셋이 필요 없고,
 // 디자인이 바뀌면 예시도 같이 바뀐다. 전부 정적(눌러도 아무 일 없음).
 import { rabbitById } from './rabbits';
+import { Palette, Send, Check, Pencil } from 'lucide-react';
 import { TalkCurveBlock } from './ReviewScreen';
 
 const SAMPLE_MEMOS = [
@@ -17,9 +18,9 @@ export function SampleInput() {
     <div className="ob-input" aria-hidden="true">
       <div className="ob-input-row">
         <div className="ob-input-box"><span className="ob-input-time">9시 30분</span> 카페가서 독서함</div>
-        <span className="ob-input-send">➤</span>
+        <span className="ob-input-send"><Send size={18} /></span>
       </div>
-      <div className="ob-input-chips"><span>🎨</span><span>↑ 이전 기록부터</span><span>↓ 다음 기록까지</span></div>
+      <div className="ob-input-chips"><span className="ob-input-chip-icon"><Palette size={15} strokeWidth={2.2} /></span><span>↑ 이전 기록부터</span><span>↓ 다음 기록까지</span></div>
     </div>
   );
 }
@@ -205,27 +206,36 @@ export function SampleCurve() {
   );
 }
 
-// 이번 주 습관 — 체크 두 줄
+// 이번 주 습관 — 실제 블록 그대로 (제목·편집·7일·체크)
 export function SampleHabits() {
   const rows = [
-    { name: '운동', color: 'green', on: [1, 1, 0, 1, 0] },
-    { name: '독서', color: 'purple', on: [0, 1, 1, 0, 1] },
+    { name: '운동', color: 'green', on: [1, 1, 0, 1, 0, 0, 0] },
+    { name: '독서', color: 'purple', on: [0, 1, 1, 0, 1, 0, 0] },
   ];
+  const days = ['월', '화', '수', '목', '금', '토', '일'];
   return (
-    <div className="ob-sample ob-sample--habits day-summary" aria-hidden="true">
+    <section className="day-summary ob-sample ob-sample--habits" aria-hidden="true">
+      <header className="day-summary-head">
+        <span className="day-summary-title">이번 주 습관</span>
+        <span className="habit-edit-btn"><Pencil size={13} /> 편집</span>
+      </header>
       <div className="habit-week">
         <div className="habit-week-row habit-week-row--head">
           <span className="habit-week-name" />
-          {['월', '화', '수', '목', '금'].map(d => <span key={d} className="habit-week-day">{d}</span>)}
+          {days.map(d => <span key={d} className="habit-week-day">{d}</span>)}
         </div>
         {rows.map(r => (
           <div key={r.name} className="habit-week-row">
             <span className="habit-week-name"><span className="habit-week-dot" style={{ backgroundColor: `var(--habit-${r.color})` }} />{r.name}</span>
-            {r.on.map((v, i) => <span key={i} className={`habit-week-cell${v ? ' habit-week-cell--on' : ''}`}>{v ? '✓' : ''}</span>)}
+            {r.on.map((v, i) => (
+              i >= 5
+                ? <span key={i} className="habit-week-cell" />
+                : <span key={i} className={`habit-week-cell${v ? ' habit-week-cell--on' : ''}`}><Check size={14} strokeWidth={3} /></span>
+            ))}
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -240,6 +250,51 @@ export function SampleDragDemo() {
           회의
         </div>
         <div className="ob-demo-finger" />
+      </div>
+    </div>
+  );
+}
+
+// 시연 2: 기록을 탭하면 입력창에 내용이 올라온다
+export function SampleTapEditDemo() {
+  return (
+    <div className="ob-demo ob-demo--tap" aria-hidden="true">
+      <div className="ob-demo-grid ob-demo-grid--short">
+        {['10:00', '11:00', '12:00'].map(t => <div key={t} className="ob-demo-line"><span>{t}</span></div>)}
+        <div className="ob-demo-block ob-demo-block--static">
+          <div className="ob-demo-block-time">10:30 → 12:00</div>
+          회의
+        </div>
+        <div className="ob-demo-finger ob-demo-finger--tap" />
+      </div>
+      <div className="ob-input ob-demo-input">
+        <div className="ob-input-row">
+          <div className="ob-input-box"><span className="ob-input-time">오전 10:30~오후 12:00</span> 회의<span className="ob-demo-caret" /></div>
+          <span className="ob-input-send"><Send size={18} /></span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 시연 3: 앞의 시각을 누르면 시간 조정 시트가 올라온다
+export function SampleTimeChipDemo() {
+  return (
+    <div className="ob-demo ob-demo--chip" aria-hidden="true">
+      <div className="ob-input ob-input--flat">
+        <div className="ob-input-row">
+          <div className="ob-input-box"><span className="ob-input-time ob-input-time--target">오전 10:30~오후 12:00</span> 회의</div>
+          <span className="ob-input-send"><Send size={18} /></span>
+        </div>
+        <div className="ob-demo-finger ob-demo-finger--chip" />
+      </div>
+      <div className="ob-demo-sheet">
+        <div className="ob-demo-sheet-handle" />
+        <div className="ob-demo-sheet-title">시간</div>
+        <div className="ob-demo-sheet-grid">
+          {['10:00', '11:00', '12:00', '13:00'].map(t => <div key={t} className="ob-demo-line"><span>{t}</span></div>)}
+          <div className="ob-demo-band"><i className="ob-demo-knob ob-demo-knob--s" />오전 10:30 - 오후 12:00<i className="ob-demo-knob ob-demo-knob--e" /></div>
+        </div>
       </div>
     </div>
   );

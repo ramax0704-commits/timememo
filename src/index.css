@@ -3508,7 +3508,7 @@ body.keyboard-open .input-toolbar { display: flex; }
 .ob-sample--review .reflection-narrative { font-size: 0.84rem; }
 .ob-sample--monthly .monthly-grid { gap: 4px; }
 .ob-sample--monthly-compact .monthly-cell { aspect-ratio: 1; }
-.ob-sample--habits { padding: 0; border: none; box-shadow: none; margin: 0; background: none; }
+.ob-sample--habits { margin: 0; }
 .ob-sample--habits .habit-week { font-size: 0.86rem; }
 .ob-sample--curve .day-summary { padding: 0; border: none; box-shadow: none; margin: 0; }
 
@@ -3550,9 +3550,10 @@ body.keyboard-open .input-toolbar { display: flex; }
 .ob-input-row { display: flex; align-items: center; gap: 10px; }
 .ob-input-box { flex: 1; border: 2px solid var(--primary-color); border-radius: 22px; padding: 12px 14px; font-size: 1rem; line-height: 1.4; }
 .ob-input-time { background-color: #e6ebff; color: var(--primary-color); border-radius: 4px; padding: 0 3px; }
-.ob-input-send { width: 44px; height: 44px; border-radius: 50%; background-color: var(--primary-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+.ob-input-send { width: 44px; height: 44px; border-radius: 50%; background-color: var(--primary-color); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .ob-input-chips { display: flex; gap: 6px; margin-top: 8px; }
-.ob-input-chips span { font-size: 0.78rem; color: var(--text-muted); border: 1px solid #e3e5ee; border-radius: 999px; padding: 6px 10px; }
+.ob-input-chips span { font-size: 0.78rem; color: var(--text-muted); border: 1px solid #e3e5ee; border-radius: 999px; padding: 6px 10px; display: inline-flex; align-items: center; }
+.ob-input-chip-icon { width: 34px; justify-content: center; padding: 6px 0 !important; color: var(--primary-color) !important; }
 .tour-bubble--plain .tour-preview:has(.ob-input) { background: none; box-shadow: none; padding: 0; max-height: none; overflow: visible; }
 
 /* 시간표 꾹·끌기 시연 */
@@ -3595,3 +3596,28 @@ body.keyboard-open .input-toolbar { display: flex; }
 .ob-rabbit-card-desc { font-size: 0.85rem; color: #3a3d4a; margin: 4px 0 8px; }
 .ob-rabbit-card-reason { font-size: 0.8rem; color: #4b4f60; border-left: 3px solid #c7d3ff; padding-left: 8px; }
 .ob-card-art--tall { max-height: 60vh; }
+
+/* 시연 2·3 */
+.ob-demo-grid--short { height: 130px; }
+.ob-demo-grid--short .ob-demo-line:nth-child(1) { top: 10px; } .ob-demo-grid--short .ob-demo-line:nth-child(2) { top: 60px; } .ob-demo-grid--short .ob-demo-line:nth-child(3) { top: 110px; }
+.ob-demo-block--static { animation: ob-demo-block-tap 3s ease-in-out infinite; }
+.ob-demo-finger--tap { animation: ob-demo-finger-tap 3s ease-in-out infinite; }
+@keyframes ob-demo-block-tap { 0%, 25% { background-color: #eaf0ff; } 32%, 40% { background-color: #d6e0ff; } 48%, 100% { background-color: #eaf0ff; } }
+@keyframes ob-demo-finger-tap { 0%, 15% { opacity: 0; transform: scale(0.6); } 25% { opacity: 1; transform: scale(1); } 32% { transform: scale(0.75); } 40% { transform: scale(1); opacity: 1; } 55%, 100% { opacity: 0; } }
+.ob-demo-input { margin-top: 10px; box-shadow: none; border: 1px solid #e6eaf7; animation: ob-demo-input-in 3s ease-in-out infinite; }
+@keyframes ob-demo-input-in { 0%, 40% { opacity: 0; transform: translateY(8px); } 55%, 90% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; } }
+.ob-demo-caret { display: inline-block; width: 2px; height: 1em; background-color: var(--primary-color); margin-left: 2px; vertical-align: -2px; animation: ob-caret 1s steps(2) infinite; }
+@keyframes ob-caret { to { opacity: 0; } }
+.ob-input--flat { position: relative; box-shadow: none; padding: 0; }
+.ob-input-time--target { animation: ob-demo-chip 3s ease-in-out infinite; }
+@keyframes ob-demo-chip { 0%, 25% { background-color: #e6ebff; } 32%, 40% { background-color: #c7d3ff; } 48%, 100% { background-color: #e6ebff; } }
+.ob-demo-finger--chip { top: 14px; left: 96px; animation: ob-demo-finger-tap 3s ease-in-out infinite; }
+.ob-demo-sheet { margin-top: 12px; border-radius: 16px 16px 0 0; background-color: #fff; border: 1px solid #e6eaf7; padding: 8px 12px 12px; animation: ob-demo-sheet-in 3s ease-in-out infinite; }
+@keyframes ob-demo-sheet-in { 0%, 42% { opacity: 0; transform: translateY(24px); } 58%, 92% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; } }
+.ob-demo-sheet-handle { width: 36px; height: 4px; border-radius: 2px; background-color: #dfe2ec; margin: 0 auto 6px; }
+.ob-demo-sheet-title { text-align: center; font-weight: 700; font-size: 0.9rem; margin-bottom: 6px; }
+.ob-demo-sheet-grid { position: relative; height: 150px; }
+.ob-demo-sheet-grid .ob-demo-line:nth-child(1) { top: 8px; } .ob-demo-sheet-grid .ob-demo-line:nth-child(2) { top: 48px; } .ob-demo-sheet-grid .ob-demo-line:nth-child(3) { top: 88px; } .ob-demo-sheet-grid .ob-demo-line:nth-child(4) { top: 128px; }
+.ob-demo-band { position: absolute; left: 44px; right: 8px; top: 28px; height: 60px; border-radius: 10px; background-color: #aebcff; color: #fff; font-weight: 700; font-size: 0.86rem; padding: 8px 12px; }
+.ob-demo-knob { position: absolute; width: 16px; height: 16px; border-radius: 50%; background-color: var(--primary-color); border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+.ob-demo-knob--s { left: -6px; top: -6px; } .ob-demo-knob--e { right: -6px; bottom: -6px; }

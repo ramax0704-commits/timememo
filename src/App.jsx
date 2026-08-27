@@ -28,7 +28,7 @@ import { requestDaySummary, summaryCacheKey, peekSummaryCache, collectCachedRabb
 import ReviewScreen from './ReviewScreen';
 import TourOverlay from './TourOverlay';
 import OnboardingCards from './OnboardingCards';
-import { SampleInput, SampleDragDemo, REVIEW_CARDS, WEEK_CARDS, MONTHLY_CARDS } from './OnboardingSamples';
+import { SampleInput, SampleDragDemo, SampleTapEditDemo, SampleTimeChipDemo, REVIEW_CARDS, WEEK_CARDS, MONTHLY_CARDS } from './OnboardingSamples';
 import Splash from './Splash';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
@@ -3876,12 +3876,11 @@ function App() {
       { key: 'time', target: '.input-area', place: 'above', advance: 'send', plain: true, caption: '했던 일을 시간과 함께 입력해 보세요.', preview: <SampleInput /> },
       { key: 'tab', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', advance: 'tap-target', plain: true, caption: '타임라인 탭을 한 번 더 누르면 시간표로 바뀌어요.' },
     ],
-    // 시간표: 꾹·끌기는 애니메이션으로 보여주고(직접 해보다 시트가 떠서 당황했다), 탭·내용·시각은 직접
+    // 시간표: 전부 애니메이션 시연 (직접 해보게 하면 딤 밖으로 움직이거나 시트가 떠서 오류처럼 보였다)
     schedule: [
-      { key: 'demo', target: null, place: 'bottom', plain: true, caption: '기록을 꾹 누른 채 위아래로 움직이면 시간이 옮겨져요.', preview: <SampleDragDemo /> },
-      { key: 'tap', target: guideRange ? `.schedule-block[data-at="${guideRange.recordedAt}"]` : '.schedule-block', place: 'below', advance: 'tap-target', plain: true, caption: '이 기록을 한 번 눌러보세요.' },
-      { key: 'edit', target: '.input-area', place: 'above', plain: true, caption: '여기서 내용을 고칠 수 있어요.' },
-      { key: 'time', target: '.input-time-hit', place: 'above', advance: 'tap-target', plain: true, caption: '앞의 시각을 누르면 시간을 고칠 수 있어요. 눌러보세요.' },
+      { key: 'demo-drag', target: null, place: 'bottom', plain: true, caption: '기록을 꾹 누른 채 위아래로 움직이면 시간이 옮겨져요.', preview: <SampleDragDemo /> },
+      { key: 'demo-tap', target: null, place: 'bottom', plain: true, caption: '기록을 한 번 누르면 내용을 고칠 수 있어요.', preview: <SampleTapEditDemo /> },
+      { key: 'demo-time', target: null, place: 'bottom', plain: true, caption: '앞의 시각을 누르면 시간을 고칠 수 있어요.', preview: <SampleTimeChipDemo /> },
     ],
   };
   // 강조할 대상이 화면에 없으면(기록 0인 회고 탭 등) 대상 없이 아래쪽 말풍선으로 띄운다
