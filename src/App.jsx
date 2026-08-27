@@ -3128,6 +3128,17 @@ function App() {
     setTimeout(reveal, 900); // iOS는 키보드 애니메이션이 끝난 뒤에야 viewport가 줄어든다
   };
   const cancelInlineEdit = () => { setEditingMemoId(null); setInputText(''); if (inputRef.current) inputRef.current.style.height = 'auto'; };
+  // 수정 중에 입력 영역 밖(목록·헤더·탭바)을 누르면 취소로 친다 (8/27). 시트·모달·안내 위는 예외.
+  useEffect(() => {
+    if (!editingMemoId) return;
+    const onDown = (e) => {
+      if (e.target.closest?.('.input-area, .block-sheet-overlay, .modal-overlay, .tour, .undo-toast, .toast, [role="dialog"]')) return;
+      cancelInlineEdit();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingMemoId]);
   // 내용을 프로그램적으로 넣은 뒤 입력창 높이를 내용에 맞춘다 (onChange가 안 타므로 직접)
   const fitInputHeight = () => {
     const el = inputRef.current;
