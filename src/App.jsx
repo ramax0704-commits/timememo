@@ -316,13 +316,11 @@ function todoDayLabel(date) {
 
 // ── 메모 아이템 컴포넌트 ──────────────────────────────────────
 // 제스처가 셋이라 한 곳에서 조율한다:
-//   짧게 탭 → 수정 시트, 좌우로 밀기 → 삭제 버튼, 꾹 누르기(0.45초) → 순서 옮기기.
+//   말풍선 탭 → 인라인 수정, 시각 탭 → 시간 조정 시트, 좌우로 밀기 → 삭제 버튼. (꾹 눌러 옮기기는 8/27에 뺐다 — 헷갈린다)
 // 예전에는 touch 이벤트를 썼는데, 포인터 이벤트로 바꿔서 PC 마우스도 같이 통한다.
-function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, duration, startAt, reorder }) {
+function MemoItem({ memo, onEdit, onEditTime, onDeleteWithUndo, habitKeywords, dimmed, duration, startAt }) {
   const [swiped, setSwiped] = useState(false);
-  // 드래그 중 위치는 App이 자동 스크롤과 함께 DOM에 직접 그린다 (여기선 상태만)
-  const [dragging, setDragging] = useState(false);
-  // { x, y, id, mode: 'pending' | 'swipe' | 'scroll' | 'drag', timer }
+  // { x, y, id, mode: 'pending' | 'swipe' | 'scroll' }
   const gestureRef = useRef(null);
   // 스와이프·드래그 뒤에 따라오는 click이 수정 시트를 열지 않게 막는다
   const suppressClickRef = useRef(false);
@@ -340,36 +338,14 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
     ? (HABIT_BORDER[habitMatch.color] || '#e8e8f0')
     : (COLOR_BORDER[memo.color || 'default'] || '#e8e8f0');
 
-  const clearGesture = () => {
-    if (gestureRef.current?.timer) clearTimeout(gestureRef.current.timer);
-    gestureRef.current = null;
-  };
-
-  const endDrag = (commit) => {
-    setDragging(false);
-    reorder?.onEnd(commit);
-  };
+  const clearGesture = () => { gestureRef.current = null; };
 
   const onPointerDown = (e) => {
     // 지난 제스처가 남긴 클릭 억제를 여기서 푼다 (다음 탭까지 막으면 안 된다)
     suppressClickRef.current = false;
     if (!e.isPrimary) return;
     if (e.target.closest('button, a, input, textarea')) return;
-    clearGesture();
-    const g = { x: e.clientX, y: e.clientY, id: e.pointerId, el: e.currentTarget, mode: 'pending', timer: null };
-    g.timer = setTimeout(() => {
-      if (gestureRef.current !== g || g.mode !== 'pending') return;
-      g.mode = 'drag';
-      suppressClickRef.current = true;
-      setSwiped(false);
-      setDragging(true);
-      // 마우스는 커서가 요소 밖으로 나가면 이벤트가 끊긴다 — 캡처로 붙잡아둔다
-      // (터치는 원래 처음 누른 요소가 끝까지 받는다)
-      try { g.el.setPointerCapture(g.id); } catch { /* 이미 떼었으면 무시 */ }
-      navigator.vibrate?.(15);
-      reorder?.onStart(memo, g.y);
-    }, 450);
-    gestureRef.current = g;
+    gestureRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId, mode: 'pending' };
   };
 
   const onPointerMove = (e) => {
@@ -378,12 +354,7 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
     if (e.pointerType === 'mouse' && !(e.buttons & 1)) return; // 마우스는 누른 채 끌 때만
     const dx = e.clientX - g.x;
     const dy = e.clientY - g.y;
-    if (g.mode === 'drag') {
-      reorder?.onMove(e.clientY);
-      return;
-    }
     if (g.mode === 'pending' && Math.hypot(dx, dy) > 8) {
-      clearTimeout(g.timer);
       // 가로로 확실히 밀면 스와이프, 아니면 세로 스크롤에 맡긴다
       g.mode = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'swipe' : 'scroll';
     }
@@ -392,9 +363,7 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
   const onPointerUp = (e) => {
     const g = gestureRef.current;
     if (!g || e.pointerId !== g.id) return;
-    if (g.mode === 'drag') {
-      endDrag(true);
-    } else if (g.mode === 'swipe') {
+    if (g.mode === 'swipe') {
       const dx = e.clientX - g.x;
       if (dx < -40) { setSwiped(true); suppressClickRef.current = true; }
       else if (dx > 40) { setSwiped(false); suppressClickRef.current = true; }
@@ -402,18 +371,14 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
     clearGesture();
   };
 
-  const onPointerCancel = () => {
-    if (gestureRef.current?.mode === 'drag') endDrag(false);
-    clearGesture();
-  };
+  const onPointerCancel = () => { clearGesture(); };
 
   return (
     <div
-      className={`memo-swipe-wrapper ${swiped ? 'swiped' : ''}${dragging ? ' dragging' : ''}`}
+      className={`memo-swipe-wrapper ${swiped ? 'swiped' : ''}`}
       style={dimmed ? { opacity: 0.45 } : undefined}
       // 채팅창 ↔ 타임블럭을 오갈 때 '보고 있던 시각'을 이 값으로 읽는다
       data-at={memo.recordedAt}
-      // 순서 옮기기가 떨어뜨릴 자리를 찾을 때 쓴다
       data-id={memo.id}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -442,12 +407,11 @@ function MemoItem({ memo, onEdit, onDeleteWithUndo, habitKeywords, dimmed, durat
 
       {/* 메모 본체 */}
       <div className="memo-item">
-        {/* 시각이든 말풍선이든 같은 편집 시트를 연다.
-            어디를 눌렀냐에 따라 할 수 있는 일이 달라지면 왔다갔다 하게 된다 */}
+        {/* 시각을 누르면 시간 조정 시트(타임블럭과 같은 것), 말풍선을 누르면 글 수정 */}
         <div
           className="memo-time-container"
-          onClick={() => onEdit(memo)}
-          title="기록 수정하기"
+          onClick={() => (onEditTime || onEdit)(memo)}
+          title="시간 고치기"
         >
           {/* 구간 기록은 타임블럭이 그리는 시작 시각(startAt)을 그대로 보여준다 — 두 화면의 시각이 어긋나지 않게.
               순간 기록은 적은 시각. */}
@@ -607,41 +571,6 @@ const RS_PPM = 0.8;             // 분당 픽셀(고정)
 const RS_DAY = 1440;
 const RS_VIEW_H = 420;          // 스크롤 영역 높이
 const RS_EDGE = 48;             // 가장자리 자동 스크롤 감지 폭
-// ── 채팅창 드래그 중 시간 그리드 ─────────────────────────────
-// 컨테이너 위에 고정으로 겹친다. 시간 눈금, 그날 다른 기록의 자리(회색), 손가락 아래 시각(파란 선+배지).
-// 끌고 있는 말풍선은 z-index가 더 높아 이 위에 떠 있다.
-function ChatTimeGrid({ grid, dayStartMs, others }) {
-  const { top, left, width, height, winStart, pxPerMin, snapMin } = grid;
-  const yOf = (min) => (min - winStart) * pxPerMin;
-  const hours = [];
-  for (let h = Math.floor(winStart / 60); h * 60 <= winStart + height / pxPerMin; h++) hours.push(h);
-  const labelOf = (min) => timeLabelOf(dayStartMs + min * 60000);
-  return (
-    <div className="chat-time-grid" style={{ top, left, width, height }} aria-hidden="true">
-      {hours.map(h => (
-        <div key={h} className="chat-time-grid-hour" style={{ top: yOf(h * 60) }}>
-          <span>{labelOf(h * 60)}</span>
-        </div>
-      ))}
-      {hours.map(h => <div key={`h${h}`} className="chat-time-grid-half" style={{ top: yOf(h * 60 + 30) }} />)}
-      {others.map(m => {
-        const min = (new Date(m.recordedAt).getTime() - dayStartMs) / 60000;
-        const y = yOf(min);
-        if (y < -10 || y > height + 10) return null;
-        return (
-          <div key={m.id} className="chat-time-grid-ghost" style={{ top: y }}>
-            <span className="chat-time-grid-ghost-time">{labelOf(min)}</span>
-            <span className="chat-time-grid-ghost-text">{m.content}</span>
-          </div>
-        );
-      })}
-      <div className="chat-time-grid-now" style={{ top: yOf(snapMin) }}>
-        <span>{labelOf(snapMin)}</span>
-      </div>
-    </div>
-  );
-}
-
 function TimeRangeSheet({ init, others = [], onDone, onCancel }) {
   const isRange = init.isRange;
   const [start, setStart] = useState(init.start);
@@ -1321,9 +1250,6 @@ function App() {
   const [reviewMode, setReviewMode] = useState('today');
   const appContainerRef = useRef(null);
   // 꾹 눌러 순서 옮기기 (채팅창)
-  const [draggingMemoId, setDraggingMemoId] = useState(null);
-  const [chatTimeGrid, setChatTimeGrid] = useState(null); // 드래그 중 시간 그리드 오버레이
-  const reorderRef = useRef(null);
   // 옮긴 직후 뜨는 시각 확정 시트 — 휠로 시각을 다듬고 확정해야 옮기기가 끝난다.
   // (자동으로 잡힌 시각을 그냥 믿게 두면 몇 시가 됐는지 모른 채 지나간다)
   const [moveConfirm, setMoveConfirm] = useState(null);
@@ -1382,16 +1308,6 @@ function App() {
   const scrollPositionRef = useRef(null);
   const justAddedRef = useRef(null); // 방금 등록한 기록의 recorded_at — 그 자리로 화면을 옮긴다
 
-
-  // ── 순서 옮기는 동안 화면 스크롤을 멈춘다 ────────────────────
-  // touch-action은 제스처 시작 시점에 정해져 도중에 못 바꾸므로,
-  // 드래그 중에만 touchmove 기본 동작을 직접 막는다.
-  useEffect(() => {
-    if (!draggingMemoId) return;
-    const prevent = (e) => e.preventDefault();
-    window.addEventListener('touchmove', prevent, { passive: false });
-    return () => window.removeEventListener('touchmove', prevent);
-  }, [draggingMemoId]);
 
   // ── 현재 시간 (스케줄 뷰 빨간 줄 등) 1분마다 갱신 ─────────────
   const [nowTime, setNowTime] = useState(new Date());
@@ -2060,10 +1976,7 @@ function App() {
     track('Weekly Report Viewed', { guest: isGuest, active_days: weekFacts.activeDays, total: weekFacts.total });
   }, [isGuest, weekFacts.activeDays, weekFacts.total]);
 
-  // ── 채팅창 시각 옮기기 (꾹 눌러 드래그) ──────────────────────
-  // 순서를 바꾸려는 게 아니라 시각을 바꾸려는 동작이다 (사용자 확인, 8/27).
-  // 꾹 누르면 시간 그리드가 겹쳐 펼쳐지고, 손가락 아래 시각(5분 단위)으로 옮긴다.
-  // 손가락이 가장자리에 닿으면 그리드 창이 앞뒤로 흐르고, 기록은 화면 안에 붙잡아둔다.
+  // ── 옮기기 공통 (타임블럭 꾹 눌러 끌기 → 확인 시트) ─────────────
   const REORDER_EDGE = 70;      // 이 안쪽에 손가락이 오면 자동 스크롤
   const REORDER_PIN = 40;       // 기록이 화면 끝에서 이만큼 안쪽에 고정
 
@@ -2084,132 +1997,6 @@ function App() {
       spansToNext: !!memo.spansToNext,
     },
   });
-
-  // 드래그 중 겹쳐 보이는 시간 그리드. 손가락 아래가 몇 시인지 보면서 옮긴다.
-  // 그리드는 6시간이 컨테이너 높이를 채우고, 가장자리로 밀면 창이 앞뒤로 흐른다 (목록 스크롤 대신).
-  // 시각은 선택한 날짜 자정 기준 분(0~1560, 다음날 새벽 2시까지)으로 다룬다.
-  const GRID_HOURS = 6;
-  const GRID_MAX_MIN = 26 * 60;
-  const applyChatDrag = () => {
-    const st = reorderRef.current;
-    const cont = timelineRef.current;
-    if (!st || !cont || !st.el) return;
-    const r = cont.getBoundingClientRect();
-    const pinnedY = Math.max(r.top + REORDER_PIN, Math.min(r.bottom - REORDER_PIN, st.lastY));
-    st.el.style.transform = `translateY(${pinnedY - st.startY}px)`;
-    const raw = st.winStart + (pinnedY - r.top) / st.pxPerMin;
-    const snap = Math.max(0, Math.min(GRID_MAX_MIN - 5, Math.round(raw / 5) * 5));
-    st.snapMin = snap;
-    // 말풍선 왼쪽 시각도 손가락 아래 시각으로 같이 돈다 (리렌더 없이 DOM에 직접)
-    if (st.timeEl) st.timeEl.textContent = timeLabelOf(selectedDayStartMs + snap * 60000);
-    setChatTimeGrid(prev => (prev && prev.snapMin === snap && prev.winStart === st.winStart ? prev
-      : { top: r.top, left: r.left, width: r.width, height: r.height, winStart: st.winStart, pxPerMin: st.pxPerMin, snapMin: snap, memoId: st.memo.id }));
-  };
-
-  const beginMemoReorder = (memo, startY) => {
-    // 이전 이동의 되돌리기 토스트는 정리한다 (되돌릴 대상이 섞이면 안 된다)
-    setMoveUndoToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return null; });
-    const cont = timelineRef.current;
-    const el = cont?.querySelector(`.memo-swipe-wrapper[data-id="${memo.id}"]`) || null;
-    const r = cont?.getBoundingClientRect();
-    const pxPerMin = r ? r.height / (GRID_HOURS * 60) : 1;
-    // 말풍선에 찍힌 시각(= 블록 시작)을 잡고 옮긴다. '이전 기록부터' 같은 구간은 recordedAt이 끝 시각이라
-    // recordedAt을 그대로 잡으면 배지가 말풍선 시각과 다르게 보인다.
-    const blockStartMs = isRangeMemo(memo) ? blockRangeOf(memo).start.getTime() : new Date(memo.recordedAt).getTime();
-    const memoMin = Math.round((blockStartMs - selectedDayStartMs) / 60000);
-    const ownOffsetMin = Math.round((new Date(memo.recordedAt).getTime() - blockStartMs) / 60000);
-    // 기록의 현재 시각이 손가락 위치에 오도록 창을 잡는다 — 잡는 순간 시각이 튀지 않게
-    const winStart = r ? memoMin - (startY - r.top) / pxPerMin : 0;
-    const timeEl = el?.querySelector('.memo-time') || null;
-    const st = { memo, el, timeEl, timeText: timeEl?.textContent ?? '', startY, lastY: startY, winStart, pxPerMin, snapMin: memoMin, ownOffsetMin, raf: 0 };
-    if (tip?.page === 'memo') endTips('done'); // 팁이 시킨 대로 꾹 눌렀다 — 안내는 여기까지
-    reorderRef.current = st;
-    setDraggingMemoId(memo.id);
-    applyChatDrag();
-    // 가장자리 자동 흐름 — 손가락이 안 움직여도 창이 계속 밀려야 하므로 프레임마다 돈다
-    const step = () => {
-      if (reorderRef.current !== st) return;
-      const c = timelineRef.current;
-      if (c) {
-        const rr = c.getBoundingClientRect();
-        const perFrame = 6 / st.pxPerMin; // 프레임당 최대 6px어치
-        if (st.lastY < rr.top + REORDER_EDGE) {
-          st.winStart = Math.max(-60, st.winStart - Math.min(perFrame, (rr.top + REORDER_EDGE - st.lastY) / 3 / st.pxPerMin));
-        } else if (st.lastY > rr.bottom - REORDER_EDGE) {
-          st.winStart = Math.min(GRID_MAX_MIN - GRID_HOURS * 60 + 60, st.winStart + Math.min(perFrame, (st.lastY - (rr.bottom - REORDER_EDGE)) / 3 / st.pxPerMin));
-        }
-        applyChatDrag();
-      }
-      st.raf = requestAnimationFrame(step);
-    };
-    st.raf = requestAnimationFrame(step);
-  };
-
-  const moveMemoReorder = (clientY) => {
-    const st = reorderRef.current;
-    if (!st) return;
-    st.lastY = clientY;
-    applyChatDrag();
-  };
-
-  const endMemoReorder = async (commit) => {
-    const st = reorderRef.current;
-    reorderRef.current = null;
-    setDraggingMemoId(null);
-    setChatTimeGrid(null);
-    if (st) {
-      cancelAnimationFrame(st.raf);
-      if (st.el) st.el.style.transform = '';
-      // 제자리에 놓았거나 취소하면 리렌더가 없으므로 시각 글자를 원래대로 되돌린다 (옮기면 리렌더가 덮어쓴다)
-      if (st.timeEl) st.timeEl.textContent = st.timeText;
-    }
-    if (!commit || !st || st.snapMin == null) return;
-    const own = new Date(st.memo.recordedAt).getTime();
-    const newMs = selectedDayStartMs + (st.snapMin + st.ownOffsetMin) * 60000;
-    // 제자리(같은 5분 칸)면 아무것도 하지 않는다
-    if (Math.abs(newMs - own) < 5 * 60000) return;
-
-    const iso = new Date(newMs).toISOString();
-    const ok = await writeMemoFields(st.memo.id, { recorded_at: iso }, { recordedAt: iso });
-    if (!ok) return;
-    track('Memo Reordered', { guest: isGuest });
-    // 옮기기는 아직 안 끝났다 — 시각을 확인/수정해야 완료다.
-    // 구간 기록은 시작·종료를 각각 고칠 수 있게 둘 다 담아둔다.
-    const isRange = isRangeMemo(st.memo);
-    const before = blockRangeOf(st.memo);
-    let after = blockRangeOf(st.memo, { recordedAt: iso });
-    // '이전 기록부터'·'다음 기록까지' 자동 잇기 구간은 recordedAt만 옮기면 시작(또는 끝)이 여전히 이웃 기록에
-    // 붙어 있어서, 손가락으로 놓은 자리와 다른 시각이 확인 시트에 뜬다 (8/27 "설정하지 않은 시간으로 바뀜").
-    // 놓은 자리를 시작으로, 옮기기 전 길이를 그대로 써서 명시적인 구간으로 만든다.
-    const autoLinked = (st.memo.spansFromPrev && !st.memo.backMinutes) || (st.memo.spansToNext && !st.memo.endMinutes);
-    if (isRange && autoLinked) {
-      const startMs = selectedDayStartMs + st.snapMin * 60000;
-      const durMs = Math.max(MIN_BLOCK_MINUTES * 60000, before.end.getTime() - before.start.getTime());
-      after = { start: new Date(startMs), end: new Date(startMs + durMs) };
-    }
-    // 그 밖에도 옮긴 자리에서 이웃에 걸려 길이가 0이 되면 단일 기록이 돼버리므로 옮기기 전 길이를 가져간다.
-    if (isRange && after.end.getTime() <= after.start.getTime()) {
-      const durMs = Math.max(MIN_BLOCK_MINUTES * 60000, before.end.getTime() - before.start.getTime());
-      after = { start: after.start, end: new Date(after.start.getTime() + durMs) };
-    }
-    const startStr = hhmm(isRange ? after.start : new Date(iso));
-    const endStr = hhmm(after.end);
-    setMoveConfirm({
-      memoId: st.memo.id,
-      prev: snapshotMoveFields(st.memo),
-      appliedIso: iso,
-      isRange,
-      baseIso: isRange ? after.start.toISOString() : iso, // 날짜의 기준
-      draftStart: startStr,
-      draftEnd: endStr,
-      initStart: startStr,
-      initEnd: endStr,
-      wheel: 'start',
-      prevLabel: isRange
-        ? `${timeLabelOf(before.start)} → ${timeLabelOf(before.end)}`
-        : timeLabelOf(st.memo.recordedAt),
-    });
-  };
 
   // 확정: 휠에서 고친 시각으로 옮기기를 마친다.
   // 시작·종료를 손대지 않았으면 드롭 시각 그대로 두고 아무것도 더 쓰지 않는다.
@@ -2292,7 +2079,6 @@ function App() {
     await writeMemoFields(t.memoId, t.prev.db, t.prev.local);
   };
 
-  const memoReorder = { onStart: beginMemoReorder, onMove: moveMemoReorder, onEnd: endMemoReorder };
 
   // ── 타임블럭 블록 꾹 눌러 이동 ──────────────────────────────
   // 채팅과 달리 시간선이 있으므로, 놓은 위치의 시각(5분 단위)이 그대로 새 시각이 된다.
@@ -4045,7 +3831,7 @@ function App() {
       { key: 'tab', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', advance: 'tap-target', pointer: 'tap', caption: '타임라인 탭을 한 번 더 누르면 시간표로 바뀌어요.' },
     ],
     memo: [
-      { key: 'hold', target: '.memo-swipe-wrapper', place: 'below', advance: 'hold', caption: '기록을 꾹 눌러 시간을 옮겨보세요.' },
+      { key: 'time-tap', target: '.memo-time-container', place: 'below', advance: 'tap-target', pointer: 'tap', caption: '시각을 누르면 시간을 고칠 수 있어요.' },
     ],
     today: [
       { key: 'curve', target: '.review-screen .shape', place: 'below', caption: '기록이 길었던 시간이 이 곡선에 나타나요.', preview: <SampleCurve /> },
@@ -5254,7 +5040,7 @@ function App() {
                         dimmed={!isSameDay(new Date(memo.recordedAt), selectedDate)}
                         duration={chatDurations[memo.id]}
                         startAt={chatStarts[memo.id]}
-                        reorder={memoReorder}
+                        onEditTime={openBlockTimeEditor}
                       />
                     </React.Fragment>
                   ))}
@@ -5718,14 +5504,6 @@ function App() {
       </nav>
 
 
-      {/* 잡힌 시간대 조정 — 드래그 핸들 + 고급선택 휠 */}
-      {chatTimeGrid && (
-        <ChatTimeGrid
-          grid={chatTimeGrid}
-          dayStartMs={selectedDayStartMs}
-          others={chatMemos.filter(m => m.id !== chatTimeGrid.memoId)}
-        />
-      )}
       {rangeSheet && (
         <TimeRangeSheet
           init={rangeSheet}

@@ -234,45 +234,8 @@ body {
 }
 
 /* 꾹 눌러 순서 옮기는 중 — 들려서 손가락을 따라온다 */
-.memo-swipe-wrapper.dragging {
-  z-index: 20;
-  overflow: visible;
-}
-.memo-swipe-wrapper.dragging .memo-item {
-  opacity: 0.92;
-}
-.memo-swipe-wrapper.dragging .memo-content {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-}
 
 /* 떨어뜨릴 자리 표시줄 */
-.chat-time-grid {
-  position: fixed;
-  z-index: 10;
-  background-color: rgba(248, 248, 251, 0.97);
-  overflow: hidden;
-  pointer-events: none;
-}
-.chat-time-grid-hour {
-  position: absolute; left: 0; right: 0; border-top: 1px solid #dfe2ec;
-}
-.chat-time-grid-hour span {
-  position: absolute; left: 10px; top: -8px; font-size: 0.7rem; color: #9aa0b4; background-color: rgba(248, 248, 251, 0.95); padding-right: 4px;
-}
-.chat-time-grid-half { position: absolute; left: 0; right: 0; border-top: 1px dashed #ebedf4; }
-.chat-time-grid-ghost {
-  position: absolute; left: 82px; right: 10px; transform: translateY(-50%);
-  display: flex; align-items: center; gap: 6px; font-size: 0.74rem; color: #a3a8ba; white-space: nowrap; overflow: hidden;
-}
-.chat-time-grid-ghost-time { flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.chat-time-grid-ghost-text { overflow: hidden; text-overflow: ellipsis; }
-.chat-time-grid-now {
-  position: absolute; left: 0; right: 0; border-top: 2px solid var(--primary-color);
-}
-.chat-time-grid-now span {
-  position: absolute; right: 10px; top: -11px; padding: 2px 8px; border-radius: 999px;
-  background-color: var(--primary-color); color: #fff; font-size: 0.72rem; font-weight: 700; font-variant-numeric: tabular-nums;
-}
 .drop-indicator {
   height: 3px;
   border-radius: 2px;
