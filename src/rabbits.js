@@ -40,7 +40,8 @@ export const RABBITS = [
     criteria: '부정 감정 2건 이상 + 짜증 라벨',
   },
   {
-    id: 'arctic_firm', family: 'arctic', image: IMG.arctic,
+    // 캐릭터 일러스트(투명 배경, 1024px WebP ≈ 38KB). 나머지도 이 형식으로 바꿔 갈 예정 — art: true면 화면이 연한 배경을 깔아준다
+    id: 'arctic_firm', family: 'arctic', image: '/rabbits/arctic_firm.webp', art: true,
     name: '단단한 북극토끼',
     desc: '힘든 상황을 단단하게 버텨낸, 고요하지만 강한 하루예요.',
     trivia: '눈보라가 오면 다리를 접고 몸을 웅크린 채 그 자리에서 견딥니다. 조용히 버텨낸 하루처럼 보여요.',

@@ -182,6 +182,10 @@ async function renderRabbitCardPng(info, rabbit, dateLabel) {
   ctx.fillStyle = '#4a72ff'; ctx.font = font(700, 20);
   ctx.fillText(`오늘의 토끼${dateLabel ? ` · ${dateLabel}` : ''}`, x, y); y += 26 + 22;
   ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, imgH, imgH, 24); ctx.clip();
+  if (info.art) { // 투명 배경 일러스트는 연한 하늘색을 깔아준다 (화면 카드와 같은 톤)
+    const ig = ctx.createLinearGradient(x, y, x + imgH, y + imgH); ig.addColorStop(0, '#e9f1fb'); ig.addColorStop(1, '#f7fbff');
+    ctx.fillStyle = ig; ctx.fillRect(x, y, imgH, imgH);
+  }
   const sc = Math.max(imgH / img.width, imgH / img.height); const sw = imgH / sc, sh = imgH / sc;
   ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, x, y, imgH, imgH); ctx.restore();
   y += imgH + 34;
@@ -247,7 +251,7 @@ function RabbitCard({ rabbit, dateLabel, onClose }) {
       <div className="rabbit-card-stage" onClick={(e) => e.stopPropagation()}>
         <div className="rabbit-card">
           <span className="rabbit-label">오늘의 토끼{dateLabel ? ` · ${dateLabel}` : ''}</span>
-          {info.image && <img className="rabbit-card-photo" src={info.image} alt={info.name} />}
+          {info.image && <img className={`rabbit-card-photo${info.art ? ' rabbit-img--art' : ''}`} src={info.image} alt={info.name} />}
           <h2 className="rabbit-name rabbit-card-name">{info.name}</h2>
           <p className="rabbit-desc rabbit-card-desc">{info.desc}</p>
           {rabbit.reason && <p className="rabbit-reason rabbit-card-reason">{rabbit.reason}</p>}
@@ -272,7 +276,7 @@ function RabbitHero({ rabbit, onOpen }) {
   if (!info) return null;
   return (
     <button type="button" className="rabbit-hero rabbit-hero--compact" onClick={onOpen} aria-label={`오늘의 토끼 ${info.name}, 카드 보기`}>
-      {info.image && <img className="rabbit-photo rabbit-photo--compact" src={info.image} alt="" />}
+      {info.image && <img className={`rabbit-photo rabbit-photo--compact${info.art ? ' rabbit-img--art' : ''}`} src={info.image} alt="" />}
       <span className="rabbit-hero-text">
         <span className="rabbit-label">오늘의 토끼</span>
         <span className="rabbit-name rabbit-name--compact">{info.name}</span>
@@ -643,7 +647,7 @@ function MonthlyRabbits({ dayRabbits, onPickDay }) {
               title={info?.name}
             >
               <span className="monthly-daynum">{d}</span>
-              {info?.image && <img className="monthly-rabbit" src={info.image} alt="" loading="lazy" />}
+              {info?.image && <img className={`monthly-rabbit${info.art ? ' rabbit-img--art' : ''}`} src={info.image} alt="" loading="lazy" />}
             </button>
           );
         })}
@@ -737,7 +741,7 @@ function WeekDays({ week, dayHeadlines, dayRabbits, habitKeywords, onPickDay }) 
                 <span className="wk-day-num">{format(d.date, 'd')}</span>
               </span>
               {rabbit?.image
-                ? <img className="wk-day-rabbit" src={rabbit.image} alt={rabbit.name} />
+                ? <img className={`wk-day-rabbit${rabbit.art ? ' rabbit-img--art' : ''}`} src={rabbit.image} alt={rabbit.name} />
                 : <span className="wk-day-rabbit wk-day-rabbit--none" aria-hidden="true" />}
               <span className={`wk-day-text${headline ? ' wk-day-text--headline' : ''}`}>
                 {d.future ? '' : d.count === 0 ? '기록 없음' : (text || `기록 ${d.count}개`)}
