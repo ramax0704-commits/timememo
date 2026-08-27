@@ -1632,6 +1632,11 @@ function App() {
     return t ? { ...t, dayMs: selectedDayStartMs } : null;
   })();
   const pendingKey = pendingSpan ? `${pendingSpan.start}-${pendingSpan.end}-${pendingSpan.dayMs}-${!!slotPick}` : null;
+  // 채팅창에서도 입력창 앞머리 시각을 눌러 시간 조정 시트를 열 수 있게 (8/27) — 판에 띠는 안 그리므로 pendingSpan과 별개
+  const inputSpan = (() => {
+    const t = parseTimeSpan(inputText, nowTime);
+    return t ? { ...t, dayMs: selectedDayStartMs } : null;
+  })();
   // 잡힌 시간 영역이 생기거나 바뀌면 그 띠를 화면에 보여준다 (등록 전에).
   // 이러면 등록해도 블록이 이미 보이던 자리에 나타나 화면이 안 튄다.
   useEffect(() => {
@@ -2232,9 +2237,10 @@ function App() {
   };
   // 잡힌 시간대(밴드 또는 입력창 시각)를 눌러 조정 시트를 연다.
   const openBandEditor = () => {
-    if (!pendingSpan) return;
+    const span = pendingSpan || inputSpan;
+    if (!span) return;
     inputRef.current?.blur(); // 시간 조정 중엔 키보드를 내린다 (시트가 키보드와 겹치지 않게)
-    setRangeSheet({ isRange: pendingSpan.end != null, start: pendingSpan.start, end: pendingSpan.end, dayMs: pendingSpan.dayMs });
+    setRangeSheet({ isRange: span.end != null, start: span.start, end: span.end, dayMs: span.dayMs });
   };
   // 등록된 블록을 꾹 눌러 시간만 조정 (시트 확인 시 그 기록을 바로 업데이트)
   const openBlockTimeEditor = (memo) => {
@@ -5331,7 +5337,7 @@ function App() {
             </div>
             {/* 앞머리 시각 위에 얹는 투명 버튼 — 눌러서 시간 조정 시트를 연다.
                 시각 부분만 덮어 뒤쪽 본문 타이핑은 방해하지 않는다. */}
-            {showScheduleView && pendingSpan && timePrefixLen > 0 && (
+            {(showScheduleView ? pendingSpan : inputSpan) && timePrefixLen > 0 && (
               <button
                 type="button"
                 className="input-time-hit input-text-metrics"
