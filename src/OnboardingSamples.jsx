@@ -228,3 +228,89 @@ export function SampleHabits() {
     </div>
   );
 }
+
+// 시간표에서 꾹 누른 채 끄는 모습 — 손가락 점이 블록을 잡고 아래로 내렸다 올라온다 (CSS 애니메이션)
+export function SampleDragDemo() {
+  return (
+    <div className="ob-demo" aria-hidden="true">
+      <div className="ob-demo-grid">
+        {['10:00', '11:00', '12:00', '13:00'].map(t => <div key={t} className="ob-demo-line"><span>{t}</span></div>)}
+        <div className="ob-demo-block">
+          <div className="ob-demo-block-time">10:30 → 12:00</div>
+          회의
+        </div>
+        <div className="ob-demo-finger" />
+      </div>
+    </div>
+  );
+}
+
+// 토끼 카드(펼친 모습) 미니 — 축약형을 탭하면 이게 뜬다는 걸 보여준다
+export function SampleRabbitCardMini({ type = 'burrow_together' }) {
+  const info = rabbitById(type);
+  if (!info) return null;
+  return (
+    <div className="ob-rabbit-card" aria-hidden="true">
+      <span className="rabbit-label">오늘의 토끼 · 8월 25일</span>
+      <img className={`ob-rabbit-card-photo${info.art ? ' rabbit-img--art' : ''}`} src={info.image} alt="" />
+      <div className="ob-rabbit-card-name">{info.name}</div>
+      <div className="ob-rabbit-card-desc">{info.desc}</div>
+      <div className="ob-rabbit-card-reason">저녁엔 팀원들과 회식했다. 곱창전골 먹고 노래방까지 가서 오랜만에 웃었다.</div>
+    </div>
+  );
+}
+
+// 회고 글 부분만 (토끼 없이)
+export function SampleReviewBody() {
+  return (
+    <div className="ob-sample ob-sample--review" aria-hidden="true">
+      <h2 className="reflection-headline">자료 정리 끝내고 회식으로</h2>
+      <p className="day-summary-narrative reflection-narrative">
+        미팅 자료 준비하고 회의 준비 완료라 적은 뒤, 저녁엔 팀원들과 곱창전골에 노래방까지 이어졌어요.
+      </p>
+      <div className="reflection-section">
+        <div className="reflection-label">사고의 흐름</div>
+        <ol className="flow-list">
+          <li className="flow-item"><span className="flow-stage">시작</span><span className="flow-text">밥먹고 뒹굴거리다 운동으로 몸을 일으켰어요.</span></li>
+          <li className="flow-item"><span className="flow-stage">전환</span><span className="flow-text">팀원들과 회식하며 오랜만에 웃었어요.</span></li>
+          <li className="flow-item"><span className="flow-stage">결론</span><span className="flow-text">미팅 자료는 완료했지만 내일 UT가 걱정됐어요.</span></li>
+        </ol>
+      </div>
+      <div className="reflection-section">
+        <div className="reflection-label">오늘 끝낸 일</div>
+        <ul className="done-list"><li className="done-item">미팅 자료 준비 완료</li><li className="done-item">요구사항 정리 완료</li></ul>
+      </div>
+      <div className="reflection-section">
+        <div className="reflection-label">에너지 단어</div>
+        <div className="energy-rows">
+          <div className="energy-row"><span className="energy-tag energy-tag--up">활력</span><span>운동 · 웃었다 · 완료</span></div>
+          <div className="energy-row"><span className="energy-tag energy-tag--down">소모</span><span>뒹굴거렸다 · 걱정된다</span></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 회고 탭 첫 진입 카드 — 처음 소개 카드와 같은 형식
+export const REVIEW_CARDS = [
+  {
+    key: 'rabbit', title: '회고를 만들면', line: '오늘의 토끼가 뽑혀요. 탭하면 카드로 펼쳐져요',
+    art: (
+      <div className="ob-card-art ob-card-art--tall">
+        <SampleRabbitCompact type="burrow_together" />
+        <div className="ob-arrow">↓ 탭</div>
+        <SampleRabbitCardMini type="burrow_together" />
+      </div>
+    ),
+  },
+  { key: 'body', title: '하루를 이렇게 읽어줘요', line: '회고 글 · 사고의 흐름 · 끝낸 일 · 에너지 단어', art: <div className="ob-card-art ob-card-art--tall"><SampleReviewBody /></div> },
+  { key: 'curve', title: '할 말이 많았던 때', line: '기록이 길었던 시간이 곡선으로 보여요', art: <div className="ob-card-art"><SampleCurve /></div> },
+];
+export const WEEK_CARDS = [
+  { key: 'days', title: '요일별로 한 줄', line: '회고 제목이나 그날의 핵심 기록이 쌓여요', art: <div className="ob-card-art"><SampleWeekList /></div> },
+  { key: 'habit', title: '습관 체크', line: '키워드를 등록하면 그 단어가 든 날에 체크돼요', art: <div className="ob-card-art"><SampleHabits /></div> },
+  { key: 'curve', title: '이번 주 할 말이 많았던 때', line: '하루하루 곡선이 겹쳐 한 주의 리듬이 보여요', art: <div className="ob-card-art"><SampleCurve /></div> },
+];
+export const MONTHLY_CARDS = [
+  { key: 'rabbits', title: '한 달의 토끼', line: '회고를 만든 날마다 토끼가 달력에 남아요', art: <div className="ob-card-art"><SampleMonthly compact /></div> },
+];

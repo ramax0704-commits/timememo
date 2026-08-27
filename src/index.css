@@ -3529,13 +3529,16 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 .tour-bubble--plain .tour-bubble-foot { margin-top: 12px; }
 .tour-bubble--plain .tour-btn { background-color: #fff; color: var(--primary-color); }
-/* 강조 대상 쪽으로 향하는 작은 화살표 */
+/* 강조 대상 쪽으로 향하는 작은 화살표 — 대상의 가운데(--tail-x) 위/아래에 */
+.tour-bubble--arrow-down, .tour-bubble--arrow-up { position: absolute; }
 .tour-bubble--arrow-down::before, .tour-bubble--arrow-up::before {
-  content: '↓'; display: block; color: #fff; font-size: 1.3rem; line-height: 1; text-align: center; margin-top: 8px;
+  content: '↓'; position: absolute; left: var(--tail-x); transform: translateX(-50%);
+  color: #fff; font-size: 1.4rem; line-height: 1; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
 }
-.tour-bubble--arrow-down { display: flex; flex-direction: column; }
-.tour-bubble--arrow-down::before { order: 9; }
-.tour-bubble--arrow-up::before { content: '↑'; margin: 0 0 8px; }
+.tour-bubble--arrow-down { padding-bottom: 34px !important; }
+.tour-bubble--arrow-down::before { bottom: 4px; }
+.tour-bubble--arrow-up { padding-top: 34px !important; }
+.tour-bubble--arrow-up::before { content: '↑'; top: 4px; }
 .ob-sample--one { gap: 6px; }
 .ob-sample-typed { font-size: 0.78rem; color: rgba(255, 255, 255, 0.85); padding-left: 4px; }
 .tour-bubble--plain .ob-sample--one .memo-content { background-color: #fff; }
@@ -3551,3 +3554,44 @@ body.keyboard-open .input-toolbar { display: flex; }
 .ob-input-chips { display: flex; gap: 6px; margin-top: 8px; }
 .ob-input-chips span { font-size: 0.78rem; color: var(--text-muted); border: 1px solid #e3e5ee; border-radius: 999px; padding: 6px 10px; }
 .tour-bubble--plain .tour-preview:has(.ob-input) { background: none; box-shadow: none; padding: 0; max-height: none; overflow: visible; }
+
+/* 시간표 꾹·끌기 시연 */
+.ob-demo { background-color: #fff; border-radius: 16px; padding: 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3); }
+.ob-demo-grid { position: relative; height: 200px; }
+.ob-demo-line { position: absolute; left: 0; right: 0; border-top: 1px solid #eceef5; }
+.ob-demo-line:nth-child(1) { top: 10px; } .ob-demo-line:nth-child(2) { top: 60px; } .ob-demo-line:nth-child(3) { top: 110px; } .ob-demo-line:nth-child(4) { top: 160px; }
+.ob-demo-line span { position: absolute; left: 0; top: -8px; font-size: 0.7rem; color: #9aa0b4; }
+.ob-demo-block {
+  position: absolute; left: 48px; right: 8px; top: 35px; height: 72px; border-radius: 10px;
+  background-color: #eaf0ff; border: 1px solid #c7d3ff; padding: 6px 10px; font-size: 0.9rem; font-weight: 600;
+  animation: ob-demo-block 3.2s ease-in-out infinite;
+}
+.ob-demo-block-time { font-size: 0.7rem; color: #7d86a8; font-weight: 500; margin-bottom: 2px; }
+.ob-demo-finger {
+  position: absolute; left: 55%; top: 60px; width: 26px; height: 26px; border-radius: 50%;
+  background-color: rgba(74, 114, 255, 0.35); border: 2px solid var(--primary-color);
+  animation: ob-demo-finger 3.2s ease-in-out infinite;
+}
+@keyframes ob-demo-block {
+  0%, 22% { transform: translateY(0); box-shadow: none; }
+  30% { transform: translateY(0) scale(0.97); box-shadow: 0 8px 20px rgba(74, 114, 255, 0.3); }
+  55% { transform: translateY(60px) scale(0.97); box-shadow: 0 8px 20px rgba(74, 114, 255, 0.3); }
+  70% { transform: translateY(60px) scale(1); box-shadow: none; }
+  100% { transform: translateY(60px); }
+}
+@keyframes ob-demo-finger {
+  0% { transform: scale(0.6); opacity: 0; }
+  12% { transform: scale(1); opacity: 1; }
+  22% { transform: scale(0.8); opacity: 1; }
+  30% { transform: translateY(0) scale(0.8); }
+  55% { transform: translateY(60px) scale(0.8); opacity: 1; }
+  70%, 100% { transform: translateY(60px) scale(1); opacity: 0; }
+}
+.tour-bubble--plain .tour-preview:has(.ob-demo) { background: none; box-shadow: none; padding: 0; max-height: none; overflow: visible; }
+/* 토끼 카드 미니 (회고 카드 소개용) */
+.ob-rabbit-card { border: 1px solid #e6eaf7; border-radius: 16px; padding: 12px; margin-top: 4px; }
+.ob-rabbit-card-photo { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 12px; margin: 8px 0; }
+.ob-rabbit-card-name { font-size: 1.1rem; font-weight: 800; }
+.ob-rabbit-card-desc { font-size: 0.85rem; color: #3a3d4a; margin: 4px 0 8px; }
+.ob-rabbit-card-reason { font-size: 0.8rem; color: #4b4f60; border-left: 3px solid #c7d3ff; padding-left: 8px; }
+.ob-card-art--tall { max-height: 60vh; }

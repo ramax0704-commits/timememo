@@ -28,7 +28,7 @@ import { requestDaySummary, summaryCacheKey, peekSummaryCache, collectCachedRabb
 import ReviewScreen from './ReviewScreen';
 import TourOverlay from './TourOverlay';
 import OnboardingCards from './OnboardingCards';
-import { SampleReviewFull, SampleWeekList, SampleMonthly, SampleCurve, SampleHabits, SampleInput } from './OnboardingSamples';
+import { SampleInput, SampleDragDemo, REVIEW_CARDS, WEEK_CARDS, MONTHLY_CARDS } from './OnboardingSamples';
 import Splash from './Splash';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
@@ -1247,6 +1247,7 @@ function App() {
   const [showCards, setShowCards] = useState(false); // 스플래시 뒤 카드 슬라이드
   const [tipsSeen, setTipsSeen] = useState(() => { try { return JSON.parse(localStorage.getItem(TIPS_KEY) || '{}') || {}; } catch { return {}; } });
   const [tip, setTip] = useState(null); // { page, idx } — 지금 떠 있는 페이지 팁
+  const [pageCards, setPageCards] = useState(null); // 'today' | 'week' | 'monthly' — 회고 쪽은 카드 슬라이드로 소개
   const [reviewMode, setReviewMode] = useState('today');
   const appContainerRef = useRef(null);
   // 꾹 눌러 순서 옮기기 (채팅창)
@@ -3573,8 +3574,10 @@ function App() {
       content: timed ? timed.content : inputText,
       color: selectedColor,
       recorded_at: recordAt.toISOString(),
-      spans_from_prev: !timed && mode === 'prev',
-      spans_to_next: !timed && mode === 'next',
+      // 칩을 눌렀으면 잇는다. "9시 30분 밥"처럼 시각만 적은 경우도 그 시각을 끝(또는 시작)으로 잇는다.
+      // 예전엔 시각이 있으면 잇기를 무시해 단일 기록이 됐다 (8/27 실서버 버그). 구간(~)으로 적었을 때만 그대로 둔다.
+      spans_from_prev: mode === 'prev' && timed?.kind !== 'range',
+      spans_to_next: mode === 'next' && timed?.kind !== 'range',
       // 구간으로 적었으면 끝 시각을 직접 정한 것과 같다
       end_minutes: timed?.kind === 'range' ? timed.durationMin : 0,
     };
@@ -3873,23 +3876,12 @@ function App() {
       { key: 'time', target: '.input-area', place: 'above', advance: 'send', plain: true, caption: '했던 일을 시간과 함께 입력해 보세요.', preview: <SampleInput /> },
       { key: 'tab', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', advance: 'tap-target', plain: true, caption: '타임라인 탭을 한 번 더 누르면 시간표로 바뀌어요.' },
     ],
-    // 시간표: 구간 예시 기록(guide-range)으로 직접 해보게 한다 — 꾹 → 끌기 → 탭 → 내용 → 시각
+    // 시간표: 꾹·끌기는 애니메이션으로 보여주고(직접 해보다 시트가 떠서 당황했다), 탭·내용·시각은 직접
     schedule: [
-      { key: 'hold', target: guideRange ? `.schedule-block[data-at="${guideRange.recordedAt}"]` : '.schedule-block', place: 'below', advance: 'hold', plain: true, caption: '구간으로 등록된 이 기록을 꾹 눌러보세요.' },
-      { key: 'drag', target: guideRange ? `.schedule-block[data-at="${guideRange.recordedAt}"]` : '.schedule-block', place: 'below', advance: 'drop', plain: true, caption: '누른 채 위아래로 움직여 시간을 옮겨보세요.' },
-      { key: 'tap', target: guideRange ? `.schedule-block[data-at="${guideRange.recordedAt}"]` : '.schedule-block', place: 'below', advance: 'tap-target', plain: true, caption: '이번엔 기록을 한 번 눌러보세요.' },
+      { key: 'demo', target: null, place: 'bottom', plain: true, caption: '기록을 꾹 누른 채 위아래로 움직이면 시간이 옮겨져요.', preview: <SampleDragDemo /> },
+      { key: 'tap', target: guideRange ? `.schedule-block[data-at="${guideRange.recordedAt}"]` : '.schedule-block', place: 'below', advance: 'tap-target', plain: true, caption: '이 기록을 한 번 눌러보세요.' },
       { key: 'edit', target: '.input-area', place: 'above', plain: true, caption: '여기서 내용을 고칠 수 있어요.' },
       { key: 'time', target: '.input-time-hit', place: 'above', advance: 'tap-target', plain: true, caption: '앞의 시각을 누르면 시간을 고칠 수 있어요. 눌러보세요.' },
-    ],
-    // 회고 쪽은 눌러볼 게 없으니 예시 화면 한 장으로
-    today: [
-      { key: 'example', target: null, place: 'bottom', plain: true, caption: '기록 5개가 모이면 이런 회고를 받아볼 수 있어요.', preview: <><SampleCurve /><SampleReviewFull /></> },
-    ],
-    week: [
-      { key: 'example', target: null, place: 'bottom', plain: true, caption: '한 주가 지나면 요일별 한 줄과 습관 체크가 쌓여요.', preview: <><SampleWeekList /><SampleHabits /></> },
-    ],
-    monthly: [
-      { key: 'example', target: null, place: 'bottom', plain: true, caption: '회고를 만든 날마다 토끼가 달력에 남아요.', preview: <SampleMonthly /> },
     ],
   };
   // 강조할 대상이 화면에 없으면(기록 0인 회고 탭 등) 대상 없이 아래쪽 말풍선으로 띄운다
@@ -3937,11 +3929,13 @@ function App() {
     let page = null;
     if (activeView === 'timeline') page = showScheduleView ? (!tipsSeen.schedule ? 'schedule' : null) : (!tipsSeen.timeline ? 'timeline' : null);
     else if (activeView === 'review') page = !tipsSeen[reviewMode] ? reviewMode : null;
-    if (!page) return;
+    if (!page || pageCards) return;
+    // 회고·이번 주·먼슬리는 눌러볼 게 없으니 처음 소개처럼 카드 슬라이드로
+    if (page === 'today' || page === 'week' || page === 'monthly') { const id = setTimeout(() => setPageCards(page), 300); return () => clearTimeout(id); }
     const id = setTimeout(() => setTip({ page, idx: 0 }), 500);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, reviewMode, tipsSeen, showCards, showSplash, tour.active, authLoading, memos.length, showScheduleView, tip]);
+  }, [activeView, reviewMode, tipsSeen, showCards, showSplash, tour.active, authLoading, memos.length, showScheduleView, tip, pageCards]);
 
   const endTour = (action) => {
     setTour({ active: false, step: 0, aiStatus: 'idle', contIso: null });
@@ -6098,7 +6092,15 @@ function App() {
           onSkip={() => finishCards('skipped')}
         />
       )}
-      {tipStep && !showCards && !showSplash && !tour.active && (
+      {pageCards && !showCards && (
+        <OnboardingCards
+          cards={pageCards === 'today' ? REVIEW_CARDS : pageCards === 'week' ? WEEK_CARDS : MONTHLY_CARDS}
+          doneLabel="확인"
+          onDone={() => { markTipsSeen(pageCards); setPageCards(null); track('Page Tip', { action: 'done', page: pageCards }); }}
+          onSkip={() => { markTipsSeen(pageCards); setPageCards(null); track('Page Tip', { action: 'skipped', page: pageCards }); }}
+        />
+      )}
+      {tipStep && !showCards && !pageCards && !showSplash && !tour.active && (
         <TourOverlay
           step={tipStep}
           index={`${tip.page}-${tip.idx}`}

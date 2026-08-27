@@ -34,12 +34,13 @@ const CARDS = [
   },
 ];
 
-export default function OnboardingCards({ onDone, onSkip }) {
+export default function OnboardingCards({ cards = CARDS, doneLabel = '시작하기', onDone, onSkip }) {
+  const CARDS_ = cards;
   const [idx, setIdx] = useState(0);
   const touch = useRef(null);
-  const last = idx === CARDS.length - 1;
+  const last = idx === CARDS_.length - 1;
 
-  const go = (n) => setIdx(Math.max(0, Math.min(CARDS.length - 1, n)));
+  const go = (n) => setIdx(Math.max(0, Math.min(CARDS_.length - 1, n)));
   const onPointerDown = (e) => { touch.current = { x: e.clientX, y: e.clientY }; };
   const onPointerUp = (e) => {
     const t = touch.current; touch.current = null;
@@ -54,7 +55,7 @@ export default function OnboardingCards({ onDone, onSkip }) {
       <button type="button" className="ob-skip" onClick={onSkip}>건너뛰기</button>
       <div className="ob-track" onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={() => { touch.current = null; }}>
         <div className="ob-slides" style={{ transform: `translateX(-${idx * 100}%)` }}>
-          {CARDS.map(c => (
+          {CARDS_.map(c => (
             <section key={c.key} className="ob-card">
               {c.art}
               <h2 className="ob-title">{c.title}</h2>
@@ -65,10 +66,10 @@ export default function OnboardingCards({ onDone, onSkip }) {
       </div>
       <div className="ob-foot">
         <div className="ob-dots" aria-hidden="true">
-          {CARDS.map((c, i) => <span key={c.key} className={`ob-dot${i === idx ? ' ob-dot--on' : ''}`} />)}
+          {CARDS_.map((c, i) => <span key={c.key} className={`ob-dot${i === idx ? ' ob-dot--on' : ''}`} />)}
         </div>
         <button type="button" className="ob-next" onClick={() => (last ? onDone() : go(idx + 1))}>
-          {last ? '시작하기' : '다음'}
+          {last ? doneLabel : '다음'}
         </button>
       </div>
     </div>
