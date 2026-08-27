@@ -5436,7 +5436,7 @@ function App() {
                   type="button"
                   className="link-chip link-chip--prev"
                   onMouseDown={e => e.preventDefault()}
-                  onClick={() => handleAddMemo(null, 'prev')}
+                  onClick={() => { handleAddMemo(null, 'prev'); inputRef.current?.blur(); }}
                   disabled={!inputText.trim()}
                 >
                   ↑ 이전 기록부터
@@ -5445,7 +5445,7 @@ function App() {
                   type="button"
                   className="link-chip link-chip--next"
                   onMouseDown={e => e.preventDefault()}
-                  onClick={() => handleAddMemo(null, 'next')}
+                  onClick={() => { handleAddMemo(null, 'next'); inputRef.current?.blur(); }}
                   disabled={!inputText.trim()}
                 >
                   ↓ 다음 기록까지
@@ -5474,7 +5474,7 @@ function App() {
                   type="button"
                   className="link-chip link-chip--prev"
                   onMouseDown={e => e.preventDefault()}
-                  onClick={() => handleAddMemo(null, 'prev')}
+                  onClick={() => { handleAddMemo(null, 'prev'); inputRef.current?.blur(); }}
                   disabled={!inputText.trim()}
                 >
                   ↑ 이전 기록부터
@@ -5483,7 +5483,7 @@ function App() {
                   type="button"
                   className="link-chip link-chip--next"
                   onMouseDown={e => e.preventDefault()}
-                  onClick={() => handleAddMemo(null, 'next')}
+                  onClick={() => { handleAddMemo(null, 'next'); inputRef.current?.blur(); }}
                   disabled={!inputText.trim()}
                 >
                   ↓ 다음 기록까지
