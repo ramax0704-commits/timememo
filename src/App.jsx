@@ -1250,6 +1250,12 @@ function App() {
   const [summaryBusy, setSummaryBusy] = useState(false);
   // 날짜별 토끼: 기기 저장분 + 회고 캐시에 남은 것(백필)을 합쳐서 시작한다
   const [dayRabbits, setDayRabbits] = useState(() => ({ ...collectCachedRabbits(), ...readDayRabbits() }));
+  // 날짜별 회고 한 줄(headline). 주간 화면의 요일별 한 줄에 쓴다 — 회고를 만든 날은 AI 없이도 그 제목을 재사용.
+  const [dayHeadlines, setDayHeadlines] = useState(() => {
+    const out = {};
+    for (const e of collectCachedSummaries()) if (e.data?.headline && !e.day.includes('#')) out[e.day] = e.data.headline;
+    return out;
+  });
   const weekViewedRef = useRef(false);
   const [summaryUses, setSummaryUses] = useState(readSummaryUses);
   const [reviewDayPick, setReviewDayPick] = useState(null); // 회고 탭에서 고른 날 (null=오늘)
@@ -1860,12 +1866,22 @@ function App() {
       : (summaryAI.status === 'ok' && summaryAI.key.startsWith(`${reviewKey}|`)) ? { ...summaryAI, stale: true }
       : { status: 'idle' };
 
-  // 회고 탭을 나가면 보던 날짜를 오늘로 되돌린다 (다음에 들어올 때 늘 오늘부터)
+  // 탭을 오가도 보던 날짜는 그대로 — 타임라인에서 25일을 보다 회고로 가면 25일 회고, 돌아오면 25일 타임라인.
+  // (전에는 회고 탭을 나가면 오늘로 되돌렸는데, 탭을 옮길 때마다 날짜가 튀어 보였다)
+  const prevViewRef = useRef(activeView);
   useEffect(() => {
-    if (activeView === 'review') return;
-    const id = setTimeout(() => setReviewDayPick(null), 0);
-    return () => clearTimeout(id);
-  }, [activeView]);
+    const prev = prevViewRef.current;
+    prevViewRef.current = activeView;
+    if (prev === activeView) return;
+    if (activeView === 'review') {
+      // 타임라인이 보던 날짜로 회고를 연다 (미래 날짜면 오늘)
+      const day = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+      setReviewDayPick(dateKeyOf(day) >= todayKey ? null : day);
+    } else if (prev === 'review' && activeView === 'timeline') {
+      // 회고에서 보던 날짜로 타임라인을 맞춘다
+      if (!isSameDay(reviewDay, selectedDate)) goToDay(reviewDay);
+    }
+  }, [activeView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 앱을 다시 열었을 때: 이미 만들어 둔 이 날의 회고를 보여준다.
   // 1순위 기기 캐시(빠름), 없으면 서버(day_reviews — 다른 기기에서 만들었거나 캐시가 밀려난 경우).
@@ -1898,7 +1914,10 @@ function App() {
   // 로그인하면 기기 캐시에만 있던 회고들을 서버로 올려 영구 보관한다 (이미 있는 날짜는 건드리지 않는다)
   useEffect(() => {
     if (!userId) return;
-    const entries = collectCachedSummaries();
+    // 8/27 한때 캐시 키가 '날짜#v2|…' 꼴이어서 day가 '2026-08-26#v2'처럼 올라갔을 수 있다. 그 행은 지운다.
+    supabase.from('day_reviews').delete().eq('user_id', userId).like('day', '%#%').then(() => {});
+    supabase.from('day_rabbits').delete().eq('user_id', userId).like('day', '%#%').then(() => {});
+    const entries = collectCachedSummaries().filter(e => !e.day.includes('#'));
     if (entries.length === 0) return;
     supabase.from('day_reviews')
       .upsert(
@@ -1928,6 +1947,14 @@ function App() {
   useEffect(() => {
     if (!userId) return;
     let alive = true;
+    supabase.from('day_reviews').select('day, data').limit(400).then(({ data, error }) => {
+      if (!alive || error || !Array.isArray(data)) return;
+      setDayHeadlines(prev => {
+        const next = { ...prev };
+        for (const r of data) if (r?.day && typeof r.data?.headline === 'string' && !String(r.day).includes('#')) next[r.day] = r.data.headline;
+        return next;
+      });
+    });
     supabase.from('day_rabbits').select('day, rabbit').limit(500).then(({ data, error }) => {
       if (!alive || error || !Array.isArray(data)) return;
       setDayRabbits(prev => {
@@ -1967,6 +1994,8 @@ function App() {
         dateKey: reviewKey,
         records,
         facts,
+        // 이미 결과가 떠 있는 상태에서 누른 건 '다시 만들기' — 캐시를 건너뛴다
+        force: summaryForScreen.status === 'ok',
       });
       setSummaryAI({ key, status: 'ok', data, mock });
       // 실제로 AI를 부른 경우에만 오늘 횟수를 깎는다 (캐시 히트·샘플은 비용이 없다)
@@ -1977,6 +2006,7 @@ function App() {
       }
       // 그날의 토끼를 먼슬리에 쌓는다 (샘플은 제외)
       if (!mock && data.rabbit?.type) saveDayRabbit(reviewKey, data.rabbit.type);
+      if (!mock && data.headline) setDayHeadlines(prev => ({ ...prev, [reviewKey]: data.headline }));
       // 회고 글을 서버에 영구 보관한다 — 기기 캐시는 12개 한도·브라우저 정리에 취약하다
       if (!mock && currentUser) {
         supabase.from('day_reviews')
@@ -5106,6 +5136,8 @@ function App() {
             busy={tour.active ? tour.aiStatus === 'loading' : summaryBusy}
             usesLeft={tour.active ? SUMMARY_DAILY_LIMIT : summaryUsesLeft}
             habitKeywords={habitKeywords}
+            onEditHabits={openKeywordModal}
+            dayHeadlines={dayHeadlines}
             dayRabbits={dayRabbits}
             onPickDay={pickReviewDay}
             viewKey={reviewKey}

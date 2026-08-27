@@ -330,3 +330,37 @@ export function toSummaryRecords(dayMemos) {
     .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt))
     .map(m => ({ time: format(new Date(m.recordedAt), 'HH:mm'), text: m.content }));
 }
+
+// ── 그날 핵심 이벤트 (AI 없이) ────────────────────────────────
+// 주간 화면의 요일별 한 줄. 회고를 만든 날은 그 headline을 쓰고, 없는 날만 이걸 쓴다.
+// 기록마다 점수를 매겨 상위 몇 개를 '·'로 잇는다. 문장이 아니라 원문 조각의 나열이다.
+//   점수: 오래 한 것(구간 길이) + 완료·끝·했다 표현 + 글자 수 + 습관 키워드 포함
+//   제외: 밥·씻음·누움·이동처럼 매일 반복되는 짧은 기록
+const FILLER_RE = /^(밥|아침|점심|저녁|식사|커피|씻|샤워|누움|누워|잠|기상|일어남|출근|퇴근|이동|귀가|집|화장실)[^가-힣]*$|^(밥|점심|저녁|아침)\s*(먹|먹음|먹었)/;
+const DONE_RE = /완료|완$|끝|했다|했음|마무리|마침|제출|보냄/;
+// 그 자체로 '이벤트'인 말들 — 짧게 적혀도 그날의 핵심일 가능성이 크다
+const EVENT_RE = /회식|모임|만남|만났|미팅|회의|발표|면접|시험|여행|데이트|공연|영화|병원|출장|약속|파티|결혼|생일/;
+const ROUTINE_RE = /씻고|씻음|샤워|누움|누워|뒹굴|잠깐 쉼|낮잠/;
+export function dayKeyEvents(items, durations = null, habitKeywords = [], max = 3) {
+  const habits = (habitKeywords || []).filter(k => k?.name && !k.endedAt).map(k => k.name);
+  const scored = items.map((m, i) => {
+    const text = (m.content || '').trim();
+    const min = durations?.get(m.id) || 0;
+    let score = 0;
+    score += Math.min(min, 180) / 30;                 // 30분당 1점, 최대 6점
+    if (DONE_RE.test(text)) score += 3;
+    score += Math.min(text.length, 40) / 20;          // 글자 수, 최대 2점
+    if (habits.some(h => text.includes(h))) score += 2;
+    if (EVENT_RE.test(text)) score += 2;
+    if (FILLER_RE.test(text) || text.length <= 1) score -= 5;
+    if (ROUTINE_RE.test(text) && text.length < 12) score -= 2;
+    return { i, text, score };
+  });
+  const picked = scored.filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, max)
+    .sort((a, b) => a.i - b.i); // 고른 것은 시간순으로
+  const clip = (t) => {
+    const one = t.split(/\n/)[0].replace(/\s+/g, ' ');
+    return one.length > 14 ? `${one.slice(0, 13)}…` : one;
+  };
+  return picked.map(x => clip(x.text)).join(' · ');
+}

@@ -24,10 +24,12 @@ function hash(str) {
 // 스키마 버전 — 프롬프트·출력 구조가 바뀌면 올린다. 옛 버전으로 만든 회고는 캐시에서 안 보이고
 // '만들기'를 누르면 새로 만든다 (2026-08-27: 토끼 21종·done·emotions 도입 → v2).
 export const SUMMARY_SCHEMA_VERSION = 2;
+// 키는 '날짜|개수|v버전-해시'. 날짜가 맨 앞이어야 다른 곳(먼슬리 백필·서버 보관)이 split('|')[0]로 날짜를 읽는다.
 export function summaryCacheKey(dateKey, records) {
   const body = records.map(r => `${r.time}|${r.text}`).join('\n');
-  return `${dateKey}#v${SUMMARY_SCHEMA_VERSION}|${records.length}|${hash(body)}`;
+  return `${dateKey}|${records.length}|v${SUMMARY_SCHEMA_VERSION}-${hash(body)}`;
 }
+const isCurrentSchemaKey = (k) => (k.split('|')[2] || '').startsWith(`v${SUMMARY_SCHEMA_VERSION}-`);
 
 // 캐시에서 찾는다. loose=false(생성 경로): 정확히 같은 키, 또는 예전 저장 방식(키 끝에
 // 고정 세트가 붙던 때) 호환으로 같은 날짜·같은 기록 수까지만 — 기록이 바뀌면 다시 만들어야 한다.
@@ -40,16 +42,34 @@ function findCached(key, loose = false) {
   let best = null;
   let bestKey = null;
   for (const [k, v] of Object.entries(cache)) {
+    // 생성 경로에서는 옛 스키마로 만든 결과를 '같은 입력'으로 치지 않는다 — 다시 만들어야 새 형식이 나온다
+    if (!loose && !isCurrentSchemaKey(k)) continue;
     if (k.startsWith(prefix) && v?.data && (!best || v.at > best.at)) { best = v; bestKey = k; }
   }
   return best ? { ...best, key: bestKey } : null;
 }
 
+// 8/27 한때 '날짜#v2|개수|해시' 꼴로 저장된 키를 지금 꼴('날짜|개수|v2-해시')로 고쳐 읽는다.
+// 그 형식으로 만든 회고(8/25 등)가 사라져 보이던 문제 — 데이터는 그대로 있었다.
+const LEGACY_KEY_RE = /^(\d{4}-\d{2}-\d{2})#v(\d+)\|(\d+)\|(.+)$/;
+function migrateCacheKeys(obj) {
+  let changed = false;
+  for (const k of Object.keys(obj)) {
+    const m = k.match(LEGACY_KEY_RE);
+    if (!m) continue;
+    const nk = `${m[1]}|${m[3]}|v${m[2]}-${m[4]}`;
+    if (!obj[nk]) obj[nk] = obj[k];
+    delete obj[k];
+    changed = true;
+  }
+  if (changed) { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch { /* 무시 */ } }
+  return obj;
+}
 function readCache() {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     const obj = raw ? JSON.parse(raw) : {};
-    return obj && typeof obj === 'object' ? obj : {};
+    return obj && typeof obj === 'object' ? migrateCacheKeys(obj) : {};
   } catch {
     return {};
   }
@@ -131,9 +151,10 @@ export function normalizeSummary(obj) {
 }
 
 // records: [{ time, text }] 시간순 / facts: 계산값
-export async function requestDaySummary({ dateKey, records, facts, signal }) {
+// force: 같은 입력이라도 캐시를 건너뛰고 새로 만든다 ('다시 만들기').
+export async function requestDaySummary({ dateKey, records, facts, signal, force = false }) {
   const key = summaryCacheKey(dateKey, records);
-  const cached = findCached(key);
+  const cached = force ? null : findCached(key);
   if (cached?.data) return { data: cached.data, mock: Boolean(cached.mock), fromCache: true };
 
   let payload;

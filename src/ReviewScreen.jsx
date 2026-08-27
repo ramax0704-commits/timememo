@@ -13,9 +13,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Lock, Inbox, RefreshCw, Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Lock, Inbox, RefreshCw, Check, ChevronLeft, ChevronRight, X, Download, Share2, Pencil, Plus } from 'lucide-react';
 import {
-  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, DAY_START_MIN, minuteInReviewDay,
+  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, DAY_START_MIN, minuteInReviewDay, dayKeyEvents,
 } from './daySummary';
 import { rabbitById } from './rabbits';
 import { NEGATIVE_LABELS } from './emotions';
@@ -126,25 +126,165 @@ export function DayCurve({ curve, now, peakLabel }) {
 }
 
 // ── 오늘의 토끼 (AI 회고의 대표 결과) ─────────────────────────
-// 숫자 대신, 오늘 기록에서 읽힌 상태·감정을 토끼 아키타입으로 비춰준다.
-// 회고 글과 한 덩어리로 보여야 해서 ReflectionBlock 머리에 들어간다.
-function RabbitHero({ rabbit }) {
+// 회고를 막 만들었을 때는 카드 뽑기처럼 배경을 어둡게 하고 카드를 짠 보여준다.
+// 카드를 닫으면(또는 이미 만들어둔 회고를 다시 볼 때는 처음부터) 축약형 —
+// 왼쪽 사진, 이름, 한 줄 요약 — 으로 회고 글 머리에 앉는다. 축약형을 탭하면 카드가 다시 열린다.
+// 카드를 캔버스에 그려 PNG Blob으로 만든다 (이미지 저장·공유용). 화면 카드와 같은 구성.
+function wrapLines(ctx, text, maxWidth) {
+  // 어절 단위로 줄을 바꾼다 (단어 중간에서 끊기지 않게). 한 어절이 폭을 넘으면 그때만 글자 단위.
+  const lines = [];
+  for (const para of String(text || '').split('\n')) {
+    let line = '';
+    for (const word of para.split(' ')) {
+      const test = line ? `${line} ${word}` : word;
+      if (ctx.measureText(test).width <= maxWidth) { line = test; continue; }
+      if (line) lines.push(line);
+      line = '';
+      for (const ch of word) {
+        const t2 = line + ch;
+        if (ctx.measureText(t2).width > maxWidth && line) { lines.push(line); line = ch; } else line = t2;
+      }
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+async function renderRabbitCardPng(info, rabbit, dateLabel) {
+  // 배경(그라데이션) 위에 흰 카드가 떠 있는 모양으로 — 그냥 이미지가 아니라 '카드'로 저장된다
+  const W = 800, M = 56, PAD = 44, scale = 2;
+  const CW = W - M * 2;
+  const font = (w, px) => `${w} ${px}px -apple-system, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif`;
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = info.image; });
+  const m = document.createElement('canvas').getContext('2d');
+  const textW = CW - PAD * 2;
+  m.font = font(500, 26); const descLines = wrapLines(m, info.desc, textW);
+  m.font = font(400, 24); const reasonLines = rabbit?.reason ? wrapLines(m, rabbit.reason, textW - 28) : [];
+  m.font = font(400, 22); const triviaLines = wrapLines(m, info.trivia, textW);
+  const imgH = textW;
+  const cardH = PAD + 26 + 22 + imgH + 34 + 46 + 12 + descLines.length * 38
+    + (reasonLines.length ? 24 + reasonLines.length * 36 : 0) + 30 + triviaLines.length * 34 + PAD;
+  const H = M + cardH + 30 + 26 + M;
+  const c = document.createElement('canvas'); c.width = W * scale; c.height = H * scale;
+  const ctx = c.getContext('2d'); ctx.scale(scale, scale);
+  // 배경
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, '#dfe7ff'); g.addColorStop(0.55, '#eef1ff'); g.addColorStop(1, '#fff4e3');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // 은은한 원 두 개
+  ctx.globalAlpha = 0.35; ctx.fillStyle = '#c9d6ff';
+  ctx.beginPath(); ctx.arc(W - 60, 90, 150, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffe2b8'; ctx.beginPath(); ctx.arc(50, H - 120, 120, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+  // 카드
+  ctx.save(); ctx.shadowColor = 'rgba(30, 40, 90, 0.18)'; ctx.shadowBlur = 40; ctx.shadowOffsetY = 16;
+  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect(M, M, CW, cardH, 32); ctx.fill(); ctx.restore();
+  let x = M + PAD, y = M + PAD;
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#4a72ff'; ctx.font = font(700, 20);
+  ctx.fillText(`오늘의 토끼${dateLabel ? ` · ${dateLabel}` : ''}`, x, y); y += 26 + 22;
+  ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, imgH, imgH, 24); ctx.clip();
+  const sc = Math.max(imgH / img.width, imgH / img.height); const sw = imgH / sc, sh = imgH / sc;
+  ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, x, y, imgH, imgH); ctx.restore();
+  y += imgH + 34;
+  ctx.fillStyle = '#1a1c26'; ctx.font = font(800, 40); ctx.fillText(info.name, x, y); y += 46 + 12;
+  ctx.fillStyle = '#3a3d4a'; ctx.font = font(500, 26); for (const l of descLines) { ctx.fillText(l, x, y); y += 38; }
+  if (reasonLines.length) {
+    y += 24; ctx.fillStyle = '#c7d3ff'; ctx.fillRect(x, y - 2, 4, reasonLines.length * 36 + 4);
+    ctx.fillStyle = '#4b4f60'; ctx.font = font(400, 24); for (const l of reasonLines) { ctx.fillText(l, x + 28, y); y += 36; }
+  }
+  y += 30; ctx.fillStyle = '#7a7f92'; ctx.font = font(400, 22); for (const l of triviaLines) { ctx.fillText(l, x, y); y += 34; }
+  // 카드 아래 서명
+  ctx.fillStyle = '#7d86a8'; ctx.font = font(700, 20); ctx.textAlign = 'center';
+  ctx.fillText('타임메모 · 오늘의 토끼', W / 2, M + cardH + 30);
+  return new Promise(res => c.toBlob(res, 'image/png'));
+}
+
+function RabbitCard({ rabbit, dateLabel, onClose }) {
   const info = rabbitById(rabbit?.type);
+  const [busy, setBusy] = useState(null); // 'save' | 'share'
+  const [toast, setToast] = useState(null);
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2200); };
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
   if (!info) return null;
+  const fileName = `타임메모_오늘의토끼_${(dateLabel || '').replace(/[^0-9]/g, '') || 'card'}.png`;
+  const makeFile = async () => new File([await renderRabbitCardPng(info, rabbit, dateLabel)], fileName, { type: 'image/png' });
+
+  const onSave = async () => {
+    if (busy) return; setBusy('save');
+    try {
+      const file = await makeFile();
+      // iOS 홈화면 앱은 download 링크가 안 먹는다 — 파일 공유 시트가 되면 그쪽으로 (거기서 '이미지 저장')
+      if (navigator.canShare?.({ files: [file] }) && /iPhone|iPad/.test(navigator.userAgent)) {
+        await navigator.share({ files: [file] });
+        showToast('저장했어요');
+      } else {
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a'); a.href = url; a.download = fileName; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        showToast('이미지를 저장했어요');
+      }
+    } catch (e) { if (e?.name !== 'AbortError') { console.error(e); showToast('저장하지 못했어요'); } }
+    setBusy(null);
+  };
+  const onShare = async () => {
+    if (busy) return; setBusy('share');
+    try {
+      const text = `오늘의 토끼 · ${info.name}\n${info.desc}${rabbit?.reason ? `\n${rabbit.reason}` : ''}`;
+      const file = await makeFile().catch(() => null);
+      if (file && navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], text });
+      else if (navigator.share) await navigator.share({ text });
+      else { await navigator.clipboard?.writeText(text); showToast('내용을 복사했어요'); }
+    } catch (e) { if (e?.name !== 'AbortError') console.error(e); }
+    setBusy(null);
+  };
+
   return (
-    <div className="rabbit-hero">
-      {info.image && <img className="rabbit-photo" src={info.image} alt={info.name} />}
-      <span className="rabbit-label">오늘의 토끼</span>
-      <h2 className="rabbit-name">{info.name}</h2>
-      <p className="rabbit-desc">{info.desc}</p>
-      {rabbit.reason && <p className="rabbit-reason">{rabbit.reason}</p>}
-      <p className="rabbit-trivia">{info.trivia}</p>
+    <div className="rabbit-card-dim" onClick={onClose} role="dialog" aria-label="오늘의 토끼">
+      <button type="button" className="rabbit-card-x" onClick={onClose} aria-label="닫기"><X size={22} /></button>
+      <div className="rabbit-card-stage" onClick={(e) => e.stopPropagation()}>
+        <div className="rabbit-card">
+          <span className="rabbit-label">오늘의 토끼{dateLabel ? ` · ${dateLabel}` : ''}</span>
+          {info.image && <img className="rabbit-card-photo" src={info.image} alt={info.name} />}
+          <h2 className="rabbit-name rabbit-card-name">{info.name}</h2>
+          <p className="rabbit-desc rabbit-card-desc">{info.desc}</p>
+          {rabbit.reason && <p className="rabbit-reason rabbit-card-reason">{rabbit.reason}</p>}
+          <p className="rabbit-trivia rabbit-card-trivia">{info.trivia}</p>
+        </div>
+        {toast && <div className="rabbit-card-toast" role="status">{toast}</div>}
+        <div className="rabbit-card-actions">
+          <button type="button" className="rabbit-card-action" onClick={onSave} disabled={!!busy}>
+            <Download size={18} /> {busy === 'save' ? '만드는 중' : '이미지 저장'}
+          </button>
+          <button type="button" className="rabbit-card-action" onClick={onShare} disabled={!!busy}>
+            <Share2 size={18} /> {busy === 'share' ? '만드는 중' : '공유하기'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
+function RabbitHero({ rabbit, onOpen }) {
+  const info = rabbitById(rabbit?.type);
+  if (!info) return null;
+  return (
+    <button type="button" className="rabbit-hero rabbit-hero--compact" onClick={onOpen} aria-label={`오늘의 토끼 ${info.name}, 카드 보기`}>
+      {info.image && <img className="rabbit-photo rabbit-photo--compact" src={info.image} alt="" />}
+      <span className="rabbit-hero-text">
+        <span className="rabbit-label">오늘의 토끼</span>
+        <span className="rabbit-name rabbit-name--compact">{info.name}</span>
+        <span className="rabbit-desc rabbit-desc--compact">{info.desc}</span>
+      </span>
+    </button>
+  );
+}
+
 // ── 오늘의 회고 (AI) — 토끼 + 회고 글이 한 덩어리 ─────────────
-function ReflectionBlock({ data, mock, stale, busy, usesLeft, onGenerate }) {
+function ReflectionBlock({ data, mock, stale, busy, usesLeft, onGenerate, cardOpen, onOpenCard, onCloseCard, dayLabel }) {
   const hasFlow = data.thoughtFlow?.length > 0;
   const hasLoops = data.loops?.length > 0;
   const hasDone = data.done?.length > 0;
@@ -157,7 +297,8 @@ function ReflectionBlock({ data, mock, stale, busy, usesLeft, onGenerate }) {
     <section className="day-summary reflection" aria-label="오늘의 회고">
       {/* 제목 없이 결과부터 — 이미지 → 어떤 토끼인지 → 회고 글 순서 */}
       {mock && <span className="day-summary-mock" title="AI 키가 아직 없어 샘플로 보여줍니다">샘플</span>}
-      {data.rabbit && <RabbitHero rabbit={data.rabbit} />}
+      {data.rabbit && <RabbitHero rabbit={data.rabbit} onOpen={onOpenCard} />}
+      {data.rabbit && cardOpen && <RabbitCard rabbit={data.rabbit} dateLabel={dayLabel} onClose={onCloseCard} />}
       {data.headline && <h2 className="reflection-headline">{data.headline}</h2>}
       <p className="day-summary-narrative reflection-narrative">{data.narrative}</p>
 
@@ -228,9 +369,14 @@ function ReflectionBlock({ data, mock, stale, busy, usesLeft, onGenerate }) {
         </div>
       )}
 
-      {stale && (
+      {/* 기록이 더 추가됐거나(stale), 아니어도 오늘 횟수가 남았으면 다시 만들 수 있다 */}
+      {(stale || usesLeft > 0) && (
         <div className="day-summary-stale">
-          <span>{usesLeft > 0 ? `이후에 기록이 더 추가됐어요. (오늘 ${usesLeft}회 남음)` : '이후에 기록이 더 추가됐어요. 오늘 횟수를 다 썼어요.'}</span>
+          <span>
+            {stale
+              ? (usesLeft > 0 ? `기록이 추가됐어요. (${usesLeft}회 남음)` : '기록이 추가됐어요. 오늘 횟수를 다 썼어요.')
+              : `회고를 다시 받아볼까요? (${usesLeft}회 남음)`}
+          </span>
           <button type="button" className="day-summary-btn day-summary-btn--ghost" onClick={onGenerate} disabled={busy || usesLeft <= 0}>
             <RefreshCw size={12} /> 다시 만들기
           </button>
@@ -408,18 +554,26 @@ function TalkCurveBlock({ memos, now, emotions, dayLabel }) {
 // ── 이번 주 습관 트래킹 ───────────────────────────────────────
 // 등록한 습관 키워드가 들어간 기록이 그날 있으면 체크. 기록하는 행동만으로
 // 습관이 주 단위로 쌓여 보인다. (키워드 등록은 마이페이지 > 먼슬리 습관 키워드)
-function HabitWeek({ week, habitKeywords }) {
+function HabitWeek({ week, habitKeywords, onEditHabits }) {
   const active = (habitKeywords || []).filter(k => k?.name && !k.endedAt);
   return (
     <section className="day-summary" aria-label="이번 주 습관">
       <header className="day-summary-head">
         <span className="day-summary-title">이번 주 습관</span>
-        <span className="day-summary-count">키워드가 든 기록 기준</span>
+        {/* 여기서 바로 등록·수정한다 (마이페이지와 같은 편집기) */}
+        {active.length > 0 && onEditHabits && (
+          <button type="button" className="habit-edit-btn" onClick={onEditHabits}><Pencil size={13} /> 편집</button>
+        )}
       </header>
       {active.length === 0 ? (
-        <p className="day-summary-muted">
-          마이페이지에서 습관 키워드를 등록해 보세요. 그 단어가 들어간 기록을 남긴 날마다 여기에 체크돼요.
-        </p>
+        <div className="habit-empty">
+          <p className="day-summary-muted">
+            습관 키워드를 등록하면, 그 단어가 들어간 기록을 남긴 날마다 여기에 체크돼요.
+          </p>
+          {onEditHabits && (
+            <button type="button" className="day-summary-btn day-summary-btn--ghost" onClick={onEditHabits}><Plus size={14} /> 습관 등록하기</button>
+          )}
+        </div>
       ) : (
         <div className="habit-week">
           <div className="habit-week-row habit-week-row--head" aria-hidden="true">
@@ -503,7 +657,40 @@ function MonthlyRabbits({ dayRabbits, onPickDay }) {
 }
 
 // ── 이번 주 ──────────────────────────────────────────────────
-function WeekView({ week, habitKeywords, onViewed }) {
+// ── 이번 주 요일별 한 줄 ─────────────────────────────────────
+// 날짜별 기록 '개수'는 의미가 없었다. 대신 그날 뭘 했는지 한 줄로.
+// 회고를 만든 날은 그 회고의 제목(headline)을, 아니면 기록 중 핵심 몇 개를 AI 없이 골라 잇는다.
+function WeekDays({ week, dayHeadlines, dayRabbits, habitKeywords, onPickDay }) {
+  return (
+    <ul className="week-days">
+      {week.days.map(d => {
+        const headline = dayHeadlines?.[d.key];
+        const events = !headline && d.count > 0 ? dayKeyEvents(d.items, week.durations, habitKeywords) : '';
+        const rabbit = rabbitById(dayRabbits?.[d.key]);
+        const text = headline || events;
+        const empty = d.future || d.count === 0;
+        return (
+          <li key={d.key} className={`week-day${empty ? ' week-day--empty' : ''}`}>
+            <button type="button" className="week-day-btn" disabled={empty} onClick={() => onPickDay?.(d.date)}>
+              <span className="week-day-date">
+                <span className="week-day-dow">{format(d.date, 'E', { locale: ko })}</span>
+                <span className="week-day-num">{format(d.date, 'd')}</span>
+              </span>
+              {rabbit?.image
+                ? <img className="week-day-rabbit" src={rabbit.image} alt={rabbit.name} />
+                : <span className="week-day-rabbit week-day-rabbit--none" aria-hidden="true" />}
+              <span className={`week-day-text${headline ? ' week-day-text--headline' : ''}`}>
+                {d.future ? '' : d.count === 0 ? '기록 없음' : (text || `기록 ${d.count}개`)}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function WeekView({ week, habitKeywords, dayHeadlines, dayRabbits, onPickDay, onEditHabits, onViewed }) {
   useEffect(() => { onViewed?.(); }, [onViewed]);
   const peakHour = peakHourFromCurve(week.curve);
   const peakLabel = peakHour != null ? `${hourLabel(peakHour)}쯤 가장 많이` : null;
@@ -515,25 +702,17 @@ function WeekView({ week, habitKeywords, onViewed }) {
           <span className="day-summary-title">이번 주 리듬</span>
         </header>
         <DayCurve curve={week.curve} now={null} peakLabel={peakLabel} />
-        {/* 이 막대가 뭘 세는지 그래프만 봐서는 안 보였다 — 제목을 붙인다 */}
-        <div className="week-bars-caption">날짜별 기록 수</div>
-        <div className="week-bars" role="img" aria-label="날짜별 기록 수">
-          {week.days.map(d => (
-            <div key={d.key} className="week-bar-slot">
-              <span className="week-bar-count">{d.count > 0 ? d.count : ''}</span>
-              <div className="week-bar-track">
-                <div
-                  className={`week-bar${d.count === week.maxDayCount && d.count > 0 ? ' week-bar--max' : ''}${d.count === 0 ? ' week-bar--empty' : ''}`}
-                  style={{ height: `${d.count === 0 ? 0 : Math.max(12, (d.count / week.maxDayCount) * 100)}%` }}
-                />
-              </div>
-              <span className="week-bar-label">{format(d.date, 'E', { locale: ko })}</span>
-            </div>
-          ))}
-        </div>
       </section>
 
-      <HabitWeek week={week} habitKeywords={habitKeywords} />
+      <section className="day-summary" aria-label="이번 주 하루하루">
+        <header className="day-summary-head">
+          <span className="day-summary-title">하루하루</span>
+          <span className="day-summary-count">탭하면 그날 회고로</span>
+        </header>
+        <WeekDays week={week} dayHeadlines={dayHeadlines} dayRabbits={dayRabbits} habitKeywords={habitKeywords} onPickDay={onPickDay} />
+      </section>
+
+      <HabitWeek week={week} habitKeywords={habitKeywords} onEditHabits={onEditHabits} />
     </>
   );
 }
@@ -541,7 +720,7 @@ function WeekView({ week, habitKeywords, onViewed }) {
 // ── 화면 ──────────────────────────────────────────────────────
 export default function ReviewScreen({
   facts, todayMemos, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, busy, usesLeft,
-  habitKeywords, dayRabbits, onPickDay, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline,
+  habitKeywords, onEditHabits, dayHeadlines, dayRabbits, onPickDay, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline,
 }) {
   const [mode, setMode] = useState('today'); // 'today' | 'week' | 'monthly'
 
@@ -551,6 +730,17 @@ export default function ReviewScreen({
   }, [mode, facts, viewKey, onViewed]);
 
   const aiOk = ai?.status === 'ok' && ai.data;
+
+  // 회고가 '방금' 만들어졌을 때만 카드를 짠 띄운다 (loading → ok 전환). 저장된 회고를 다시 볼 땐 축약형부터.
+  const [rabbitCardOpen, setRabbitCardOpen] = useState(false);
+  const prevStatusRef = useRef(ai?.status);
+  useEffect(() => {
+    if (prevStatusRef.current === 'loading' && ai?.status === 'ok' && ai.data?.rabbit) setRabbitCardOpen(true);
+    prevStatusRef.current = ai?.status;
+  }, [ai?.status, ai?.data]);
+  // 날짜가 바뀌면 카드는 닫는다 (렌더 중 비교 — effect에서 setState 하지 않기)
+  const [cardViewKey, setCardViewKey] = useState(viewKey);
+  if (cardViewKey !== viewKey) { setCardViewKey(viewKey); if (rabbitCardOpen) setRabbitCardOpen(false); }
 
   // 좌우로 밀면 날짜가 바뀐다 (타임라인 채팅창과 같은 손짓). 세로 스크롤과 헷갈리지 않게
   // 가로로 충분히(50px↑), 세로보다 확실히 더 움직였을 때만.
@@ -578,7 +768,10 @@ export default function ReviewScreen({
           onPickDay={(d) => { onPickDay?.(d); setMode('today'); }}
         />
       ) : mode === 'week' ? (
-        <WeekView week={week} habitKeywords={habitKeywords} onViewed={onWeekViewed} />
+        <WeekView
+          week={week} habitKeywords={habitKeywords} dayHeadlines={dayHeadlines} dayRabbits={dayRabbits}
+          onPickDay={(d) => { onPickDay?.(d); setMode('today'); }} onEditHabits={onEditHabits} onViewed={onWeekViewed}
+        />
       ) : (
         <>
           {!facts ? (
@@ -602,7 +795,11 @@ export default function ReviewScreen({
               만들기 전에는 곡선 아래에 만들기 버튼이 있다 — 결과가 위아래로 찢어지지 않는다 */}
           {aiOk && !locked ? (
             <>
-              <ReflectionBlock data={ai.data} mock={ai.mock} stale={ai.stale} busy={busy} usesLeft={usesLeft} onGenerate={onGenerate} />
+              <ReflectionBlock
+                data={ai.data} mock={ai.mock} stale={ai.stale} busy={busy} usesLeft={usesLeft} onGenerate={onGenerate}
+                cardOpen={rabbitCardOpen} onOpenCard={() => setRabbitCardOpen(true)} onCloseCard={() => setRabbitCardOpen(false)}
+                dayLabel={dayLabel}
+              />
               <TalkCurveBlock memos={todayMemos} now={isToday ? now : null} emotions={ai.data.emotions} dayLabel={dayLabel} />
             </>
           ) : (
