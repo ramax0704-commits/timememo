@@ -11,6 +11,19 @@ const SAMPLE_MEMOS = [
   { time: '오후 7:10', text: '미팅 자료 준비 완료. 요구사항 정리 완료', dur: '1h 15m' },
 ];
 
+// 팁 하나에 붙는 예시 한 줄 — "시간과 함께" 적은 모습
+export function SampleChatOne() {
+  return (
+    <div className="ob-sample ob-sample--chat ob-sample--one" aria-hidden="true">
+      <div className="memo-item">
+        <div className="memo-time-container"><span className="memo-time">오전 9:30</span></div>
+        <div className="memo-content">밥 먹고 출근</div>
+      </div>
+      <div className="ob-sample-typed">← "9시 30분 밥 먹고 출근"이라고 적으면 이렇게 남아요</div>
+    </div>
+  );
+}
+
 export function SampleChat() {
   return (
     <div className="ob-sample ob-sample--chat" aria-hidden="true">
@@ -57,6 +70,53 @@ export function SampleReview() {
           <li className="done-item">미팅 자료 준비 완료</li>
           <li className="done-item">요구사항 정리 완료</li>
         </ul>
+      </div>
+    </div>
+  );
+}
+
+// 회고 전문 — 기록을 넣으면 무엇이 나오는지 한 번에 보여준다 (실제 결과 화면과 같은 블록 구성)
+export function SampleReviewFull() {
+  return (
+    <div className="ob-sample ob-sample--review" aria-hidden="true">
+      <SampleRabbitCompact type="burrow_together" />
+      <h2 className="reflection-headline">자료 정리 끝내고 회식으로</h2>
+      <p className="day-summary-narrative reflection-narrative">
+        미팅 자료 준비하고 회의 준비 완료라 적은 뒤, 저녁엔 팀원들과 곱창전골에 노래방까지 이어졌어요. 낮의 정리가 끝나고 나서야 저녁 자리가 시작된 하루였어요.
+      </p>
+      <div className="reflection-section">
+        <div className="reflection-label">사고의 흐름</div>
+        <ol className="flow-list">
+          <li className="flow-item"><span className="flow-stage">시작</span><span className="flow-text">밥먹고 뒹굴거리다 운동으로 몸을 일으켰어요.</span></li>
+          <li className="flow-item"><span className="flow-stage">전환</span><span className="flow-text">팀원들과 회식하며 오랜만에 웃었어요.</span></li>
+          <li className="flow-item"><span className="flow-stage">결론</span><span className="flow-text">미팅 자료는 완료했지만 내일 UT가 걱정됐어요.</span></li>
+        </ol>
+      </div>
+      <div className="reflection-section">
+        <div className="reflection-label">시도 → 결과</div>
+        <ul className="loop-list">
+          <li className="loop-item"><span className="loop-from">미팅 자료 정리</span><span className="loop-arrow">→</span><span className="loop-to">회의 준비 완료</span></li>
+        </ul>
+      </div>
+      <div className="reflection-section">
+        <div className="reflection-label">오늘 끝낸 일</div>
+        <ul className="done-list">
+          <li className="done-item">미팅 자료 준비 완료</li>
+          <li className="done-item">요구사항 정리 완료</li>
+        </ul>
+      </div>
+      <div className="reflection-section">
+        <div className="reflection-label">에너지 단어</div>
+        <div className="energy-rows">
+          <div className="energy-row"><span className="energy-tag energy-tag--up">활력</span><span>운동 · 웃었다 · 완료</span></div>
+          <div className="energy-row"><span className="energy-tag energy-tag--down">소모</span><span>뒹굴거렸다 · 걱정된다</span></div>
+        </div>
+      </div>
+      <div className="reflection-section">
+        <div className="reflection-label">오늘을 점화한 단어</div>
+        <div className="day-summary-chips">
+          {['미팅 자료', '회식', '노래방'].map(k => <span key={k} className="day-summary-chip day-summary-chip--meaning">{k}</span>)}
+        </div>
       </div>
     </div>
   );

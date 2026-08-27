@@ -17,7 +17,7 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 
 const BUBBLE_MAX_W = 320;
-const BUBBLE_MAX_W_PREVIEW = 360;
+const BUBBLE_MAX_W_PREVIEW = 480; // 예시 전문은 화면 폭을 거의 다 쓴다 (카드에 갇힌 느낌을 줄인다)
 const EDGE = 12;
 
 function rectIn(container, el) {
@@ -47,9 +47,15 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
       setPointerRect(rectIn(containerRef.current, pel));
     };
     measure();
-    const timers = [200, 600, 1200, settle + 60].map(ms => setTimeout(measure, ms));
+    // 키보드가 오르내리면 iOS는 window resize 대신 visualViewport만 바뀐다 — 그것도 듣고, 몇 번 더 잰다
+    const timers = [200, 600, 1200, 2000, 3000, settle + 60].map(ms => setTimeout(measure, ms));
     window.addEventListener('resize', measure);
-    return () => { timers.forEach(clearTimeout); window.removeEventListener('resize', measure); };
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', measure); vv?.addEventListener('scroll', measure);
+    return () => {
+      timers.forEach(clearTimeout); window.removeEventListener('resize', measure);
+      vv?.removeEventListener('resize', measure); vv?.removeEventListener('scroll', measure);
+    };
   }, [step, containerRef]);
 
   // 사용자가 밝혀진 곳을 실제로 눌렀는지 — 캡처 단계에서 듣고, 앱의 원래 동작은 그대로 둔다
@@ -67,7 +73,8 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
   const W = containerRef.current?.clientWidth ?? 0;
   const H = containerRef.current?.clientHeight ?? 0;
   const pad = 4;
-  const spot = rect && rect.settled
+  const measured = rect && rect.settled && rect.width > 0 && rect.height > 0 && rect.top + rect.height > 0;
+  const spot = measured
     ? { left: rect.left - pad, top: rect.top - pad, width: rect.width + pad * 2, height: rect.height + pad * 2, radius: rect.radius + pad }
     : null;
   const pointerSpot = pointerRect ?? spot;
@@ -111,7 +118,7 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
 
   // 대상이 있는 단계인데 아직 자리를 못 쟀거나(스크롤 중) 자리 잡히기 전이면 아무것도 보여주지 않는다.
   // (기본 자리에 먼저 떴다가 옮겨가면 "엉뚱한 데로 갔다 온다"로 보인다)
-  const ready = !step.target || (rect && rect.settled);
+  const ready = !step.target || measured;
   // 언제든 그만둘 수 있는 X. 어느 단계에서 나갔는지는 endTour('skipped')가 step과 함께 남긴다.
   const skipBtn = onSkip && !step.final && (
     <button type="button" className="tour-skip" onClick={onSkip} aria-label="안내 건너뛰기">✕</button>
@@ -143,7 +150,7 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
       )}
 
       <div
-        className={`tour-bubble${tail ? ` tour-bubble--tail-${tail}` : ''}${step.final ? ' tour-bubble--final' : ''}`}
+        className={`tour-bubble${step.plain ? ' tour-bubble--plain' : ''}${tail && !step.plain ? ` tour-bubble--tail-${tail}` : ''}${step.plain && tail ? ` tour-bubble--arrow-${tail}` : ''}${step.final ? ' tour-bubble--final' : ''}`}
         style={{ ...bubbleStyle, '--tail-x': `${tailX}px` }}
       >
         <p>{step.caption}</p>

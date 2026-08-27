@@ -3518,3 +3518,26 @@ body.keyboard-open .input-toolbar { display: flex; }
   background-color: #f7f8fc; padding: 10px; text-align: left;
   mask-image: linear-gradient(#000 85%, transparent);
 }
+
+/* ── 페이지 팁 plain 스타일: 말풍선 없이 딤 위 흰 글씨 + 예시 패널 ── */
+.tour-bubble--plain { background: none; box-shadow: none; padding: 0 4px; animation: rabbit-dim-in 0.25s ease-out; }
+.tour-bubble--plain::after { display: none; }
+.tour-bubble--plain > p { color: #fff; font-size: 1.08rem; font-weight: 700; line-height: 1.5; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35); }
+.tour-bubble--plain .tour-preview {
+  margin-top: 12px; max-height: 58vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  background-color: #fff; border-radius: 16px; padding: 14px; mask-image: none; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
+}
+.tour-bubble--plain .tour-bubble-foot { margin-top: 12px; }
+.tour-bubble--plain .tour-btn { background-color: #fff; color: var(--primary-color); }
+/* 강조 대상 쪽으로 향하는 작은 화살표 */
+.tour-bubble--arrow-down::before, .tour-bubble--arrow-up::before {
+  content: '↓'; display: block; color: #fff; font-size: 1.3rem; line-height: 1; text-align: center; margin-top: 8px;
+}
+.tour-bubble--arrow-down { display: flex; flex-direction: column; }
+.tour-bubble--arrow-down::before { order: 9; }
+.tour-bubble--arrow-up::before { content: '↑'; margin: 0 0 8px; }
+.ob-sample--one { gap: 6px; }
+.ob-sample-typed { font-size: 0.78rem; color: rgba(255, 255, 255, 0.85); padding-left: 4px; }
+.tour-bubble--plain .ob-sample--one .memo-content { background-color: #fff; }
+/* 채팅 예시 한 줄은 패널 없이 딤 위에 그대로 */
+.tour-bubble--plain .tour-preview:has(.ob-sample--one) { background: none; box-shadow: none; padding: 0; max-height: none; overflow: visible; }

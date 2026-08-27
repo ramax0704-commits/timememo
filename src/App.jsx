@@ -28,7 +28,7 @@ import { requestDaySummary, summaryCacheKey, peekSummaryCache, collectCachedRabb
 import ReviewScreen from './ReviewScreen';
 import TourOverlay from './TourOverlay';
 import OnboardingCards from './OnboardingCards';
-import { SampleReview, SampleWeekList, SampleMonthly, SampleCurve, SampleHabits } from './OnboardingSamples';
+import { SampleReviewFull, SampleWeekList, SampleMonthly, SampleCurve, SampleHabits, SampleChatOne } from './OnboardingSamples';
 import Splash from './Splash';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
@@ -717,7 +717,7 @@ function TimeRangeSheet({ init, others = [], onDone, onCancel }) {
 // 처음 온 사람에게 핵심 사용법을 카드 몇 장으로. 닫으면 다시 안 뜨고,
 // 마이페이지 '사용법 다시 보기'로 언제든 다시 볼 수 있다.
 const ONBOARDING_KEY = 'timememo-onboarding-done';
-// 페이지별 첫 진입 팁을 본 기록 { timeline, memo, today, week, monthly }
+// 페이지별 첫 진입 팁을 본 기록 { timeline, schedule, today, week, monthly }
 const TIPS_KEY = 'timememo-tips-seen';
 // 스플래시(첫 화면)에서 '구글로 시작' 또는 '로그인 없이'를 고른 적이 있는지
 const SPLASH_KEY = 'timememo-splash-done';
@@ -2447,8 +2447,10 @@ function App() {
   // 하나에만 있다는 건 똑같다 — 앱을 지우거나 폰을 바꾸면 사라지고 다른
   // 기기에서는 못 본다. 홈 화면 앱에는 '홈 화면에 추가' 안내만 뺀다(이미 했으니).
   const inStandaloneApp = isStandaloneApp();
+  // 안내용 기본 기록(guide-*)은 세지 않는다 — 처음 들어오자마자 보관 안내가 팁과 겹쳐 뜨면 안 된다
+  const ownMemoCount = memos.filter(m => !String(m.id).startsWith('guide-')).length;
   const showSaveNotice =
-    isGuest && memos.length >= SAVE_NOTICE_AFTER && !saveNoticeDismissed && !tour.active;
+    isGuest && ownMemoCount >= SAVE_NOTICE_AFTER && !saveNoticeDismissed && !tour.active && !tip;
 
   // 게스트 기록이 생기면 브라우저에 "이 사이트 저장소는 지우지 말아 달라"고 요청한다 (Storage API persist).
   // 크롬은 대체로 들어주고(용량 정리 대상에서 제외), 사파리는 거의 무시한다 — 그래서 iOS는 홈 화면 추가 안내가 따로 있다.
@@ -3840,29 +3842,49 @@ function App() {
     setShowCards(false);
     localStorage.setItem(ONBOARDING_KEY, '1');
     setActiveView('timeline');
+    seedGuideMemos();
     track('Onboarding Cards', { action });
+  };
+  // 처음 온 사람의 오늘에 안내용 기록 세 개를 깔아둔다 — 빈 화면 대신 "이렇게 쓰면 된다"가 보이고,
+  // 시간표 팁이 구간 기록 예시(guide-range)를 가리킬 수 있다. 진짜 기록처럼 지우거나 고칠 수 있다.
+  const seedGuideMemos = () => {
+    if (!isGuest || memos.length > 0) return;
+    const now = new Date();
+    const at = (h, m) => new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).toISOString();
+    const rows = [
+      { id: 'guide-1', content: '오늘 한 일을 한 줄씩 남겨보세요. 이 기록은 눌러서 고치거나 옆으로 밀어 지울 수 있어요.', color: 'default', recorded_at: at(9, 0), spans_from_prev: false, spans_to_next: false, end_minutes: 0 },
+      { id: 'guide-range', content: '"10시반~12시 회의"처럼 적으면 이렇게 구간으로 남아요.', color: 'blue', recorded_at: at(10, 30), spans_from_prev: false, spans_to_next: false, end_minutes: 90 },
+      { id: 'guide-3', content: '기록이 5개 모이면 회고 탭에서 오늘의 회고를 받아볼 수 있어요.', color: 'default', recorded_at: at(14, 0), spans_from_prev: false, spans_to_next: false, end_minutes: 0 },
+    ];
+    saveGuestRows([...loadGuestRows(), ...rows]);
+    setMemos(prev => [...prev, ...rows.map(rowToMemo)].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
   };
 
   // ── 페이지별 첫 진입 팁 ─────────────────────────────────────
   // 한 번에 한 문장. 페이지마다 처음 들어왔을 때 한 번만. 건너뛰면 그 페이지 것만 끝.
+  // 지시문은 딤 위에 흰 글씨로(plain), 한 번에 한 문장. 회고 쪽은 예시 '전문'을 아래에 펼친다.
+  const guideRange = memos.find(m => String(m.id) === 'guide-range');
   const TIP_STEPS = {
     timeline: [
-      { key: 'time', target: '.input-area', place: 'above', advance: 'send', caption: '"9시 30분 밥"처럼 시간을 앞에 적어 보내보세요.' },
-      { key: 'tab', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', advance: 'tap-target', pointer: 'tap', caption: '타임라인 탭을 한 번 더 누르면 시간표로 바뀌어요.' },
+      { key: 'time', target: '.input-area', place: 'above', advance: 'send', plain: true, caption: '했던 일을 시간과 함께 입력해 보세요.', preview: <SampleChatOne /> },
+      { key: 'tab', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', advance: 'tap-target', pointer: 'tap', plain: true, caption: '타임라인 탭을 한 번 더 누르면 시간표로 바뀌어요.' },
     ],
-    memo: [
-      { key: 'time-tap', target: '.memo-time-container', place: 'below', advance: 'tap-target', pointer: 'tap', caption: '시각을 누르면 시간을 고칠 수 있어요.' },
+    schedule: [
+      // 판 전체를 밝히면 흰 글씨가 안 보인다 — 처음 둘은 대상 없이 딤 위에 글만
+      { key: 'slot', target: null, place: 'bottom', plain: true, caption: '빈 시간대를 꾹 누르면 그 시각에 기록을 추가할 수 있어요.' },
+      { key: 'span', target: null, place: 'bottom', plain: true, caption: '꾹 누른 채 끌면 시작과 끝이 있는 구간 기록이 돼요.' },
+      { key: 'edit', target: guideRange ? `.schedule-block[data-at="${guideRange.recordedAt}"]` : '.schedule-block', place: 'below', plain: true, caption: '기록을 누르면 내용을, 그 안의 시각을 누르면 시간을 고칠 수 있어요.' },
     ],
     today: [
-      { key: 'curve', target: '.review-screen .shape', place: 'below', caption: '기록이 길었던 시간이 이 곡선에 나타나요.', preview: <SampleCurve /> },
-      { key: 'result', target: null, place: 'bottom', caption: '회고를 만들면 이렇게 나와요.', preview: <SampleReview /> },
+      { key: 'curve', target: '.review-screen .shape', place: 'below', plain: true, caption: '기록이 길었던 시간이 이 곡선에 나타나요.', preview: <SampleCurve /> },
+      { key: 'result', target: null, place: 'bottom', plain: true, caption: '기록 5개가 모이면 이런 회고를 받아볼 수 있어요.', preview: <SampleReviewFull /> },
     ],
     week: [
-      { key: 'days', target: null, place: 'bottom', caption: '요일마다 그날의 한 줄이 쌓여요.', preview: <SampleWeekList /> },
-      { key: 'habit', target: null, place: 'bottom', caption: '습관 키워드를 등록하면 그 단어가 든 날에 체크돼요.', preview: <SampleHabits /> },
+      { key: 'days', target: null, place: 'bottom', plain: true, caption: '요일마다 그날의 한 줄이 쌓여요.', preview: <SampleWeekList /> },
+      { key: 'habit', target: null, place: 'bottom', plain: true, caption: '습관 키워드를 등록하면 그 단어가 든 날에 체크돼요.', preview: <SampleHabits /> },
     ],
     monthly: [
-      { key: 'rabbits', target: null, place: 'bottom', caption: '회고를 만든 날마다 토끼가 달력에 남아요.', preview: <SampleMonthly compact /> },
+      { key: 'rabbits', target: null, place: 'bottom', plain: true, caption: '회고를 만든 날마다 토끼가 달력에 남아요.', preview: <SampleMonthly /> },
     ],
   };
   // 강조할 대상이 화면에 없으면(기록 0인 회고 탭 등) 대상 없이 아래쪽 말풍선으로 띄운다
@@ -3897,7 +3919,7 @@ function App() {
     if (tip || showCards || showSplash || tour.active || authLoading) return;
     if (localStorage.getItem(ONBOARDING_KEY) !== '1') return;
     let page = null;
-    if (activeView === 'timeline') page = !tipsSeen.timeline ? 'timeline' : (!tipsSeen.memo && memos.length > 0 && !showScheduleView ? 'memo' : null);
+    if (activeView === 'timeline') page = showScheduleView ? (!tipsSeen.schedule ? 'schedule' : null) : (!tipsSeen.timeline ? 'timeline' : null);
     else if (activeView === 'review') page = !tipsSeen[reviewMode] ? reviewMode : null;
     if (!page) return;
     const id = setTimeout(() => setTip({ page, idx: 0 }), 500);
