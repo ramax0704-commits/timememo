@@ -686,12 +686,6 @@ function WeekTalkCurve({ week }) {
   const peakLabel = ampmLabel(Math.floor((DAY_START_MIN + peakMin) / 60) % 24).replace(/시$/, `시${(peakMin % 60) ? ' 30분' : ''}`);
   const peakX = ((peakMin + BIN / 2) / 1440) * 100;
   const { line, area } = monotonePath(binsToPoints(total, totalMax));
-  // 실제 기록 시각마다 점 — 봉우리가 어느 기록에서 왔는지 눈으로 맞춰볼 수 있게
-  const dots = days.flatMap(d => d.items.map(m => {
-    const t = minuteInReviewDay(m.recordedAt);
-    const v = total[Math.floor(t / BIN)];
-    return { key: m.id, x: (t / 1440) * 100, y: ((CURVE_H - 3 - (v / totalMax) * (CURVE_H - 8)) / CURVE_H) * 100 };
-  }));
   return (
     <div className="day-curve talk-curve" role="img" aria-label={`이번 주 기록 길이 곡선. ${peakLabel}쯤 가장 길게`}>
       <div className="day-curve-plot">
@@ -711,7 +705,6 @@ function WeekTalkCurve({ week }) {
           ))}
           <path d={line} className="day-curve-line" vectorEffect="non-scaling-stroke" />
         </svg>
-        {dots.map(d => <span key={d.key} className="week-talk-dot" style={{ left: `${d.x}%`, top: `${d.y}%` }} />)}
         <span className={`day-curve-peak${peakX > 70 ? ' day-curve-peak--left' : peakX < 14 ? ' day-curve-peak--start' : ''}`} style={{ left: `${peakX}%` }}>
           {peakLabel}쯤 말이 길었어요
         </span>
@@ -719,7 +712,7 @@ function WeekTalkCurve({ week }) {
       <div className="day-curve-axis">
         {[0, 6, 12, 18].map(h => <span key={h}>{ampmLabel(h + DAY_START_MIN / 60)}</span>)}
       </div>
-      <p className="week-talk-legend">점은 기록 하나하나, 흐린 선은 하루하루, 굵은 선은 이번 주 합</p>
+      <p className="week-talk-legend">흐린 선은 하루하루, 굵은 선은 이번 주 합</p>
     </div>
   );
 }
@@ -770,10 +763,9 @@ function WeekView({ week, habitKeywords, dayHeadlines, dayRabbits, onPickDay, on
         <WeekTalkCurve week={week} />
       </section>
 
-      <section className="day-summary" aria-label="이번 주 하루하루">
+      <section className="day-summary" aria-label="이번 주 요약">
         <header className="day-summary-head">
-          <span className="day-summary-title">하루하루</span>
-          <span className="day-summary-count">탭하면 그날 회고로</span>
+          <span className="day-summary-title">이번 주 요약</span>
         </header>
         <WeekDays week={week} dayHeadlines={dayHeadlines} dayRabbits={dayRabbits} habitKeywords={habitKeywords} onPickDay={onPickDay} />
       </section>
