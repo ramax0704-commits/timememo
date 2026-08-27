@@ -3603,7 +3603,7 @@ function App() {
         // 앞머리에 시각을 적어 남긴 기록인지 (none | single | range)
         time_prefix: timed?.kind ?? 'none',
         // "온보딩 진입 시 실제로 입력했는지"를 보는 축
-        during_onboarding: tour.active,
+        during_onboarding: tour.active || !!tip,
       });
       if (tour.active) afterTourSend(memo, mode);
     if (advanceTipIf('send', 400)) inputRef.current?.blur(); // 안내 중엔 키보드를 내리고 다음 안내로
@@ -3639,11 +3639,13 @@ function App() {
     // 비로그인은 프로필을 만들 수 없다(기기마다 새로 생기는 익명 id라 사람이 안 묶인다).
     // 이벤트에 달면 로그인 여부와 상관없이 다 잡히고, guest 속성으로 나눠 볼 수 있다.
     // memos는 그 사람의 전체 기록이고 이 시점엔 아직 새 기록이 안 들어가 있다.
-    const isFirstMemo = memos.length === 0;
+    // 안내용 기본 기록(guide-*)은 세지 않는다 — 8/28부터 새 사용자에게 3개를 심어두므로, 그걸 세면 첫 기록이 영영 안 잡힌다
+    const ownBefore = memos.filter(m => !String(m.id).startsWith('guide-')).length;
+    const isFirstMemo = ownBefore === 0;
     // 요약 카드를 실제로 본 뒤에 남긴 기록인지. 카드가 다음 기록을 부르는지 보려는 값이다.
     const afterSummary = summaryViewedRef.current.has(dateKeyOf(selectedDate));
     if (afterSummary) {
-      track('record_created_after_summary', { guest: isGuest, memo_count_before: memos.length, source: extra?.source ?? 'direct' });
+      track('record_created_after_summary', { guest: isGuest, memo_count_before: ownBefore, source: extra?.source ?? 'direct' });
     }
     track('Memo Created', {
       after_summary: afterSummary,
@@ -3655,7 +3657,12 @@ function App() {
       // 이 기록을 쓰기 직전까지 이 사람이 갖고 있던 기록 수 = 이게 몇 번째 기록인지.
       // 이게 없으면 "사람들이 몇 개째에서 멈추나"를 Mixpanel에서 알 수 없다.
       // (이벤트 수만 세면 많이 쓰는 한 명이 전체를 가려버린다)
-      memo_count_before: memos.length,
+      memo_count_before: ownBefore,
+      // 페이지 팁이 떠 있는 동안 쓴 기록인지 (카드 온보딩 → 첫 팁 "시간과 함께 입력해 보세요"에서 바로 쓰는지)
+      during_tip: !!tip,
+      tip_step: tip ? `${tip.page}:${TIP_STEPS[tip.page]?.[tip.idx]?.key ?? tip.idx}` : null,
+      // 온보딩 형태 — 8/28 카드+팁 방식. 옛 투어(tour) 시절 데이터와 나눠 본다
+      onboarding_variant: 'cards-v2',
       ...extra,
       hour: new Date().getHours(),
       content_length: content.length,
