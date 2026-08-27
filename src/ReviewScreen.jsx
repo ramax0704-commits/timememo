@@ -20,7 +20,6 @@ import {
 import { rabbitById } from './rabbits';
 import { NEGATIVE_LABELS } from './emotions';
 
-const hourLabel = (h) => `${String(h).padStart(2, '0')}시`;
 
 // ── 하루 리듬 곡선 ─────────────────────────────────────────────
 // 0시~24시 위에 기록이 몰린 정도를 부드러운 선으로. 막대가 아니라 곡선인 이유는
@@ -454,8 +453,6 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
 
 // ── 오늘의 모양 (블록 1) ──────────────────────────────────────
 // 몰린 시간은 곡선의 꼭대기(가우시안 합의 최대점)로 잡는다. 기록이 한 칸에 몰린 게 아니라
-// 여러 시각에 흩어져 있을 때도 '무게중심'이 보이기 때문이다.
-const peakHourFromCurve = (curve) => (curve?.peakMinute != null ? Math.floor(((curve.peakMinute + (curve.offsetMin ?? 0)) % 1440) / 60) : null);
 
 // ── 할 말이 많았던 때 ─────────────────────────────────────────
 // 시간대별 기록 '개수'는 사용자에게 필요 없는 정보였다. 대신 기록마다 글자 수를 세로축으로 놓아
@@ -657,6 +654,68 @@ function MonthlyRabbits({ dayRabbits, onPickDay }) {
 }
 
 // ── 이번 주 ──────────────────────────────────────────────────
+// ── 할 말이 많았던 때 · 이번 주 ───────────────────────────────
+// '이번 주 리듬'(기록 개수 분포)은 뭘 보여주는지 읽히지 않았다. 오늘 탭과 같은 기준 — 기록의 글자 수 —
+// 으로 통일한다. 요일마다 30분 칸으로 글자 수를 모아 얇고 흐린 선으로 겹치고, 그 합을 굵은 선으로.
+const BIN = 30;
+const NBINS = 1440 / BIN;
+function binsOf(items) {
+  const b = new Array(NBINS).fill(0);
+  for (const m of items) b[Math.floor(minuteInReviewDay(m.recordedAt) / BIN)] += (m.content || '').length;
+  return b;
+}
+// 30분 칸 그대로 그리면 바늘처럼 뾰족해서 '언제쯤'이 안 읽힌다 — 앞뒤 칸으로 번지게 한다 (±1시간)
+const KERNEL = [0.06, 0.24, 0.4, 0.24, 0.06];
+function smooth(bins) {
+  return bins.map((_, i) => KERNEL.reduce((acc, w, k) => acc + w * (bins[i + k - 2] || 0), 0));
+}
+function binsToPoints(bins, max) {
+  return bins.map((v, i) => ({ t: i * BIN + BIN / 2, y: max > 0 ? v / max : 0 }));
+}
+function WeekTalkCurve({ week }) {
+  const days = week.days.filter(d => d.count > 0);
+  if (days.length === 0) return null;
+  const perDay = days.map(d => smooth(binsOf(d.items)));
+  const total = new Array(NBINS).fill(0);
+  for (const b of perDay) b.forEach((v, i) => { total[i] += v; });
+  const totalMax = Math.max(1, ...total);
+  const dayMax = Math.max(1, ...perDay.flat());
+  const peakIdx = total.indexOf(Math.max(...total));
+  const peakMin = peakIdx * BIN;
+  const peakLabel = ampmLabel(Math.floor((DAY_START_MIN + peakMin) / 60) % 24).replace(/시$/, `시${(peakMin % 60) ? ' 30분' : ''}`);
+  const peakX = ((peakMin + BIN / 2) / 1440) * 100;
+  const { line, area } = monotonePath(binsToPoints(total, totalMax));
+  return (
+    <div className="day-curve talk-curve" role="img" aria-label={`이번 주 기록 길이 곡선. ${peakLabel}쯤 가장 길게`}>
+      <div className="day-curve-plot">
+        <svg viewBox={`0 0 ${CURVE_W} ${CURVE_H}`} preserveAspectRatio="none" className="day-curve-svg">
+          <defs>
+            <linearGradient id="weekTalkFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#4a72ff" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="#4a72ff" stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
+          {[25, 50, 75].map(p => (
+            <line key={p} x1={p} y1="0" x2={p} y2={CURVE_H} className="day-curve-grid" vectorEffect="non-scaling-stroke" />
+          ))}
+          <path d={area} fill="url(#weekTalkFill)" />
+          {perDay.map((b, i) => (
+            <path key={i} d={monotonePath(binsToPoints(b, dayMax)).line} className="week-talk-day" vectorEffect="non-scaling-stroke" />
+          ))}
+          <path d={line} className="day-curve-line" vectorEffect="non-scaling-stroke" />
+        </svg>
+        <span className={`day-curve-peak${peakX > 70 ? ' day-curve-peak--left' : peakX < 14 ? ' day-curve-peak--start' : ''}`} style={{ left: `${peakX}%` }}>
+          {peakLabel}쯤 말이 길었어요
+        </span>
+      </div>
+      <div className="day-curve-axis">
+        {[0, 6, 12, 18].map(h => <span key={h}>{ampmLabel(h + DAY_START_MIN / 60)}</span>)}
+      </div>
+      <p className="week-talk-legend">흐린 선은 하루하루, 굵은 선은 이번 주 합</p>
+    </div>
+  );
+}
+
 // ── 이번 주 요일별 한 줄 ─────────────────────────────────────
 // 날짜별 기록 '개수'는 의미가 없었다. 대신 그날 뭘 했는지 한 줄로.
 // 회고를 만든 날은 그 회고의 제목(headline)을, 아니면 기록 중 핵심 몇 개를 AI 없이 골라 잇는다.
@@ -692,16 +751,15 @@ function WeekDays({ week, dayHeadlines, dayRabbits, habitKeywords, onPickDay }) 
 
 function WeekView({ week, habitKeywords, dayHeadlines, dayRabbits, onPickDay, onEditHabits, onViewed }) {
   useEffect(() => { onViewed?.(); }, [onViewed]);
-  const peakHour = peakHourFromCurve(week.curve);
-  const peakLabel = peakHour != null ? `${hourLabel(peakHour)}쯤 가장 많이` : null;
 
   return (
     <>
-      <section className="day-summary shape" aria-label="이번 주 기록">
+      <section className="day-summary shape" aria-label="이번 주 할 말이 많았던 때">
         <header className="day-summary-head">
-          <span className="day-summary-title">이번 주 리듬</span>
+          <span className="day-summary-title">할 말이 많았던 때</span>
+          <span className="day-summary-count">이번 주</span>
         </header>
-        <DayCurve curve={week.curve} now={null} peakLabel={peakLabel} />
+        <WeekTalkCurve week={week} />
       </section>
 
       <section className="day-summary" aria-label="이번 주 하루하루">

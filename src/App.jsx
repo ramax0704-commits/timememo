@@ -5055,6 +5055,10 @@ function App() {
             오늘로
           </button>
         )}
+        {/* 회고 탭도 같은 자리 — 지난 날 회고를 보다 오늘로 바로 돌아온다 */}
+        {activeView === 'review' && !reviewIsToday && (
+          <button type="button" className="today-fab" onClick={() => pickReviewDay(new Date())}>오늘로</button>
+        )}
         {activeView === 'timeline' ? (
           /* ── 타임라인 뷰 ── */
           showScheduleView ? (
