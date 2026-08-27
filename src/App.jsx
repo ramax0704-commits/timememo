@@ -28,7 +28,7 @@ import { requestDaySummary, summaryCacheKey, peekSummaryCache, collectCachedRabb
 import ReviewScreen from './ReviewScreen';
 import TourOverlay from './TourOverlay';
 import OnboardingCards from './OnboardingCards';
-import { SampleReviewFull, SampleWeekList, SampleMonthly, SampleCurve, SampleHabits, SampleChatOne } from './OnboardingSamples';
+import { SampleReviewFull, SampleWeekList, SampleMonthly, SampleCurve, SampleHabits, SampleInput } from './OnboardingSamples';
 import Splash from './Splash';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
@@ -1622,6 +1622,7 @@ function App() {
   const hmToMin = (str) => { const [h, mi] = str.split(':').map(Number); return h * 60 + mi; };
   const pendingSpan = (() => {
     if (!showScheduleView) return null;
+    if (editingMemoId) return null; // 수정 중엔 띠를 안 그린다 — 진짜 블록을 덮어 내용이 안 보였다 (8/27)
     if (slotPick) {
       const start = hmToMin(slotPick.draftStart);
       let end = slotPick.isRange ? hmToMin(slotPick.draftEnd) : null;
@@ -2059,6 +2060,7 @@ function App() {
       }
     }
 
+    if (tipStep?.advance === 'drop') setTimeout(nextTip, 300); // 안내: 옮기기 끝 → 다음(눌러보세요)
     // 확정한 뒤에도 잠깐은 마음을 바꿀 수 있게 되돌리기 토스트를 띄운다 (8/27: 6초는 못 보고 지나갔다 → 10초)
     const timer = setTimeout(() => setMoveUndoToast(null), 10000);
     setMoveUndoToast(prevT => {
@@ -2072,6 +2074,7 @@ function App() {
     const m = moveConfirm;
     if (!m) return;
     setMoveConfirm(null);
+    if (tipStep?.advance === 'drop') setTimeout(nextTip, 300);
     await writeMemoFields(m.memoId, m.prev.db, m.prev.local);
   };
 
@@ -2390,6 +2393,7 @@ function App() {
       // 꾹 누르면 이동 모드 (8/27: 시간 조정 시트가 바로 떠서 끌 수가 없었다 — 시트는 안 움직이고 놓았을 때만)
       g.mode = 'drag';
       scheduleSuppressClickRef.current = true; // 롱프레스 뒤 click(수정)이 안 열리게
+      if (tipStep?.advance === 'hold') nextTip(); // 안내: 꾹 눌렀다 → 다음(끌어보세요)
       setMoveUndoToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return null; });
       try { el.setPointerCapture(g.id); } catch { /* 이미 떼었으면 무시 */ }
       navigator.vibrate?.(15);
@@ -3599,7 +3603,7 @@ function App() {
         during_onboarding: tour.active,
       });
       if (tour.active) afterTourSend(memo, mode);
-    if (tip?.page === 'timeline' && tipStep?.advance === 'send') setTimeout(nextTip, 400);
+    if (tipStep?.advance === 'send') { inputRef.current?.blur(); setTimeout(nextTip, 400); } // 안내 중엔 키보드를 내리고 다음 안내로
       return;
     }
 
@@ -3620,7 +3624,7 @@ function App() {
     const memo = rowToMemo(data);
     setMemos(prev => prev.some(m => m.id === memo.id) ? prev : [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
     if (tour.active) afterTourSend(memo, mode);
-    if (tip?.page === 'timeline' && tipStep?.advance === 'send') setTimeout(nextTip, 400);
+    if (tipStep?.advance === 'send') { inputRef.current?.blur(); setTimeout(nextTip, 400); } // 안내 중엔 키보드를 내리고 다음 안내로
   };
 
   // 기록 하나가 만들어질 때 보내는 공통 이벤트.
@@ -3866,25 +3870,26 @@ function App() {
   const guideRange = memos.find(m => String(m.id) === 'guide-range');
   const TIP_STEPS = {
     timeline: [
-      { key: 'time', target: '.input-area', place: 'above', advance: 'send', plain: true, caption: '했던 일을 시간과 함께 입력해 보세요.', preview: <SampleChatOne /> },
-      { key: 'tab', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', advance: 'tap-target', pointer: 'tap', plain: true, caption: '타임라인 탭을 한 번 더 누르면 시간표로 바뀌어요.' },
+      { key: 'time', target: '.input-area', place: 'above', advance: 'send', plain: true, caption: '했던 일을 시간과 함께 입력해 보세요.', preview: <SampleInput /> },
+      { key: 'tab', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', advance: 'tap-target', plain: true, caption: '타임라인 탭을 한 번 더 누르면 시간표로 바뀌어요.' },
     ],
+    // 시간표: 구간 예시 기록(guide-range)으로 직접 해보게 한다 — 꾹 → 끌기 → 탭 → 내용 → 시각
     schedule: [
-      // 판 전체를 밝히면 흰 글씨가 안 보인다 — 처음 둘은 대상 없이 딤 위에 글만
-      { key: 'slot', target: null, place: 'bottom', plain: true, caption: '빈 시간대를 꾹 누르면 그 시각에 기록을 추가할 수 있어요.' },
-      { key: 'span', target: null, place: 'bottom', plain: true, caption: '꾹 누른 채 끌면 시작과 끝이 있는 구간 기록이 돼요.' },
-      { key: 'edit', target: guideRange ? `.schedule-block[data-at="${guideRange.recordedAt}"]` : '.schedule-block', place: 'below', plain: true, caption: '기록을 누르면 내용을, 그 안의 시각을 누르면 시간을 고칠 수 있어요.' },
+      { key: 'hold', target: guideRange ? `.schedule-block[data-at="${guideRange.recordedAt}"]` : '.schedule-block', place: 'below', advance: 'hold', plain: true, caption: '구간으로 등록된 이 기록을 꾹 눌러보세요.' },
+      { key: 'drag', target: guideRange ? `.schedule-block[data-at="${guideRange.recordedAt}"]` : '.schedule-block', place: 'below', advance: 'drop', plain: true, caption: '누른 채 위아래로 움직여 시간을 옮겨보세요.' },
+      { key: 'tap', target: guideRange ? `.schedule-block[data-at="${guideRange.recordedAt}"]` : '.schedule-block', place: 'below', advance: 'tap-target', plain: true, caption: '이번엔 기록을 한 번 눌러보세요.' },
+      { key: 'edit', target: '.input-area', place: 'above', plain: true, caption: '여기서 내용을 고칠 수 있어요.' },
+      { key: 'time', target: '.input-time-hit', place: 'above', advance: 'tap-target', plain: true, caption: '앞의 시각을 누르면 시간을 고칠 수 있어요. 눌러보세요.' },
     ],
+    // 회고 쪽은 눌러볼 게 없으니 예시 화면 한 장으로
     today: [
-      { key: 'curve', target: '.review-screen .shape', place: 'below', plain: true, caption: '기록이 길었던 시간이 이 곡선에 나타나요.', preview: <SampleCurve /> },
-      { key: 'result', target: null, place: 'bottom', plain: true, caption: '기록 5개가 모이면 이런 회고를 받아볼 수 있어요.', preview: <SampleReviewFull /> },
+      { key: 'example', target: null, place: 'bottom', plain: true, caption: '기록 5개가 모이면 이런 회고를 받아볼 수 있어요.', preview: <><SampleCurve /><SampleReviewFull /></> },
     ],
     week: [
-      { key: 'days', target: null, place: 'bottom', plain: true, caption: '요일마다 그날의 한 줄이 쌓여요.', preview: <SampleWeekList /> },
-      { key: 'habit', target: null, place: 'bottom', plain: true, caption: '습관 키워드를 등록하면 그 단어가 든 날에 체크돼요.', preview: <SampleHabits /> },
+      { key: 'example', target: null, place: 'bottom', plain: true, caption: '한 주가 지나면 요일별 한 줄과 습관 체크가 쌓여요.', preview: <><SampleWeekList /><SampleHabits /></> },
     ],
     monthly: [
-      { key: 'rabbits', target: null, place: 'bottom', plain: true, caption: '회고를 만든 날마다 토끼가 달력에 남아요.', preview: <SampleMonthly /> },
+      { key: 'example', target: null, place: 'bottom', plain: true, caption: '회고를 만든 날마다 토끼가 달력에 남아요.', preview: <SampleMonthly /> },
     ],
   };
   // 강조할 대상이 화면에 없으면(기록 0인 회고 탭 등) 대상 없이 아래쪽 말풍선으로 띄운다
@@ -5348,7 +5353,7 @@ function App() {
             </div>
             {/* 앞머리 시각 위에 얹는 투명 버튼 — 눌러서 시간 조정 시트를 연다.
                 시각 부분만 덮어 뒤쪽 본문 타이핑은 방해하지 않는다. */}
-            {(showScheduleView ? pendingSpan : inputSpan) && timePrefixLen > 0 && (
+            {(pendingSpan || inputSpan) && timePrefixLen > 0 && (
               <button
                 type="button"
                 className="input-time-hit input-text-metrics"

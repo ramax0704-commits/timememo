@@ -11,6 +11,19 @@ const SAMPLE_MEMOS = [
   { time: '오후 7:10', text: '미팅 자료 준비 완료. 요구사항 정리 완료', dur: '1h 15m' },
 ];
 
+// 입력창에 "9시 30분 카페가서 독서함"이라고 적은 모습 (실제 입력 영역과 같은 구성)
+export function SampleInput() {
+  return (
+    <div className="ob-input" aria-hidden="true">
+      <div className="ob-input-row">
+        <div className="ob-input-box"><span className="ob-input-time">9시 30분</span> 카페가서 독서함</div>
+        <span className="ob-input-send">➤</span>
+      </div>
+      <div className="ob-input-chips"><span>🎨</span><span>↑ 이전 기록부터</span><span>↓ 다음 기록까지</span></div>
+    </div>
+  );
+}
+
 // 팁 하나에 붙는 예시 한 줄 — "시간과 함께" 적은 모습
 export function SampleChatOne() {
   return (
