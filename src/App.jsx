@@ -16,7 +16,7 @@ import {
   parse
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Send, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Tag, Plus, ListChecks, CornerDownLeft, Palette, HelpCircle, MessageSquare, Sparkles } from 'lucide-react';
+import { Send, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Plus, ListChecks, CornerDownLeft, Palette, HelpCircle, MessageSquare, Sparkles } from 'lucide-react';
 import { supabase, setRememberMe, getRememberMe } from './supabase';
 import { track, identifyUser, resetUser, markFirstMemo } from './analytics';
 import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
@@ -3127,7 +3127,10 @@ function App() {
     setTimeout(reveal, 350);
     setTimeout(reveal, 900); // iOS는 키보드 애니메이션이 끝난 뒤에야 viewport가 줄어든다
   };
-  const cancelInlineEdit = () => { setEditingMemoId(null); setInputText(''); if (inputRef.current) inputRef.current.style.height = 'auto'; };
+  const cancelInlineEdit = () => {
+    setEditingMemoId(null); setInputText('');
+    if (inputRef.current) { inputRef.current.style.height = 'auto'; inputRef.current.blur(); } // 키보드도 내린다
+  };
   // 수정 중에 입력 영역 밖(목록·헤더·탭바)을 누르면 취소로 친다 (8/27). 시트·모달·안내 위는 예외.
   useEffect(() => {
     if (!editingMemoId) return;
@@ -5146,31 +5149,6 @@ function App() {
                   </div>
                 </div>
               )}
-
-              {/* 습관 키워드 설정 */}
-              <div className="mypage-card">
-                <div className="card-header-icon">
-                  <Tag size={18} style={{ color: 'var(--primary-color)' }} />
-                  <h3>먼슬리 습관 키워드</h3>
-                </div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px', lineHeight: 1.5 }}>
-                  메모에 아래 단어가 포함되면 달력에 자동으로 표시됩니다.
-                </p>
-                <div className="keyword-list">
-                  {habitKeywords.filter(k => !k.endedAt).map(kw => (
-                    <div key={kw.name} className="keyword-chip" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: `var(--habit-${kw.color})`, flexShrink: 0 }} />
-                      <span>{kw.name}</span>
-                    </div>
-                  ))}
-                  {habitKeywords.filter(k => !k.endedAt).length === 0 && (
-                    <span style={{ fontSize: '0.8rem', color: '#aaa' }}>등록된 키워드가 없습니다</span>
-                  )}
-                </div>
-                <button className="btn-save" style={{ marginTop: '12px', width: '100%' }} onClick={openKeywordModal}>
-                  키워드 관리
-                </button>
-              </div>
 
               {/* 앱 사용법 다시 보기 */}
               <div className="mypage-card">
