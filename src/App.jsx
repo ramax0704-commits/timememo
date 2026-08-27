@@ -2622,6 +2622,21 @@ function App() {
   const showSaveNotice =
     isGuest && memos.length >= SAVE_NOTICE_AFTER && !saveNoticeDismissed && !tour.active;
 
+  // 게스트 기록이 생기면 브라우저에 "이 사이트 저장소는 지우지 말아 달라"고 요청한다 (Storage API persist).
+  // 크롬은 대체로 들어주고(용량 정리 대상에서 제외), 사파리는 거의 무시한다 — 그래서 iOS는 홈 화면 추가 안내가 따로 있다.
+  // 한 번 요청하면 유지되므로 기기당 한 번만 부른다.
+  const persistAskedRef = useRef(false);
+  useEffect(() => {
+    if (!isGuest || memos.length === 0 || persistAskedRef.current) return;
+    persistAskedRef.current = true;
+    const storage = navigator.storage;
+    if (!storage?.persist) return;
+    storage.persisted?.().then(already => {
+      if (already) return;
+      storage.persist().then(granted => track('Storage Persist', { granted, platform: isIOSDevice ? 'ios' : 'other' })).catch(() => {});
+    }).catch(() => {});
+  }, [isGuest, memos.length]);
+
   // 안내가 실제로 눈에 띈 순간을 한 번만 남긴다.
   // (이 안내가 로그인으로 이어지는지 봐야 붙여둘 값어치가 있는지 알 수 있다)
   const saveNoticeSeenRef = useRef(false);
