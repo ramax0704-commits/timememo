@@ -17,6 +17,7 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 
 const BUBBLE_MAX_W = 320;
+const BUBBLE_MAX_W_PREVIEW = 360;
 const EDGE = 12;
 
 function rectIn(container, el) {
@@ -85,7 +86,7 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
       : [{ left: 0, top: 0, width: W, height: H }];
 
   // 말풍선 자리: 대상 가운데를 향해 꼬리를 두고, 화면 밖으로 나가지 않게 좌우를 잡는다
-  const bubbleW = Math.min(BUBBLE_MAX_W, W - EDGE * 2);
+  const bubbleW = Math.min(step.preview ? BUBBLE_MAX_W_PREVIEW : BUBBLE_MAX_W, W - EDGE * 2);
   let bubbleStyle;
   let tail = null; // 'down' | 'up' | null
   let tailX = bubbleW / 2;
@@ -144,6 +145,8 @@ export default function TourOverlay({ step, index, containerRef, onTargetTap, on
         style={{ ...bubbleStyle, '--tail-x': `${tailX}px` }}
       >
         <p>{step.caption}</p>
+        {/* 예시 미리보기 — 페이지 팁에서 "이렇게 나와요"를 실제 UI 조각으로 보여준다 */}
+        {step.preview && <div className="tour-preview">{step.preview}</div>}
         {(step.final || step.advance === 'button') && (
           <div className="tour-bubble-foot">
             {step.final ? (

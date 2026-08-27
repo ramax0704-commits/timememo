@@ -465,7 +465,7 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
 // emotions[].index는 toSummaryRecords와 같은 순서(recordedAt 오름차순)의 기록 번호다.
 const fmtTime = (d) => format(new Date(d), 'HH:mm');
 
-function TalkCurveBlock({ memos, now, emotions, dayLabel }) {
+export function TalkCurveBlock({ memos, now, emotions, dayLabel }) {
   const sorted = [...(memos || [])].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
   if (sorted.length < 3) return null;
   const lens = sorted.map(m => (m.content || '').length);
@@ -783,8 +783,11 @@ function WeekView({ week, habitKeywords, dayHeadlines, dayRabbits, onPickDay, on
 export default function ReviewScreen({
   facts, todayMemos, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, busy, usesLeft,
   habitKeywords, onEditHabits, dayHeadlines, dayRabbits, onPickDay, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline,
+  onModeChange,
 }) {
   const [mode, setMode] = useState('today'); // 'today' | 'week' | 'monthly'
+  // 페이지별 첫 진입 팁이 어느 화면인지 알아야 해서 App에 알린다
+  useEffect(() => { onModeChange?.(mode); }, [mode, onModeChange]);
 
   // 탭에 들어와 오늘의 모양을 실제로 본 시점 (기록이 있을 때만 의미가 있다)
   useEffect(() => {

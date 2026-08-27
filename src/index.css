@@ -3496,3 +3496,58 @@ body.keyboard-open .input-toolbar { display: flex; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ── 온보딩 카드 슬라이드 ─────────────────────────────────── */
+.ob {
+  position: fixed; inset: 0; z-index: 1200; display: flex; flex-direction: column;
+  background: linear-gradient(170deg, #eef2ff 0%, #ffffff 55%, #fff7ea 100%);
+  padding-top: max(16px, env(safe-area-inset-top)); padding-bottom: max(20px, env(safe-area-inset-bottom));
+}
+.ob-skip {
+  align-self: flex-end; margin: 4px 16px 0; padding: 8px 12px; border: none; background: none;
+  color: var(--text-muted); font-size: 0.86rem; cursor: pointer;
+}
+.ob-track { flex: 1; overflow: hidden; touch-action: pan-y; min-height: 0; }
+.ob-slides { display: flex; height: 100%; transition: transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.ob-card {
+  flex: 0 0 100%; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 8px 28px 16px; box-sizing: border-box; text-align: center; overflow: hidden;
+}
+.ob-card-art {
+  width: 100%; max-width: 340px; max-height: 52vh; overflow: hidden;
+  background-color: #fff; border-radius: 22px; padding: 16px 14px; box-sizing: border-box;
+  box-shadow: 0 18px 44px -18px rgba(30, 40, 90, 0.35), 0 0 0 1px #e6eaf7;
+  text-align: left; margin-bottom: 26px;
+  mask-image: linear-gradient(#000 82%, transparent);
+}
+.ob-arrow { text-align: center; color: var(--primary-color); font-size: 1.1rem; margin: 6px 0; }
+.ob-title { margin: 0 0 8px; font-size: 1.45rem; font-weight: 800; letter-spacing: -0.01em; }
+.ob-line { margin: 0; font-size: 1rem; color: var(--text-muted); }
+.ob-foot { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 8px 24px 0; }
+.ob-dots { display: flex; gap: 7px; }
+.ob-dot { width: 7px; height: 7px; border-radius: 50%; background-color: #d5dbf0; transition: all 0.2s; }
+.ob-dot--on { width: 20px; border-radius: 999px; background-color: var(--primary-color); }
+.ob-next {
+  width: 100%; max-width: 340px; padding: 15px; border: none; border-radius: 16px;
+  background-color: var(--primary-color); color: #fff; font-size: 1rem; font-weight: 700; cursor: pointer;
+}
+.ob-next:active { background-color: var(--primary-hover); }
+
+/* 예시 조각 — 눌러도 아무 일 없고, 실제 화면보다 조금 작게 */
+.ob-sample { pointer-events: none; }
+.ob-static { cursor: default; }
+.ob-sample--chat { display: flex; flex-direction: column; gap: 10px; }
+.ob-sample--chat .memo-content { font-size: 0.86rem; }
+.ob-sample--review .reflection-headline { font-size: 1.05rem; margin: 6px 0 4px; }
+.ob-sample--review .reflection-narrative { font-size: 0.84rem; }
+.ob-sample--monthly .monthly-grid { gap: 4px; }
+.ob-sample--monthly-compact .monthly-cell { aspect-ratio: 1; }
+.ob-sample--habits { padding: 0; border: none; box-shadow: none; margin: 0; }
+.ob-sample--curve .day-summary { padding: 0; border: none; box-shadow: none; margin: 0; }
+
+/* 페이지 팁 말풍선 안의 예시 미리보기 */
+.tour-preview {
+  margin-top: 10px; max-height: 44vh; overflow: hidden; border-radius: 12px;
+  background-color: #f7f8fc; padding: 10px; text-align: left;
+  mask-image: linear-gradient(#000 85%, transparent);
+}

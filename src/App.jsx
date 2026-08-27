@@ -27,6 +27,8 @@ import {
 import { requestDaySummary, summaryCacheKey, peekSummaryCache, collectCachedRabbits, collectCachedSummaries, normalizeSummary } from './summaryAI';
 import ReviewScreen from './ReviewScreen';
 import TourOverlay from './TourOverlay';
+import OnboardingCards from './OnboardingCards';
+import { SampleReview, SampleWeekList, SampleMonthly, SampleCurve, SampleHabits } from './OnboardingSamples';
 import Splash from './Splash';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
@@ -786,6 +788,8 @@ function TimeRangeSheet({ init, others = [], onDone, onCancel }) {
 // 처음 온 사람에게 핵심 사용법을 카드 몇 장으로. 닫으면 다시 안 뜨고,
 // 마이페이지 '사용법 다시 보기'로 언제든 다시 볼 수 있다.
 const ONBOARDING_KEY = 'timememo-onboarding-done';
+// 페이지별 첫 진입 팁을 본 기록 { timeline, memo, today, week, monthly }
+const TIPS_KEY = 'timememo-tips-seen';
 // 스플래시(첫 화면)에서 '구글로 시작' 또는 '로그인 없이'를 고른 적이 있는지
 const SPLASH_KEY = 'timememo-splash-done';
 
@@ -1311,6 +1315,10 @@ function App() {
   // contIso: 투어 중 '이어서'로 저장한 진짜 기록의 시각 — 시간표에서 그 블록을 강조할 때 쓴다
   const [tour, setTour] = useState({ active: false, step: 0, aiStatus: 'idle', contIso: null });
   const [showSplash, setShowSplash] = useState(false);
+  const [showCards, setShowCards] = useState(false); // 스플래시 뒤 카드 슬라이드
+  const [tipsSeen, setTipsSeen] = useState(() => { try { return JSON.parse(localStorage.getItem(TIPS_KEY) || '{}') || {}; } catch { return {}; } });
+  const [tip, setTip] = useState(null); // { page, idx } — 지금 떠 있는 페이지 팁
+  const [reviewMode, setReviewMode] = useState('today');
   const appContainerRef = useRef(null);
   // 꾹 눌러 순서 옮기기 (채팅창)
   const [draggingMemoId, setDraggingMemoId] = useState(null);
@@ -3974,6 +3982,74 @@ function App() {
       el.setSelectionRange(el.value.length, el.value.length);
     }, 400);
   };
+  // ── 카드 온보딩 끝 → 페이지 팁 시작 ─────────────────────────
+  const finishCards = (action) => {
+    setShowCards(false);
+    localStorage.setItem(ONBOARDING_KEY, '1');
+    setActiveView('timeline');
+    track('Onboarding Cards', { action });
+  };
+
+  // ── 페이지별 첫 진입 팁 ─────────────────────────────────────
+  // 한 번에 한 문장. 페이지마다 처음 들어왔을 때 한 번만. 건너뛰면 그 페이지 것만 끝.
+  const TIP_STEPS = {
+    timeline: [
+      { key: 'time', target: '.input-area', place: 'above', caption: '"9시 30분 밥"처럼 시간을 앞에 적으면 그 시각에 기록돼요.' },
+      { key: 'tab', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', caption: '타임라인 탭을 한 번 더 누르면 시간표로 바뀌어요.' },
+    ],
+    memo: [
+      { key: 'hold', target: '.memo-swipe-wrapper', place: 'below', caption: '기록을 꾹 누르면 시간을 옮길 수 있어요.' },
+    ],
+    today: [
+      { key: 'curve', target: '.review-screen .shape', place: 'below', caption: '기록이 길었던 시간이 이 곡선에 나타나요.', preview: <SampleCurve /> },
+      { key: 'result', target: null, place: 'bottom', caption: '회고를 만들면 이렇게 나와요.', preview: <SampleReview /> },
+    ],
+    week: [
+      { key: 'days', target: null, place: 'bottom', caption: '요일마다 그날의 한 줄이 쌓여요.', preview: <SampleWeekList /> },
+      { key: 'habit', target: null, place: 'bottom', caption: '습관 키워드를 등록하면 그 단어가 든 날에 체크돼요.', preview: <SampleHabits /> },
+    ],
+    monthly: [
+      { key: 'rabbits', target: null, place: 'bottom', caption: '회고를 만든 날마다 토끼가 달력에 남아요.', preview: <SampleMonthly compact /> },
+    ],
+  };
+  // 강조할 대상이 화면에 없으면(기록 0인 회고 탭 등) 대상 없이 아래쪽 말풍선으로 띄운다
+  const tipStep = (() => {
+    if (!tip) return null;
+    const base = TIP_STEPS[tip.page][tip.idx];
+    const has = base.target && typeof document !== 'undefined' && document.querySelector(base.target);
+    return { ...base, target: has ? base.target : null, place: has ? base.place : 'bottom', free: true, advance: 'button' };
+  })();
+  const markTipsSeen = (page) => {
+    setTipsSeen(prev => {
+      const next = { ...prev, [page]: true };
+      try { localStorage.setItem(TIPS_KEY, JSON.stringify(next)); } catch { /* 무시 */ }
+      return next;
+    });
+  };
+  const endTips = (action) => {
+    if (!tip) return;
+    track('Page Tip', { action, page: tip.page, index: tip.idx });
+    markTipsSeen(tip.page);
+    setTip(null);
+  };
+  const nextTip = () => {
+    if (!tip) return;
+    if (tip.idx + 1 < TIP_STEPS[tip.page].length) setTip({ page: tip.page, idx: tip.idx + 1 });
+    else endTips('done');
+  };
+  // 어느 페이지에 있는지 → 아직 안 본 팁이 있으면 띄운다 (온보딩 카드를 끝낸 뒤에만)
+  useEffect(() => {
+    if (tip || showCards || showSplash || tour.active || authLoading) return;
+    if (localStorage.getItem(ONBOARDING_KEY) !== '1') return;
+    let page = null;
+    if (activeView === 'timeline') page = !tipsSeen.timeline ? 'timeline' : (!tipsSeen.memo && memos.length > 0 && !showScheduleView ? 'memo' : null);
+    else if (activeView === 'review') page = !tipsSeen[reviewMode] ? reviewMode : null;
+    if (!page) return;
+    const id = setTimeout(() => setTip({ page, idx: 0 }), 500);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, reviewMode, tipsSeen, showCards, showSplash, tour.active, authLoading, memos.length, showScheduleView, tip]);
+
   const endTour = (action) => {
     setTour({ active: false, step: 0, aiStatus: 'idle', contIso: null });
     setInputText(''); // 미리 적어둔 시각이 남아 있으면 지운다
@@ -4096,9 +4172,9 @@ function App() {
       const id = setTimeout(() => { setShowSplash(true); track('Splash', { action: 'shown' }); }, 0);
       return () => clearTimeout(id);
     }
-    // 스플래시는 봤는데 투어를 못 끝내고 나간 사람(기록 0): 다시 오면 투어부터
+    // 스플래시는 봤는데 카드를 못 끝내고 나간 사람(기록 0): 다시 오면 카드부터
     if (splashDone && !currentUser && memos.length === 0) {
-      const id = setTimeout(() => startTour('revisit'), 400);
+      const id = setTimeout(() => setShowCards(true), 400);
       return () => clearTimeout(id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5156,6 +5232,7 @@ function App() {
             usesLeft={tour.active ? SUMMARY_DAILY_LIMIT : summaryUsesLeft}
             habitKeywords={habitKeywords}
             onEditHabits={openKeywordModal}
+            onModeChange={setReviewMode}
             dayHeadlines={dayHeadlines}
             dayRabbits={dayRabbits}
             onPickDay={pickReviewDay}
@@ -5255,7 +5332,13 @@ function App() {
                 <button
                   className="btn-cancel"
                   style={{ width: '100%' }}
-                  onClick={() => startTour('mypage')}
+                  onClick={() => {
+                    // 카드 소개부터 다시, 페이지 팁도 다시 뜨게 초기화
+                    setTipsSeen({}); try { localStorage.removeItem(TIPS_KEY); } catch { /* 무시 */ }
+                    setShowMyPage(false);
+                    setShowCards(true);
+                    track('Onboarding Cards', { action: 'replay' });
+                  }}
                 >
                   사용법 다시 보기
                 </button>
@@ -6125,9 +6208,27 @@ function App() {
             localStorage.setItem(SPLASH_KEY, '1');
             track('Splash', { action: 'entered' });
             setShowSplash(false);
-            // 홈에 들어서자마자 투어 시작 — 첫 단계가 "지금 한 일을 적어보세요"다
-            startTour('splash');
+            // 앱이 뭘 해주는지 카드 세 장으로 먼저 보여준다 (예전엔 바로 입력 투어였다)
+            setShowCards(true);
+            track('Onboarding Cards', { action: 'shown' });
           }}
+        />
+      )}
+      {showCards && (
+        <OnboardingCards
+          onDone={() => finishCards('done')}
+          onSkip={() => finishCards('skipped')}
+        />
+      )}
+      {tipStep && !showCards && !showSplash && !tour.active && (
+        <TourOverlay
+          step={tipStep}
+          index={`${tip.page}-${tip.idx}`}
+          containerRef={appContainerRef}
+          onTargetTap={() => {}}
+          onNext={nextTip}
+          onFinish={nextTip}
+          onSkip={() => endTips('skipped')}
         />
       )}
       {tour.active && TOUR_STEPS[tour.step] && (
