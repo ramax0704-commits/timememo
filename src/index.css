@@ -2627,21 +2627,21 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 
 /* ── 이번 주: 날짜별 막대 ─────────────────────────────────────── */
-.week-days { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.week-day + .week-day { border-top: 1px solid #f0f1f6; }
-.week-day-btn {
+.wk-days { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.wk-day + .wk-day { border-top: 1px solid #f0f1f6; }
+.wk-day-btn {
   display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 2px;
   background: none; border: none; text-align: left; cursor: pointer; font: inherit; color: inherit;
 }
-.week-day-btn:disabled { cursor: default; }
-.week-day--empty .week-day-btn { opacity: 0.45; }
-.week-day-date { display: flex; flex-direction: column; align-items: center; width: 28px; flex-shrink: 0; line-height: 1.1; }
-.week-day-dow { font-size: 0.66rem; color: var(--text-muted); }
-.week-day-num { font-size: 0.95rem; font-weight: 700; }
-.week-day-rabbit { width: 34px; height: 34px; border-radius: 9px; object-fit: cover; flex-shrink: 0; }
-.week-day-rabbit--none { background-color: #eef0f7; }
-.week-day-text { flex: 1; min-width: 0; font-size: 0.84rem; line-height: 1.4; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.week-day-text--headline { color: var(--text-main); font-weight: 600; }
+.wk-day-btn:disabled { cursor: default; }
+.wk-day--empty .wk-day-btn { opacity: 0.45; }
+.wk-day-date { display: flex; flex-direction: column; align-items: center; width: 28px; flex-shrink: 0; line-height: 1.1; }
+.wk-day-dow { font-size: 0.66rem; color: var(--text-muted); }
+.wk-day-num { font-size: 0.95rem; font-weight: 700; }
+.wk-day-rabbit { width: 34px; height: 34px; border-radius: 9px; object-fit: cover; flex-shrink: 0; }
+.wk-day-rabbit--none { background-color: #eef0f7; }
+.wk-day-text { flex: 1; min-width: 0; font-size: 0.84rem; line-height: 1.4; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-day-text--headline { color: var(--text-main); font-weight: 600; }
 .habit-edit-btn {
   display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; border-radius: 999px;
   border: 1px solid #dfe4f7; background-color: #fff; color: var(--primary-color); font-size: 0.72rem; font-weight: 700; cursor: pointer;

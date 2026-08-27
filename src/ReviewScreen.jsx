@@ -662,7 +662,7 @@ function MonthlyRabbits({ dayRabbits, onPickDay }) {
 // 회고를 만든 날은 그 회고의 제목(headline)을, 아니면 기록 중 핵심 몇 개를 AI 없이 골라 잇는다.
 function WeekDays({ week, dayHeadlines, dayRabbits, habitKeywords, onPickDay }) {
   return (
-    <ul className="week-days">
+    <ul className="wk-days">
       {week.days.map(d => {
         const headline = dayHeadlines?.[d.key];
         const events = !headline && d.count > 0 ? dayKeyEvents(d.items, week.durations, habitKeywords) : '';
@@ -670,16 +670,16 @@ function WeekDays({ week, dayHeadlines, dayRabbits, habitKeywords, onPickDay }) 
         const text = headline || events;
         const empty = d.future || d.count === 0;
         return (
-          <li key={d.key} className={`week-day${empty ? ' week-day--empty' : ''}`}>
-            <button type="button" className="week-day-btn" disabled={empty} onClick={() => onPickDay?.(d.date)}>
-              <span className="week-day-date">
-                <span className="week-day-dow">{format(d.date, 'E', { locale: ko })}</span>
-                <span className="week-day-num">{format(d.date, 'd')}</span>
+          <li key={d.key} className={`wk-day${empty ? ' wk-day--empty' : ''}`}>
+            <button type="button" className="wk-day-btn" disabled={empty} onClick={() => onPickDay?.(d.date)}>
+              <span className="wk-day-date">
+                <span className="wk-day-dow">{format(d.date, 'E', { locale: ko })}</span>
+                <span className="wk-day-num">{format(d.date, 'd')}</span>
               </span>
               {rabbit?.image
-                ? <img className="week-day-rabbit" src={rabbit.image} alt={rabbit.name} />
-                : <span className="week-day-rabbit week-day-rabbit--none" aria-hidden="true" />}
-              <span className={`week-day-text${headline ? ' week-day-text--headline' : ''}`}>
+                ? <img className="wk-day-rabbit" src={rabbit.image} alt={rabbit.name} />
+                : <span className="wk-day-rabbit wk-day-rabbit--none" aria-hidden="true" />}
+              <span className={`wk-day-text${headline ? ' wk-day-text--headline' : ''}`}>
                 {d.future ? '' : d.count === 0 ? '기록 없음' : (text || `기록 ${d.count}개`)}
               </span>
             </button>
