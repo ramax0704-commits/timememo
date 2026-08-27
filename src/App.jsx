@@ -2060,7 +2060,7 @@ function App() {
       }
     }
 
-    if (tipStep?.advance === 'drop') setTimeout(nextTip, 300); // 안내: 옮기기 끝 → 다음(눌러보세요)
+    advanceTipIf('drop', 300); // 안내: 옮기기 끝 → 다음(눌러보세요)
     // 확정한 뒤에도 잠깐은 마음을 바꿀 수 있게 되돌리기 토스트를 띄운다 (8/27: 6초는 못 보고 지나갔다 → 10초)
     const timer = setTimeout(() => setMoveUndoToast(null), 10000);
     setMoveUndoToast(prevT => {
@@ -2074,7 +2074,7 @@ function App() {
     const m = moveConfirm;
     if (!m) return;
     setMoveConfirm(null);
-    if (tipStep?.advance === 'drop') setTimeout(nextTip, 300);
+    advanceTipIf('drop', 300);
     await writeMemoFields(m.memoId, m.prev.db, m.prev.local);
   };
 
@@ -2393,7 +2393,7 @@ function App() {
       // 꾹 누르면 이동 모드 (8/27: 시간 조정 시트가 바로 떠서 끌 수가 없었다 — 시트는 안 움직이고 놓았을 때만)
       g.mode = 'drag';
       scheduleSuppressClickRef.current = true; // 롱프레스 뒤 click(수정)이 안 열리게
-      if (tipStep?.advance === 'hold') nextTip(); // 안내: 꾹 눌렀다 → 다음(끌어보세요)
+      advanceTipIf('hold'); // 안내: 꾹 눌렀다 → 다음(끌어보세요)
       setMoveUndoToast(prev => { if (prev?.timer) clearTimeout(prev.timer); return null; });
       try { el.setPointerCapture(g.id); } catch { /* 이미 떼었으면 무시 */ }
       navigator.vibrate?.(15);
@@ -3603,7 +3603,7 @@ function App() {
         during_onboarding: tour.active,
       });
       if (tour.active) afterTourSend(memo, mode);
-    if (tipStep?.advance === 'send') { inputRef.current?.blur(); setTimeout(nextTip, 400); } // 안내 중엔 키보드를 내리고 다음 안내로
+    if (advanceTipIf('send', 400)) inputRef.current?.blur(); // 안내 중엔 키보드를 내리고 다음 안내로
       return;
     }
 
@@ -3624,7 +3624,7 @@ function App() {
     const memo = rowToMemo(data);
     setMemos(prev => prev.some(m => m.id === memo.id) ? prev : [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
     if (tour.active) afterTourSend(memo, mode);
-    if (tipStep?.advance === 'send') { inputRef.current?.blur(); setTimeout(nextTip, 400); } // 안내 중엔 키보드를 내리고 다음 안내로
+    if (advanceTipIf('send', 400)) inputRef.current?.blur(); // 안내 중엔 키보드를 내리고 다음 안내로
   };
 
   // 기록 하나가 만들어질 때 보내는 공통 이벤트.
@@ -3914,10 +3914,21 @@ function App() {
     markTipsSeen(tip.page);
     setTip(null);
   };
+  // 시간표 블록 핸들러는 메모된 렌더 안에 있어 클로저가 오래될 수 있다 — 훅은 ref로 최신 단계를 본다
+  const tipStepRef = useRef(null);
+  tipStepRef.current = tipStep;
+  const nextTipRef = useRef(null);
   const nextTip = () => {
     if (!tip) return;
     if (tip.idx + 1 < TIP_STEPS[tip.page].length) setTip({ page: tip.page, idx: tip.idx + 1 });
     else endTips('done');
+  };
+  nextTipRef.current = nextTip;
+  // 앱 동작에서 안내를 넘길 때 쓰는 훅 (send / hold / drop)
+  const advanceTipIf = (kind, delay = 0) => {
+    if (tipStepRef.current?.advance !== kind) return false;
+    setTimeout(() => nextTipRef.current?.(), delay);
+    return true;
   };
   // 어느 페이지에 있는지 → 아직 안 본 팁이 있으면 띄운다 (온보딩 카드를 끝낸 뒤에만)
   useEffect(() => {
