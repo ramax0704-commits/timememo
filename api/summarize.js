@@ -288,7 +288,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 1200,
+        max_tokens: 3000, // 8/27 프롬프트 확장(사고의 흐름·에너지·감정·일기체 근거) 뒤 1200이면 잘려서 502가 났다
         // 시스템 프롬프트는 매 호출 똑같다 → 프롬프트 캐싱. 5분 안에 다른 호출이 오면 이 부분 입력료가 1/10.
         // (캐시는 1,024토큰 이상인 접두부만 저장되므로 프롬프트를 줄이면 오히려 캐시가 안 걸릴 수 있다)
         system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
