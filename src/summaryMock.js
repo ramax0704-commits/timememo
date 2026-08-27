@@ -5,7 +5,7 @@
 // 실제 키를 넣으면 이 파일은 호출되지 않는다.
 //
 // 출력 모양은 실제 AI와 같다:
-// { categories, headline, narrative, thoughtFlow, loops, energyWords: { up, down }, keywords }
+// { categories, headline, narrative, thoughtFlow, loops, energyWords: { up, down }, keywords, done, emotions, rabbit }
 
 // 흔한 활동 단서 → 카테고리. 샘플이 너무 엉뚱하면 화면 판단이 안 되므로 이 정도는 묶어준다.
 const ACTIVITY_HINTS = [
@@ -67,9 +67,9 @@ export function mockDaySummary(records, { fixedCategories = [], facts = {} } = {
   // 토끼 샘플: 단서 몇 개로 대충 고른다 (실제 매칭은 AI가 한다)
   const rabbit = /회의|미팅|마감|바쁘|정신없|늦/.test(all) ? { type: 'clock', reason: '일정에 쫓기듯 움직인 흔적이 많았어요.' }
     : /쉬|침대|낮잠|휴식|넷플릭스|유튜브/.test(all) ? { type: 'lop', reason: '쉼에 무게가 실린 하루였어요.' }
-      : /운동|산책|러닝|헬스|수영/.test(all) ? { type: 'hare', reason: '몸을 움직인 기록이 도드라졌어요.' }
-        : /친구|만나|모임|회식|통화/.test(all) ? { type: 'burrow', reason: '사람과 어울린 기록이 하루의 중심에 있었어요.' }
-          : { type: 'moon', reason: '담담하게 할 일을 이어간 하루였어요.' };
+      : /운동|산책|러닝|헬스|수영/.test(all) ? { type: 'hare_run', reason: '몸을 움직인 기록이 도드라졌어요.' }
+        : /친구|만나|모임|회식|통화/.test(all) ? { type: 'burrow_together', reason: '사람과 어울린 기록이 하루의 중심에 있었어요.' }
+          : { type: 'moon_steady', reason: '담담하게 할 일을 이어간 하루였어요.' };
 
   // 시간대별 상태 샘플: 그 시간대 기록에 활력·소모 단어가 있는지만 본다
   const segOf = (time) => {
@@ -104,6 +104,9 @@ export function mockDaySummary(records, { fixedCategories = [], facts = {} } = {
     loops: [],
     energyWords: { up, down },
     keywords,
+    // 완료 표현이 붙은 기록만 원문 조각으로 (실제 판정은 AI가 한다)
+    done: records.filter(r => /완료|완$|끝|했음|마무리/.test(r.text)).map(r => r.text.slice(0, 30)).slice(0, 5),
+    emotions: [],
     rabbit,
     segmentStates,
   };

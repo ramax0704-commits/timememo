@@ -1,10 +1,10 @@
 // '회고' 탭 — 오늘 기록으로 내가 어떤 하루를 보냈는지, 그리고 이번 주.
 //
 // [오늘]
-//   1. 오늘의 모양 — 계산. 총 기록 시간, 연속 일수, 하루 리듬 곡선(기록이 몰린 시간대).
+//   1. 할 말이 많았던 때 — 계산. 기록별 글자 수 곡선. 회고를 만들면 그 위에 감정 라벨이 얹힌다.
 //   2. 오늘의 시간 배분 — AI 분류 + 사용자 수정. 기록마다 category로 저장되므로
 //                       AI를 다시 부르지 않아도 기록의 category만으로 그린다.
-//   3. 오늘의 회고 — AI. 한 줄 제목, 회고 글, 사고의 흐름, 시도→결과, 에너지 단어, 의미 단어.
+//   3. 오늘의 회고 — AI. 한 줄 제목, 회고 글, 사고의 흐름, 시도→결과, 오늘 끝낸 일, 에너지 단어, 의미 단어.
 //   4. 다음 — 계산. "기록 N일차", 주간 리포트까지 남은 기록일.
 //   2·3은 사용자가 '오늘 회고 만들기'를 눌러야 만들어진다 (자동 생성 없음, 기록 5개부터).
 //   로그인해야 만들 수 있고, 실패하면 2·3만 빠지고 1·4는 그대로다.
@@ -15,9 +15,10 @@ import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Lock, Inbox, RefreshCw, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
-  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT,
+  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, DAY_START_MIN, minuteInReviewDay,
 } from './daySummary';
 import { rabbitById } from './rabbits';
+import { NEGATIVE_LABELS } from './emotions';
 
 const hourLabel = (h) => `${String(h).padStart(2, '0')}시`;
 
@@ -43,6 +44,31 @@ function curvePath(points) {
     d += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${x2.toFixed(2)} ${y2.toFixed(2)}`;
   }
   const area = `${d} L ${CURVE_W} ${CURVE_H} L 0 ${CURVE_H} Z`;
+  return { line: d, area };
+}
+
+// 단조 3차 보간 (Fritsch–Carlson). 점 사이에서 값이 넘치지 않아 산·골이 데이터보다 과장되지 않는다.
+function monotonePath(points) {
+  const n = points.length;
+  if (n < 2) return { line: '', area: '' };
+  const xs = points.map(p => (p.t / 1440) * CURVE_W);
+  const ys = points.map(p => CURVE_H - 3 - p.y * (CURVE_H - 8));
+  const dx = [], dy = [], m = [];
+  for (let i = 0; i < n - 1; i++) { dx.push(xs[i + 1] - xs[i] || 1e-6); dy.push(ys[i + 1] - ys[i]); m.push(dy[i] / dx[i]); }
+  const tg = [m[0]];
+  for (let i = 1; i < n - 1; i++) tg.push(m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2);
+  tg.push(m[n - 2]);
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { tg[i] = 0; tg[i + 1] = 0; continue; }
+    const a = tg[i] / m[i], b = tg[i + 1] / m[i], h = Math.hypot(a, b);
+    if (h > 3) { tg[i] = 3 * a / h * m[i]; tg[i + 1] = 3 * b / h * m[i]; }
+  }
+  let d = `M ${xs[0].toFixed(2)} ${ys[0].toFixed(2)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i];
+    d += ` C ${(xs[i] + h / 3).toFixed(2)} ${(ys[i] + tg[i] * h / 3).toFixed(2)}, ${(xs[i + 1] - h / 3).toFixed(2)} ${(ys[i + 1] - tg[i + 1] * h / 3).toFixed(2)}, ${xs[i + 1].toFixed(2)} ${ys[i + 1].toFixed(2)}`;
+  }
+  const area = `${d} L ${xs[n - 1].toFixed(2)} ${CURVE_H} L ${xs[0].toFixed(2)} ${CURVE_H} Z`;
   return { line: d, area };
 }
 
@@ -121,6 +147,7 @@ function RabbitHero({ rabbit }) {
 function ReflectionBlock({ data, mock, stale, busy, usesLeft, onGenerate }) {
   const hasFlow = data.thoughtFlow?.length > 0;
   const hasLoops = data.loops?.length > 0;
+  const hasDone = data.done?.length > 0;
   const up = data.energyWords?.up ?? [];
   const down = data.energyWords?.down ?? [];
   const hasEnergy = up.length > 0 || down.length > 0;
@@ -159,6 +186,15 @@ function ReflectionBlock({ data, mock, stale, busy, usesLeft, onGenerate }) {
                 <span className="loop-to">{l.to}</span>
               </li>
             ))}
+          </ul>
+        </div>
+      )}
+
+      {hasDone && (
+        <div className="reflection-section">
+          <div className="reflection-label">오늘 끝낸 일</div>
+          <ul className="done-list">
+            {data.done.map((d, i) => <li key={i} className="done-item">{d}</li>)}
           </ul>
         </div>
       )}
@@ -275,17 +311,96 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
 // 여러 시각에 흩어져 있을 때도 '무게중심'이 보이기 때문이다.
 const peakHourFromCurve = (curve) => (curve?.peakMinute != null ? Math.floor(((curve.peakMinute + (curve.offsetMin ?? 0)) % 1440) / 60) : null);
 
-// 기록 수·총 시간·연속 일수 같은 숫자는 하루를 이해하는 데 도움이 안 돼 뺐다.
-// 리듬 곡선만 남긴다 — 하루가 어느 쪽에 실려 있었는지는 숫자가 아니라 모양으로 보인다.
-function ShapeBlock({ facts, now, dayLabel }) {
-  const peakHour = peakHourFromCurve(facts.curve);
-  const peakLabel = peakHour != null ? `${hourLabel(peakHour)}쯤 가장 많이` : null;
+// ── 할 말이 많았던 때 ─────────────────────────────────────────
+// 시간대별 기록 '개수'는 사용자에게 필요 없는 정보였다. 대신 기록마다 글자 수를 세로축으로 놓아
+// 하루 중 어느 순간에 말이 길어졌는지를 곡선으로 보여준다. AI 회고와 무관하게 늘 보이고,
+// 회고를 만든 뒤에는 같은 곡선 위에 감정 라벨(emotions)을 점으로 얹고 아래에 인용을 붙인다.
+// emotions[].index는 toSummaryRecords와 같은 순서(recordedAt 오름차순)의 기록 번호다.
+const fmtTime = (d) => format(new Date(d), 'HH:mm');
+
+function TalkCurveBlock({ memos, now, emotions, dayLabel }) {
+  const sorted = [...(memos || [])].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+  if (sorted.length < 3) return null;
+  const lens = sorted.map(m => (m.content || '').length);
+  const max = Math.max(1, ...lens);
+  const pts = sorted.map((m, i) => ({ t: minuteInReviewDay(m.recordedAt), y: lens[i] / max, i }));
+  // 기록 앞뒤로 바닥점을 두어 산 모양이 되게 하고, 오버슈트 없는 단조 보간으로 그린다
+  // (Catmull-Rom은 점이 적고 간격이 들쭉날쭉하면 꼬부라진다)
+  const padded = [
+    { t: Math.max(0, pts[0].t - 45), y: 0 },
+    ...pts,
+    { t: Math.min(1439, pts[pts.length - 1].t + 45), y: 0 },
+  ];
+  const { line, area } = monotonePath(padded);
+  const px = (p) => (p.t / 1440) * CURVE_W;
+  const py = (p) => CURVE_H - 3 - p.y * (CURVE_H - 8);
+
+  // 눈에 띄게 솟은 지점: 양옆보다 높고 최댓값의 60% 이상. 많아야 3개, 가까운 것끼리는 하나만.
+  const peaks = pts
+    .filter((p, i) => p.y >= 0.6 && (i === 0 || p.y >= pts[i - 1].y) && (i === pts.length - 1 || p.y > pts[i + 1].y))
+    .sort((a, b) => b.y - a.y)
+    .reduce((acc, p) => (acc.some(q => Math.abs(q.t - p.t) < 90) ? acc : [...acc, p]), [])
+    .slice(0, 3);
+
+  const nowMin = now ? minuteInReviewDay(now) : null;
+  const nowX = nowMin != null ? (nowMin / 1440) * CURVE_W : null;
+  const marks = (emotions || []).map(e => ({ ...e, p: pts[e.index] })).filter(e => e.p);
+
   return (
-    <section className="day-summary shape" aria-label="하루 리듬">
+    <section className="day-summary shape" aria-label="할 말이 많았던 때">
       <header className="day-summary-head">
-        <span className="day-summary-title">{dayLabel || '하루 리듬'}</span>
+        <span className="day-summary-title">할 말이 많았던 때</span>
+        {dayLabel && <span className="day-summary-count">{dayLabel}</span>}
       </header>
-      <DayCurve curve={facts.curve} now={now} peakLabel={peakLabel} />
+      <div className="day-curve talk-curve" role="img" aria-label={`기록 길이 곡선. 가장 긴 기록 ${max}자`}>
+        <div className="day-curve-plot">
+          <svg viewBox={`0 0 ${CURVE_W} ${CURVE_H}`} preserveAspectRatio="none" className="day-curve-svg">
+            <defs>
+              <linearGradient id="talkCurveFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#4a72ff" stopOpacity="0.22" />
+                <stop offset="100%" stopColor="#4a72ff" stopOpacity="0.02" />
+              </linearGradient>
+            </defs>
+            {[25, 50, 75].map(p => (
+              <line key={p} x1={p} y1="0" x2={p} y2={CURVE_H} className="day-curve-grid" vectorEffect="non-scaling-stroke" />
+            ))}
+            <path d={area} fill="url(#talkCurveFill)" />
+            <path d={line} className="day-curve-line" vectorEffect="non-scaling-stroke" />
+            {nowX != null && (
+              <line x1={nowX} y1="0" x2={nowX} y2={CURVE_H} className="day-curve-now-line" vectorEffect="non-scaling-stroke" />
+            )}
+          </svg>
+          {peaks.map(p => (
+            <span key={`pk${p.i}`} className="talk-curve-peak" style={{ left: `${px(p)}%`, top: `${(py(p) / CURVE_H) * 100}%` }}>
+              {fmtTime(sorted[p.i].recordedAt)}
+            </span>
+          ))}
+          {marks.map(e => (
+            <span
+              key={`em${e.index}`}
+              className={`talk-curve-emotion${NEGATIVE_LABELS.includes(e.label) ? ' talk-curve-emotion--neg' : ''}`}
+              style={{ left: `${px(e.p)}%`, top: `${(py(e.p) / CURVE_H) * 100}%` }}
+            >
+              <i className="talk-curve-dot" />
+              <b>{e.label}</b>
+            </span>
+          ))}
+        </div>
+        <div className="day-curve-axis">
+          {[0, 6, 12, 18].map(h => <span key={h}>{ampmLabel(h + DAY_START_MIN / 60)}</span>)}
+        </div>
+      </div>
+      {marks.length > 0 && (
+        <ul className="talk-quotes">
+          {marks.map(e => (
+            <li key={`q${e.index}`} className="talk-quote">
+              <span className={`talk-quote-label${NEGATIVE_LABELS.includes(e.label) ? ' talk-quote-label--neg' : ''}`}>{e.label}</span>
+              <span className="talk-quote-time">{fmtTime(sorted[e.index].recordedAt)}</span>
+              <q className="talk-quote-text">{e.quote}</q>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
@@ -425,7 +540,7 @@ function WeekView({ week, habitKeywords, onViewed }) {
 
 // ── 화면 ──────────────────────────────────────────────────────
 export default function ReviewScreen({
-  facts, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, busy, usesLeft,
+  facts, todayMemos, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, busy, usesLeft,
   habitKeywords, dayRabbits, onPickDay, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline,
 }) {
   const [mode, setMode] = useState('today'); // 'today' | 'week' | 'monthly'
@@ -483,16 +598,16 @@ export default function ReviewScreen({
             </div>
           ) : (
             <>
-          {/* 회고를 만들면 결과(토끼+회고 글)가 한 덩어리로 맨 위에, 리듬 곡선은 그 아래로.
-              만들기 전에는 리듬 곡선 아래에 만들기 버튼이 있다 — 결과가 위아래로 찢어지지 않는다 */}
+          {/* 회고를 만들면 결과(토끼+회고 글)가 한 덩어리로 맨 위에, 기록 길이 곡선은 그 아래로.
+              만들기 전에는 곡선 아래에 만들기 버튼이 있다 — 결과가 위아래로 찢어지지 않는다 */}
           {aiOk && !locked ? (
             <>
               <ReflectionBlock data={ai.data} mock={ai.mock} stale={ai.stale} busy={busy} usesLeft={usesLeft} onGenerate={onGenerate} />
-              <ShapeBlock facts={facts} now={isToday ? now : null} dayLabel={dayLabel} />
+              <TalkCurveBlock memos={todayMemos} now={isToday ? now : null} emotions={ai.data.emotions} dayLabel={dayLabel} />
             </>
           ) : (
             <>
-              <ShapeBlock facts={facts} now={isToday ? now : null} dayLabel={dayLabel} />
+              <TalkCurveBlock memos={todayMemos} now={isToday ? now : null} emotions={null} dayLabel={dayLabel} />
               <AIGate ai={ai} locked={locked} recordCount={facts.count} busy={busy} usesLeft={usesLeft} onGenerate={onGenerate} onLoginClick={onLoginClick} />
             </>
           )}

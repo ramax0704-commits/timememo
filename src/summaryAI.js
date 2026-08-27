@@ -7,6 +7,7 @@
 // 실패하면 throw 한다. 호출하는 쪽(App)은 블록 2·3만 숨기고 블록 1·4는 그대로 둔다.
 import { mockDaySummary } from './summaryMock.js';
 import { RABBIT_IDS } from './rabbits.js';
+import { EMOTION_LABELS } from './emotions.js';
 
 const CACHE_KEY = 'timememo-day-summary-cache';
 const CACHE_MAX = 12;
@@ -20,9 +21,12 @@ function hash(str) {
 // 같은 입력이면 다시 부르지 않는다. 기록을 고치거나 추가하면 키가 바뀐다.
 // 고정 카테고리 세트는 키에 넣지 않는다 — 회고를 만든 직후 세트가 정해지면서 키가 바뀌어
 // 방금 만든 결과가 사라져 보이는 사고가 있었다 (8/25). 세트가 바뀌어도 만든 회고는 그대로 보여야 한다.
+// 스키마 버전 — 프롬프트·출력 구조가 바뀌면 올린다. 옛 버전으로 만든 회고는 캐시에서 안 보이고
+// '만들기'를 누르면 새로 만든다 (2026-08-27: 토끼 21종·done·emotions 도입 → v2).
+export const SUMMARY_SCHEMA_VERSION = 2;
 export function summaryCacheKey(dateKey, records) {
   const body = records.map(r => `${r.time}|${r.text}`).join('\n');
-  return `${dateKey}|${records.length}|${hash(body)}`;
+  return `${dateKey}#v${SUMMARY_SCHEMA_VERSION}|${records.length}|${hash(body)}`;
 }
 
 // 캐시에서 찾는다. loose=false(생성 경로): 정확히 같은 키, 또는 예전 저장 방식(키 끝에
@@ -99,7 +103,7 @@ export function peekSummaryCache(key) {
 // 받은 JSON을 고정 스키마로 정리한다. 못 맞추면 null.
 export function normalizeSummary(obj) {
   if (!obj || typeof obj !== 'object') return null;
-  const narrative = typeof obj.narrative === 'string' ? obj.narrative.trim() : '';
+  const narrative = typeof obj.narrative === 'string' ? obj.narrative.trim().slice(0, 150) : '';
   if (!narrative) return null;
   const strs = (arr, max, len) => (Array.isArray(arr) ? arr : [])
     .filter(x => typeof x === 'string').map(x => x.trim().slice(0, len)).filter(Boolean).slice(0, max);
@@ -114,10 +118,16 @@ export function normalizeSummary(obj) {
     .slice(0, 4);
   const energyWords = { up: strs(obj.energyWords?.up, 6, 16), down: strs(obj.energyWords?.down, 6, 16) };
   const keywords = strs(obj.keywords, 4, 8);
+  const done = strs(obj.done, 5, 30);
+  const emotions = (Array.isArray(obj.emotions) ? obj.emotions : [])
+    .filter(e => e && Number.isInteger(e.index) && e.index >= 0 && EMOTION_LABELS.includes(e.label)
+      && typeof e.quote === 'string' && e.quote.trim())
+    .map(e => ({ index: e.index, label: e.label, quote: e.quote.trim().slice(0, 40) }))
+    .slice(0, 4);
   const rabbit = obj.rabbit && RABBIT_IDS.includes(obj.rabbit.type) && typeof obj.rabbit.reason === 'string' && obj.rabbit.reason.trim()
     ? { type: obj.rabbit.type, reason: obj.rabbit.reason.trim().slice(0, 160) }
     : null;
-  return { headline, narrative, thoughtFlow, loops, energyWords, keywords, rabbit };
+  return { headline, narrative, thoughtFlow, loops, energyWords, keywords, done, emotions, rabbit };
 }
 
 // records: [{ time, text }] 시간순 / facts: 계산값

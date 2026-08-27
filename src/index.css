@@ -246,6 +246,33 @@ body {
 }
 
 /* 떨어뜨릴 자리 표시줄 */
+.chat-time-grid {
+  position: fixed;
+  z-index: 10;
+  background-color: rgba(248, 248, 251, 0.97);
+  overflow: hidden;
+  pointer-events: none;
+}
+.chat-time-grid-hour {
+  position: absolute; left: 0; right: 0; border-top: 1px solid #dfe2ec;
+}
+.chat-time-grid-hour span {
+  position: absolute; left: 10px; top: -8px; font-size: 0.7rem; color: #9aa0b4; background-color: rgba(248, 248, 251, 0.95); padding-right: 4px;
+}
+.chat-time-grid-half { position: absolute; left: 0; right: 0; border-top: 1px dashed #ebedf4; }
+.chat-time-grid-ghost {
+  position: absolute; left: 82px; right: 10px; transform: translateY(-50%);
+  display: flex; align-items: center; gap: 6px; font-size: 0.74rem; color: #a3a8ba; white-space: nowrap; overflow: hidden;
+}
+.chat-time-grid-ghost-time { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.chat-time-grid-ghost-text { overflow: hidden; text-overflow: ellipsis; }
+.chat-time-grid-now {
+  position: absolute; left: 0; right: 0; border-top: 2px solid var(--primary-color);
+}
+.chat-time-grid-now span {
+  position: absolute; right: 10px; top: -11px; padding: 2px 8px; border-radius: 999px;
+  background-color: var(--primary-color); color: #fff; font-size: 0.72rem; font-weight: 700; font-variant-numeric: tabular-nums;
+}
 .drop-indicator {
   height: 3px;
   border-radius: 2px;
@@ -2673,6 +2700,46 @@ body.keyboard-open .input-toolbar { display: flex; }
   pointer-events: none;
 }
 .day-curve-peak--left { transform: translateX(-100%); }
+.talk-curve-peak {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 6px));
+  padding: 1px 6px;
+  border-radius: 999px;
+  background-color: #fff;
+  border: 1px solid #dfe4f7;
+  color: var(--primary-color);
+  font-size: 0.64rem;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.talk-curve-emotion {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+}
+.talk-curve-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background-color: #fff; border: 3px solid #e0a100;
+  box-shadow: 0 0 0 3px rgba(224, 161, 0, 0.15);
+}
+.talk-curve-emotion b {
+  position: absolute; top: 100%; margin-top: 2px;
+  font-size: 0.62rem; font-weight: 700; color: #8a5a00; white-space: nowrap;
+  background-color: #fff3d6; padding: 1px 5px; border-radius: 6px;
+}
+.talk-curve-emotion--neg .talk-curve-dot { border-color: #6b6f80; box-shadow: 0 0 0 3px rgba(107, 111, 128, 0.15); }
+.talk-curve-emotion--neg b { color: #4b4f60; background-color: #f1f1f4; }
+.talk-quotes { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.talk-quote { display: flex; align-items: baseline; gap: 6px; font-size: 0.8rem; line-height: 1.5; flex-wrap: wrap; }
+.talk-quote-label { flex-shrink: 0; font-size: 0.66rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; background-color: #fff3d6; color: #8a5a00; }
+.talk-quote-label--neg { background-color: #f1f1f4; color: #4b4f60; }
+.talk-quote-time { flex-shrink: 0; font-size: 0.7rem; color: var(--text-muted); }
+.talk-quote-text { color: var(--text-main); quotes: '"' '"'; word-break: keep-all; }
 .day-curve-axis {
   display: flex;
   justify-content: space-between;
@@ -2715,6 +2782,9 @@ body.keyboard-open .input-toolbar { display: flex; }
 .loop-from { color: var(--text-muted); }
 .loop-arrow { color: var(--primary-color); font-weight: 700; }
 .loop-to { color: var(--text-main); font-weight: 600; background-color: #fff8dc; padding: 0 4px; border-radius: 4px; }
+.done-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.done-item { display: flex; align-items: flex-start; gap: 8px; font-size: 0.84rem; line-height: 1.5; color: var(--text-main); word-break: keep-all; }
+.done-item::before { content: '✓'; flex-shrink: 0; color: #1f8a4c; font-weight: 700; }
 .energy-rows { display: flex; flex-direction: column; gap: 6px; }
 .energy-row { display: flex; align-items: flex-start; gap: 8px; }
 .energy-tag { flex-shrink: 0; font-size: 0.68rem; font-weight: 700; padding: 3px 7px; border-radius: 6px; margin-top: 1px; }

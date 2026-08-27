@@ -3,8 +3,8 @@
 // 브라우저가 Claude를 직접 부르면 API 키가 노출되므로 여기서만 부른다 (PRD 방침).
 // 입력: {
 //   date: 'yyyy-MM-dd',
-//   records: [{ time: 'HH:mm', text }],          — 당일 기록의 시각과 본문만, 시간순
-//   facts: { count, spanMinutes, peakHour, streak, recordDays },  — 계산값 (AI가 지어내지 않게 준다)
+//   records: [{ time: 'HH:mm', text, durationMin }], — 당일 기록의 시각·본문·지속시간(분), 시간순
+//   facts: { count, spanMinutes, peakHour, streak, recordDays, avgGapMin, eveningRatio },  — 계산값 (AI가 지어내지 않게 준다)
 //   fixedCategories: string[],                   — 4일차 이상이면 사용자 고정 세트. 없으면 []
 //   knownCategories: [{ name, examples: [] }],   — 지금까지 쓰인 카테고리와 예시 (사용자가 고친 결과 포함)
 // }
@@ -12,7 +12,8 @@
 //   categories: [{ name, recordIndexes }],
 //   headline, narrative,
 //   thoughtFlow: [{ stage, text }], loops: [{ from, to }],
-//   energyWords: { up: [], down: [] }, keywords: []
+//   energyWords: { up: [], down: [] }, keywords: [],
+//   done: [], emotions: [{ index, label, quote }], rabbit: { type, reason }
 // }
 //
 // ANTHROPIC_API_KEY가 없으면(아직 키를 안 넣은 상태) 샘플을 돌려준다 (mock: true).
@@ -20,6 +21,7 @@
 // ANTHROPIC_API_KEY 로 넣고 다시 배포하면 그때부터 실제 회고가 나간다.
 import { mockDaySummary } from '../src/summaryMock.js';
 import { RABBITS, RABBIT_IDS } from '../src/rabbits.js';
+import { EMOTION_LABELS } from '../src/emotions.js';
 
 // 새 의존성을 안 쓰기로 해서 공식 SDK(@anthropic-ai/sdk) 대신 fetch로 직접 부른다.
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
@@ -57,8 +59,8 @@ async function bumpDailyUsage() {
 const OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
-    headline: { type: 'string', description: '오늘을 한 줄로. 20자 이내. 사용자의 말에서 따온 표현이면 더 좋다.' },
-    narrative: { type: 'string', description: '회고 글 3~5문장. 관찰에서 출발해 사용자 자신도 몰랐을 패턴이나 마음을 짚는다. 각 문장 45자 이내.' },
+    headline: { type: 'string', description: '오늘을 한 줄로. 20자 이내. 나열 금지.' },
+    narrative: { type: 'string', description: '회고 글 2~3문장, 총 150자 이내. 직접 언급하는 기록은 최대 2개.' },
     thoughtFlow: {
       type: 'array',
       description: '사고의 흐름. 기록에 생각·판단·결심이 드러날 때만 시작→전환→결론 순으로 2~3단계. 없으면 빈 배열.',
@@ -87,7 +89,7 @@ const OUTPUT_SCHEMA = {
     },
     energyWords: {
       type: 'object',
-      description: '기록에 실제로 쓰인 단어 중 활력이 느껴지는 것(up)과 소모가 느껴지는 것(down). 원문 그대로. 없으면 빈 배열.',
+      description: '기록에 실제로 쓰인 한글·영문 단어 중 활력(up)·소모(down)가 느껴지는 것. 원문 그대로. 이모지·문장부호·숫자 제외. 없으면 빈 배열.',
       properties: {
         up: { type: 'array', items: { type: 'string' } },
         down: { type: 'array', items: { type: 'string' } },
@@ -95,10 +97,25 @@ const OUTPUT_SCHEMA = {
       required: ['up', 'down'],
       additionalProperties: false,
     },
-    keywords: { type: 'array', items: { type: 'string' }, description: '오늘을 점화한 의미 단어 2~4개. 1~3자 명사.' },
+    keywords: { type: 'array', items: { type: 'string' }, description: '오늘을 점화한 의미 단어 2~4개. 기록에 실제 등장한 명사 우선.' },
+    done: { type: 'array', items: { type: 'string' }, description: '완료 표현이 붙은 기록의 원문 조각. 최대 5개. 없으면 빈 배열.' },
+    emotions: {
+      type: 'array',
+      description: '감정 표현이 실제로 적힌 기록에만 라벨. 하루 최대 4개. 없으면 빈 배열.',
+      items: {
+        type: 'object',
+        properties: {
+          index: { type: 'integer', description: '해당 기록의 index (0부터)' },
+          label: { type: 'string', enum: EMOTION_LABELS },
+          quote: { type: 'string', description: '판정 근거가 된 표현, 원문 그대로 짧게' },
+        },
+        required: ['index', 'label', 'quote'],
+        additionalProperties: false,
+      },
+    },
     rabbit: {
       type: 'object',
-      description: '오늘과 가장 닮은 토끼 하나. 활동보다 상태·감정 근거를 우선한다.',
+      description: '순서대로 조건을 검사해 먼저 걸리는 토끼. 순서를 건너뛰지 않는다.',
       properties: {
         type: { type: 'string', enum: RABBIT_IDS },
         reason: { type: 'string', description: '왜 이 토끼인지, 오늘 기록의 표현을 인용해 1~2문장. 각 문장 45자 이내.' },
@@ -107,7 +124,7 @@ const OUTPUT_SCHEMA = {
       additionalProperties: false,
     },
   },
-  required: ['headline', 'narrative', 'thoughtFlow', 'loops', 'energyWords', 'keywords', 'rabbit'],
+  required: ['headline', 'narrative', 'thoughtFlow', 'loops', 'energyWords', 'keywords', 'done', 'emotions', 'rabbit'],
   additionalProperties: false,
 };
 
@@ -115,26 +132,53 @@ const SYSTEM_PROMPT = `당신은 사용자가 하루 동안 남긴 짧은 기록
 타임라인은 사용자가 이미 봤다. 당신의 역할은 '무엇을 했는지'를 다시 말하는 게 아니라, 기록 사이에 놓인 '어떤 마음으로 하루를 건넜는지'를 사용자의 말을 빌려 비춰주는 것이다.
 
 당신이 만들 것:
-A. headline — 오늘을 한 줄로. 사용자의 말에서 따온 표현이면 더 좋다. 20자 이내.
-B. narrative — 회고 글 3~5문장. 관찰에서 출발해서, 사용자 자신도 미처 이름 붙이지 못했을 패턴이나 마음을 한 번 짚어준다. 하루의 끝에서 읽고 "아, 그랬구나" 하고 스스로를 조금 더 이해하게 되는 글.
-C. thoughtFlow — 기록에 생각·판단·결심이 드러날 때만, 시작→전환→결론 순으로 사고의 흐름을 2~3단계로 정리한다. 단순 활동 기록뿐이면 빈 배열.
+
+A. headline — 오늘을 한 줄로. 20자 이내. 기록 두 개 이상을 이어 붙여 나열하지 않는다. 사용자의 말에서 따온 표현 하나를 쓰거나, 그날의 상태를 한 마디로 쓴다.
+
+B. narrative — 회고 글 2~3문장, 총 150자 이내. 하루를 되짚지 않는다. 오늘 가장 무게가 실린 기록 하나를 고르고, 그 앞이나 뒤에 무엇이 놓였는지만 짚는다. 직접 언급하는 기록은 최대 2개까지다.
+
+C. thoughtFlow — 기록에 생각·판단·결심이 드러날 때만, 시작→전환→결론 순으로 2~3단계로 정리한다. 단순 활동 기록뿐이면 빈 배열.
+
 D. loops — "A가 B로 이어졌다"가 기록에서 실제로 읽힐 때만 (시도→결과, 자각→행동, 욕구→자제). 없으면 빈 배열.
-E. energyWords — 기록에 실제로 쓰인 단어 중 활력이 느껴지는 것(up)과 소모가 느껴지는 것(down)을 원문 그대로 뽑는다. 없으면 빈 배열.
-F. keywords — 오늘을 점화한 의미 단어 2~4개 (예: 회복, 정리, 꾸준함). 1~3자 명사.
-G. rabbit — 아래 8가지 토끼 중 오늘과 가장 닮은 하나를 고른다. 기준이 팽팽하면 활동보다 상태·감정 쪽 근거를 우선한다. reason에는 오늘 기록의 표현을 인용해 왜 이 토끼인지 적는다:
-${RABBITS.map(r => `- ${r.id} (${r.name}): ${r.criteria}`).join('\n')}
+
+E. energyWords — 기록에 실제로 쓰인 한글·영문 단어 중 활력이 느껴지는 것(up)과 소모가 느껴지는 것(down)을 원문 그대로 뽑는다. 이모지, 문장부호, 숫자는 제외한다. 뚜렷하지 않으면 빈 배열.
+
+F. keywords — 오늘을 점화한 의미 단어 2~4개. 기록에 실제 등장한 명사를 우선한다. "소소함, 여유, 힐링, 알참"처럼 분위기를 뭉뚱그리는 단어는 쓰지 않는다.
+
+G. done — 오늘 기록 중 완료·완·끝·했음처럼 일이 끝났다는 표현이 붙은 것만 원문 그대로 짧게 딴다. 최대 5개. 진행 중이라고 적힌 기록은 넣지 않는다. 원문에 없는 말로 바꾸지 않는다. 해당하는 기록이 없으면 빈 배열.
+
+H. emotions — 기록마다 감정 표현이 실제로 적혀 있을 때만 라벨을 붙인다. 하루 최대 4개.
+- 활동의 성격으로 감정을 추론하지 않는다. 완료는 뿌듯함이 아니고, 쉼은 무기력이 아니며, 바쁨은 불안이 아니다.
+- quote에는 판정 근거가 된 표현을 원문 그대로 짧게 적는다. 적을 수 없으면 그 기록에는 라벨을 붙이지 않는다.
+- 한 기록에 여러 감정이 보이면 표현이 가장 뚜렷한 하나만 고른다.
+- 라벨과 판정 근거:
+  · 기쁨 — 좋다, 재밌다, 웃겼다, 대박, 최고처럼 지금 일이 좋았던 표현. 앞일을 보면 설렘, 해낸 것이면 뿌듯함.
+  · 설렘 — 기대, 신남, 웃음 표현이 앞일과 붙어 있을 때.
+  · 뿌듯함 — 드디어, 해냈다, 다행처럼 끝낸 것에 대한 만족. 완료라고만 적힌 것은 해당 없음.
+  · 감사 — 고맙다, 덕분에, 다행이다, 베풂을 적은 표현. 공을 밖에 돌릴 때.
+  · 평온 — 괜찮다, 편하다처럼 안정이 직접 적힌 표현. 조용한 하루라는 사실만으로는 안 됨.
+  · 불안 — 걱정, 두려움, 자기 의심 문장, 신체 긴장 표현. 대상이 자기나 앞일일 때.
+  · 짜증 — 화, 거슬림, 억울함, 답답함. 원인이 밖에 있을 때만. 자책은 불안.
+  · 무기력 — 힘듦, 지침, 하기 싫음을 부정적으로 적은 표현. 대상이 사람이면 외로움.
+  · 외로움 — 혼자, 쓸쓸하다, 보고싶다, 연락 없다. 혼자 있었다는 사실만으로는 안 됨.
+  · 다잡음 — 맘 잡고, 다시 일어났다, 정신 차리자처럼 가라앉은 뒤 다시 움직이기로 한 표현. 앞쪽에 부정 감정이 있어야 함.
+- 부정 감정은 불안, 짜증, 무기력, 외로움 넷을 말한다.
+
+I. rabbit — 아래 순서대로 조건을 검사해 먼저 걸리는 것으로 확정하고 멈춘다. 순서를 건너뛰지 않는다. reason에는 왜 이 토끼인지 오늘 기록의 표현을 인용해 1~2문장, 각 문장 45자 이내로 적는다.
+${RABBITS.map((r, i) => `  ${i + 1}. ${r.criteria} → ${r.id}`).join('\n')}
 
 지켜야 할 것:
-1. 기록 내용을 시간순으로 나열하지 않는다. 사용자는 이미 봤다.
+1. 기록 내용을 시간순으로 나열하지 않는다. narrative에서 직접 언급하거나 인용하는 기록은 최대 2개까지다. 나머지 기록은 언급하지 않는다.
 2. 사용자가 쓴 표현을 인용해서 짚는다. 인용은 원문 그대로, 짧게.
 3. 기록에 없는 사실·감정·이유를 지어내지 않는다. 읽히지 않는 것은 빈 값으로 둔다. 비어 있는 것이 틀린 것보다 낫다.
-4. 수치를 창작하지 않는다. 계산값(총 기록 시간, 몰린 시간대, 연속 일수)은 주어진 숫자만 그대로 쓸 수 있고, 안 써도 된다.
-5. 조언·훈계·일반 통념(수면, 운동, 생산성)을 주입하지 않는다. 사용자 데이터에 없는 것은 말하지 않는다.
-6. "효율적, 알찬, 생산적, 아쉬운, 부족한, 잘하셨, 힘내, 대단해요" 같은 평가·응원 상투어를 쓰지 않는다. 따뜻함은 정확한 관찰에서 나온다.
-7. 인과를 단정하지 않는다 ("A 때문에 B"). 대신 "A 뒤에 B가 왔다", "A와 B가 나란히 있다"처럼 붙여 놓는다.
+4. 수치를 창작하지 않는다. 계산값은 주어진 숫자만 그대로 쓸 수 있고, 안 써도 된다.
+5. 조언·훈계·일반 통념(수면, 운동, 생산성)을 주입하지 않는다.
+6. "효율적, 알찬, 생산적, 아쉬운, 부족한, 잘하셨, 힘내, 대단해요" 같은 평가·응원 상투어를 쓰지 않는다. "고르게 섞여 있었어요", "적당히 채워진 하루" 같은 총평 문장도 쓰지 않는다. 따뜻함은 정확한 관찰에서 나온다.
+7. 인과를 단정하지 않는다. "A 때문에 B" 대신 "A 뒤에 B가 왔다"처럼 붙여 놓는다.
 8. 다일 비교는 이 요청에 누적 데이터가 없으므로 하지 않는다.
+9. 기록이 6개 미만이거나 생각·감정이 드러난 기록이 하나도 없는 날에는 narrative를 2문장으로 줄이고, 기록 하나에서 읽히는 것 한 가지만 짚는다. 읽히는 게 없으면 짧게 끝낸다.
 
-문체: 한국어, '~했어요' 체. 말을 거는 듯 부드럽되 과장하지 않는다. 이모지·느낌표 금지. 사용자를 '당신'이라 부르지 않는다 (주어 생략).`;
+문체: 한국어, '~했어요' 체. 말을 거는 듯 부드럽되 과장하지 않는다. 이모지·느낌표 금지. 사용자를 '당신'이라 부르지 않는다.`;
 
 function validateRecords(records) {
   if (!Array.isArray(records) || records.length === 0 || records.length > 200) return null;
@@ -143,7 +187,8 @@ function validateRecords(records) {
     if (!r || typeof r.time !== 'string' || typeof r.text !== 'string') return null;
     if (!/^\d{2}:\d{2}$/.test(r.time)) return null;
     // index를 유지해야 하므로 빈 본문도 자리를 비우지 않는다
-    out.push({ time: r.time, text: r.text.trim().slice(0, 2000) || '(빈 기록)' });
+    const durationMin = Number.isInteger(r.durationMin) && r.durationMin >= 0 ? r.durationMin : null;
+    out.push({ time: r.time, text: r.text.trim().slice(0, 2000) || '(빈 기록)', durationMin });
   }
   return out;
 }
@@ -153,7 +198,7 @@ const strs = (arr, max, len = 40) => (Array.isArray(arr) ? arr : [])
 
 export function normalizeResult(obj) {
   if (!obj || typeof obj !== 'object') return null;
-  const narrative = typeof obj.narrative === 'string' ? obj.narrative.trim() : '';
+  const narrative = typeof obj.narrative === 'string' ? obj.narrative.trim().slice(0, 150) : '';
   if (!narrative) return null;
   const headline = typeof obj.headline === 'string' ? obj.headline.trim().slice(0, 40) : '';
   const thoughtFlow = (Array.isArray(obj.thoughtFlow) ? obj.thoughtFlow : [])
@@ -169,10 +214,16 @@ export function normalizeResult(obj) {
     down: strs(obj.energyWords?.down, 6, 16),
   };
   const keywords = strs(obj.keywords, 4, 8);
+  const done = strs(obj.done, 5, 30);
+  const emotions = (Array.isArray(obj.emotions) ? obj.emotions : [])
+    .filter(e => e && Number.isInteger(e.index) && e.index >= 0 && EMOTION_LABELS.includes(e.label)
+      && typeof e.quote === 'string' && e.quote.trim())
+    .map(e => ({ index: e.index, label: e.label, quote: e.quote.trim().slice(0, 40) }))
+    .slice(0, 4);
   const rabbit = obj.rabbit && RABBIT_IDS.includes(obj.rabbit.type) && typeof obj.rabbit.reason === 'string' && obj.rabbit.reason.trim()
     ? { type: obj.rabbit.type, reason: obj.rabbit.reason.trim().slice(0, 160) }
     : null;
-  return { headline, narrative, thoughtFlow, loops, energyWords, keywords, rabbit };
+  return { headline, narrative, thoughtFlow, loops, energyWords, keywords, done, emotions, rabbit };
 }
 
 export default async function handler(req, res) {
@@ -205,10 +256,16 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: 'daily-cap', used, cap: DAILY_CAP });
   }
 
-  const lines = records.map((r, i) => `[${i}] ${r.time} ${r.text.replace(/\s*\n\s*/g, ' / ')}`).join('\n');
+  // 기록마다 글자 수와 지속시간을 붙인다 — 모델이 길이·간격을 세지 않게 (회고-수정안 §7)
+  const lines = records.map((r, i) => {
+    const meta = [`${r.text.length}자`, r.durationMin != null && `${r.durationMin}분`].filter(Boolean).join(', ');
+    return `[${i}] ${r.time} (${meta}) ${r.text.replace(/\s*\n\s*/g, ' / ')}`;
+  }).join('\n');
   const factLines = [
     facts.count != null && `- 기록 개수: ${facts.count}개`,
     facts.spanMinutes != null && `- 총 기록 시간(첫 기록부터 마지막 기록까지): ${facts.spanMinutes}분`,
+    facts.avgGapMin != null && `- 기록 간 평균 간격: ${facts.avgGapMin}분`,
+    facts.eveningRatio != null && `- 저녁·밤(18시 이후) 기록 비율: ${facts.eveningRatio}%`,
     facts.peakHour != null && `- 기록이 가장 몰린 시간대: ${String(facts.peakHour).padStart(2, '0')}시대`,
     facts.streak != null && `- 연속 기록 일수: ${facts.streak}일`,
     facts.recordDays != null && `- 누적 기록일: ${facts.recordDays}일`,
