@@ -1138,6 +1138,8 @@ function App() {
   const [memos, setMemos] = useState(loadGuestMemos);
   // 토큰이 갱신되면 서버 데이터를 다시 읽는다 (첫 로드가 만료 토큰으로 실패했을 수 있다)
   const [refetchTick, setRefetchTick] = useState(0);
+  // 서버에서 기록을 못 받아온 상태. 빈 화면을 '다 날아갔다'로 보이게 두면 안 되니 안내를 띄우고 다시 시도한다.
+  const [memosLoadFailed, setMemosLoadFailed] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   // 타임블럭이 이어서 그려둔 날짜 창의 기준일. selectedDate가 창을 벗어날 때만 따라온다.
   // (헤더 날짜는 스크롤을 따라 계속 바뀌는데, 그때마다 창을 다시 잡으면 화면이 튄다)
@@ -1388,8 +1390,8 @@ function App() {
       }
       if (event === 'TOKEN_REFRESHED') setRefetchTick(t => t + 1);
       setCurrentUser(session?.user ?? null);
-      // 로그아웃하면 체험 모드로 돌아간다 (보통은 비어 있다)
-      if (!session?.user) setMemos(loadGuestMemos());
+      // 로그아웃하면 체험 모드로 돌아간다 (보통은 비어 있다). 진짜 로그아웃일 때만 — 갱신 중 잠깐 세션이 비어도 화면은 지키지 않는다.
+      if (event === 'SIGNED_OUT') setMemos(loadGuestMemos());
       setAuthLoading(false);
     });
     return () => subscription.unsubscribe();
@@ -1431,8 +1433,10 @@ function App() {
         .order('recorded_at', { ascending: true }));
       if (error) {
         console.error('Error fetching memos:', error);
+        setMemosLoadFailed(true);
         return;
       }
+      setMemosLoadFailed(false);
       setMemos(data.map(rowToMemo));
     };
     fetchMemos();
@@ -1454,6 +1458,26 @@ function App() {
 
     return () => { supabase.removeChannel(channel); };
   }, [userId, refetchTick]);
+
+  // ── 앱 복귀 시 다시 불러오기 ────────────────────────────────
+  // 아침에 앱을 열면 OS가 밤새 내려둔 페이지를 새로 띄우는데, 그 첫 몇 초는 네트워크·토큰 갱신이 늦어
+  // 첫 불러오기가 통째로 실패할 수 있다. 그러면 빈 화면이 '기록이 다 날아간 것처럼' 보였다.
+  // 화면이 다시 보이거나 온라인으로 돌아오면 서버에서 다시 받는다. 실패한 상태면 짧은 간격으로도 재시도.
+  useEffect(() => {
+    if (!userId) return;
+    const refetch = () => setRefetchTick(t => t + 1);
+    const onVisible = () => { if (document.visibilityState === 'visible') refetch(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', refetch);
+    window.addEventListener('pageshow', refetch);
+    const timer = memosLoadFailed ? setInterval(refetch, 10000) : null;
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', refetch);
+      window.removeEventListener('pageshow', refetch);
+      if (timer) clearInterval(timer);
+    };
+  }, [userId, memosLoadFailed]);
 
   // ── 체험 기록을 계정으로 옮기기 ──────────────────────────────
   // 로그인하고 나서 써둔 게 사라지면 로그인 벽보다 나쁜 경험이 된다.
@@ -1520,7 +1544,7 @@ function App() {
     };
     loadSettings();
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [userId, refetchTick]);
 
   // ── 할 일 불러오기 ──────────────────────────────────────────
   useEffect(() => {
@@ -1842,7 +1866,7 @@ function App() {
       return () => clearTimeout(id);
     }
     let alive = true;
-    supabase.from('day_reviews').select('data, cache_key').eq('day', day).maybeSingle().then(({ data: row, error }) => {
+    fetchWithRetry(() => supabase.from('day_reviews').select('data, cache_key').eq('day', day).maybeSingle()).then(({ data: row, error }) => {
       if (!alive || error || !row?.data) return;
       const clean = normalizeSummary(row.data);
       if (clean) applyResult(row.cache_key || `${day}|server`, clean, false);
@@ -1886,7 +1910,7 @@ function App() {
   useEffect(() => {
     if (!userId) return;
     let alive = true;
-    supabase.from('day_reviews').select('day, data').limit(400).then(({ data, error }) => {
+    fetchWithRetry(() => supabase.from('day_reviews').select('day, data').limit(400)).then(({ data, error }) => {
       if (!alive || error || !Array.isArray(data)) return;
       setDayHeadlines(prev => {
         const next = { ...prev };
@@ -1894,7 +1918,7 @@ function App() {
         return next;
       });
     });
-    supabase.from('day_rabbits').select('day, rabbit').limit(500).then(({ data, error }) => {
+    fetchWithRetry(() => supabase.from('day_rabbits').select('day, rabbit').limit(500)).then(({ data, error }) => {
       if (!alive || error || !Array.isArray(data)) return;
       setDayRabbits(prev => {
         const next = { ...prev };
@@ -5315,7 +5339,13 @@ function App() {
           </div>
         )}
         {/* 회고 안내 — 되돌리기 토스트가 떠 있으면 그쪽이 우선 (같은 자리라 겹친다) */}
-        {reviewToast && !undoToast && !moveUndoToast && (
+        {memosLoadFailed && !undoToast && !moveUndoToast && (
+          <div className={toastClass}>
+            <span>기록을 불러오지 못했어요. 지워진 게 아니에요</span>
+            <button className="undo-btn" onClick={() => setRefetchTick(t => t + 1)}>다시 시도</button>
+          </div>
+        )}
+        {reviewToast && !undoToast && !moveUndoToast && !memosLoadFailed && (
           <div className={toastClass}>
             <span>오늘의 회고를 확인해보세요</span>
             <button className="undo-btn" onClick={openReviewFromToast}>보기</button>
