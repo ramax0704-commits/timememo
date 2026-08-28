@@ -1297,6 +1297,8 @@ function App() {
 
   // Settings (habit keywords)
   const [habitKeywords, setHabitKeywords] = useState([]);
+  // 서버에서 습관 키워드를 실제로 받아왔는지. 불러오기 전(또는 실패)에 저장하면 빈 배열로 덮어써 버린다.
+  const [habitKeywordsLoaded, setHabitKeywordsLoaded] = useState(false);
   const [newKeyword, setNewKeyword] = useState('');
   const [newKeywordColor, setNewKeywordColor] = useState('purple');
   // 키워드 관리 모달: 모달 안에서 수정하고 저장을 눌러야 반영됨
@@ -1497,12 +1499,16 @@ function App() {
   // ── Settings 불러오기 ────────────────────────────────────────
   useEffect(() => {
     if (!userId) return;
+    setHabitKeywordsLoaded(false);
+    let cancelled = false;
     const loadSettings = async () => {
-      const { data, error } = await supabase
+      // 메모와 같이 재시도한다. 한 번 삐끗하면 키워드가 '다 날아간 것처럼' 빈 채로 보였다.
+      const { data, error } = await fetchWithRetry(() => supabase
         .from('settings')
         .select('habit_keywords')
         .eq('user_id', userId)
-        .maybeSingle();
+        .maybeSingle());
+      if (cancelled) return;
       if (error) {
         console.error('Error loading settings:', error);
         return;
@@ -1510,8 +1516,10 @@ function App() {
       if (data?.habit_keywords && Array.isArray(data.habit_keywords)) {
         setHabitKeywords(data.habit_keywords);
       }
+      setHabitKeywordsLoaded(true);
     };
     loadSettings();
+    return () => { cancelled = true; };
   }, [userId]);
 
   // ── 할 일 불러오기 ──────────────────────────────────────────
@@ -4090,6 +4098,8 @@ function App() {
   // ── 습관 키워드 저장 ─────────────────────────────────────────
   const saveHabitKeywords = async (keywords) => {
     if (!currentUser) return;
+    // 서버 값을 못 받아온 상태에서 저장하면 기존 키워드를 빈 배열로 덮어쓴다 — 절대 금지.
+    if (!habitKeywordsLoaded) { console.error('habit keywords not loaded; skip save'); return; }
     const { error } = await supabase.from('settings').upsert({
       user_id: currentUser.id,
       habit_keywords: keywords,
@@ -4147,6 +4157,10 @@ function App() {
       deleted_count: habitKeywords.filter(k => !k.endedAt && !draftKeywords.some(d => d.name === k.name)).length,
       active_count: draftKeywords.filter(k => !k.endedAt).length,
     });
+    if (currentUser && !habitKeywordsLoaded) {
+      alert('습관 키워드를 아직 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
     setHabitKeywords(draftKeywords);
     await saveHabitKeywords(draftKeywords);
     setShowKeywordModal(false);
