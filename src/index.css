@@ -3720,3 +3720,13 @@ body.keyboard-open .input-toolbar { display: flex; }
 /* 페이지로 펼치면 글 칸이 남는 높이를 다 차지하고, 도구 줄은 맨 아래에 붙는다 */
 .block-sheet--full .edit-sheet-body { flex: 1; display: flex; flex-direction: column; }
 .block-sheet--full .edit-sheet-text { flex: 1; }
+
+/* 수정 시트는 '실제로 보이는 영역'에 맞춘다 — 키보드가 뜬 뒤 앱이 위로 밀려도 도구 줄이 키보드에 붙게 */
+.block-sheet-overlay:has(.edit-sheet) {
+  position: fixed;
+  inset: auto;
+  top: var(--vv-top, 0px);
+  left: 0; right: 0;
+  height: var(--vh, 100dvh);
+  max-width: 480px; margin: 0 auto;
+}

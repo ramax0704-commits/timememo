@@ -1771,6 +1771,9 @@ function App() {
     const applyVh = () => {
       if (!window.visualViewport) return;
       document.documentElement.style.setProperty('--vh', `${window.visualViewport.height}px`);
+      // iOS는 키보드가 뜨면 보이는 영역을 아래로 밀어 놓기도 한다(offsetTop). 그만큼 앱 아래에 빈 띠가 생겨
+      // 시트 도구 줄과 키보드 사이가 뜬다 — 시트는 이 값으로 자리를 잡는다 (8/29)
+      document.documentElement.style.setProperty('--vv-top', `${Math.round(window.visualViewport.offsetTop)}px`);
     };
     let settle = null;
     const handleResize = () => {
@@ -6158,7 +6161,7 @@ function App() {
                 className="edit-sheet-text"
                 value={editContentStr}
                 onChange={e => setEditContentStr(e.target.value)}
-                onFocus={() => { setSheetPanel(null); setSheetFull(true); }}
+                onFocus={() => setSheetPanel(null)}
                 placeholder="무엇을 했나요?"
                 rows={3}
               />
