@@ -1663,8 +1663,8 @@ body.keyboard-open .input-toolbar { display: flex; }
   box-shadow: none;
   width: 100%;
   max-width: 400px;
-  padding: 56px 8px 24px;
-  margin: auto; /* 공간이 남으면 중앙, 부족하면 스크롤 가능 */
+  padding: 64px 8px 24px;
+  margin: 0 auto auto; /* 위에 붙인다 — 가운데 두면 머리 위가 휑하다 (8/29) */
   animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -2373,6 +2373,9 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 /* 회고를 본 뒤 저장을 권하는 카드 (게스트) */
 .day-summary--keep { border: 1px dashed #c9cfe6; background: #f7f8fd; }
+.day-summary-keep-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.day-summary-keep-title { font-size: 1rem; font-weight: 700; color: var(--primary-color); }
+.day-summary-btn--small { padding: 8px 14px; font-size: 0.85rem; flex-shrink: 0; }
 
 .day-summary-btn {
   display: inline-flex;

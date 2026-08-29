@@ -868,9 +868,11 @@ export default function ReviewScreen({
               {/* 게스트는 회고를 본 직후에 저장을 권한다 — '보려면 로그인'이 아니라 '간직하려면 로그인' */}
               {isGuest && !ai.mock && (
                 <section className="day-summary day-summary--keep">
-                  <div className="day-summary-ai-title">이 회고, 내일도 보려면</div>
-                  <p className="day-summary-muted">지금은 이 폰에만 있어요.<br />7일 동안 안 열면 지워질 수 있어요.</p>
-                  <button type="button" className="day-summary-btn" onClick={() => onLoginClick('after_result')}>구글로 저장해두기</button>
+                  <div className="day-summary-keep-row">
+                    <div className="day-summary-keep-title">이 회고, 내일도 보려면</div>
+                    <button type="button" className="day-summary-btn day-summary-btn--small" onClick={() => onLoginClick('after_result')}>로그인하기</button>
+                  </div>
+                  <p className="day-summary-muted">지금은 이 폰에만 있어요. 7일 동안 안 열면 지워질 수 있어요.</p>
                 </section>
               )}
               <TalkCurveBlock memos={todayMemos} now={isToday ? now : null} emotions={ai.data.emotions} dayLabel={dayLabel} />
