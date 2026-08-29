@@ -6147,12 +6147,6 @@ function App() {
                   <button type="button" className="edit-page-circle" onClick={() => setSheetFull(false)} title="뒤로" aria-label="뒤로">
                     <ChevronLeft size={22} />
                   </button>
-                  <div className="edit-page-bar-right">
-                    <button type="button" className="edit-page-circle edit-page-circle--danger" onClick={deleteFromBlockEditor} title="삭제" aria-label="삭제">
-                      <Trash2 size={18} />
-                    </button>
-                    <button type="button" className="edit-page-save" onClick={saveBlockEdit} disabled={!editContentStr.trim()}>저장</button>
-                  </div>
                 </div>
               )}
               <div className="block-sheet-head edit-sheet-head">
@@ -6292,7 +6286,7 @@ function App() {
               >
                 <Palette size={18} strokeWidth={2} />
               </button>
-              {!sheetFull && (
+              {(
                 <>
                   <button
                     type="button"

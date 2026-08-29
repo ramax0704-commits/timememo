@@ -3642,7 +3642,8 @@ body.keyboard-open .input-toolbar { display: flex; }
   border-radius: 0;
   padding-top: calc(8px + env(safe-area-inset-top));
 }
-.block-sheet-overlay--full { background-color: rgba(0, 0, 0, 0.5); }
+/* 페이지 모드는 딤 없이 흰 화면 — 상태바 뒤까지 (시트가 올라온 것처럼 보이지 않게, 8/29) */
+.block-sheet-overlay--full { background-color: #fff; }
 /* 페이지로 펼치면 본문 칸이 글 길이만큼 자란다 (시트일 땐 fitSheetTextarea가 상한을 둔다) */
 .block-sheet--full .block-textarea { min-height: 160px; }
 .block-textarea { overflow-y: auto; }
