@@ -3675,7 +3675,7 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 .edit-sheet-tools {
   flex: none; display: flex; align-items: center; gap: 8px;
-  padding-top: 10px; margin-top: 8px; border-top: 1px solid var(--border-color);
+  padding-top: 8px; margin-top: 4px;
 }
 .edit-tool-btn {
   width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--border-color);
@@ -3730,3 +3730,7 @@ body.keyboard-open .input-toolbar { display: flex; }
   height: var(--vh, 100dvh);
   max-width: 480px; margin: 0 auto;
 }
+
+/* 페이지 모드는 페이지답게: 모서리·손잡이 없이 상태바 아래부터 (8/29) */
+.block-sheet--full.edit-sheet { border-radius: 0; padding-top: calc(14px + env(safe-area-inset-top)); }
+.block-sheet--full .edit-sheet-head { margin-top: 0; }
