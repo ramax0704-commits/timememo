@@ -3635,7 +3635,9 @@ body.keyboard-open .input-toolbar { display: flex; }
 /* ── 기록 수정 시트 → 위로 밀면 전체 페이지 (8/29) ───────────────── */
 .block-sheet-grip { flex: none; touch-action: none; }
 .block-sheet-head-left, .block-sheet-head-right { display: flex; align-items: center; gap: 4px; }
-.block-sheet.edit-sheet { transition: max-height 0.25s ease, border-radius 0.25s ease; }
+.block-sheet.edit-sheet { transition: border-radius 0.28s ease, padding 0.28s ease; }
+.block-sheet-overlay:has(.edit-sheet) { transition: background-color 0.28s ease; }
+.edit-page-bar { animation: fadeIn 0.28s; }
 .block-sheet--full {
   max-height: 100%;
   height: 100%;
@@ -3754,5 +3756,5 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 .edit-page-save:disabled { opacity: 0.4; }
 .block-sheet--full .edit-sheet-head { margin-bottom: 2px; }
-.block-sheet--full .edit-sheet-text { font-size: 1.15rem; line-height: 1.65; }
+/* 글씨 크기는 두 모드 같게 — 전환 때 글이 튀지 않게 */
 .block-sheet--full .edit-sheet-tools { border: none; }

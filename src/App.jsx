@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useLayoutEffect, useState, useEffect, useRef, useCallback } from 'react';
 import {
   format,
   isSameDay,
@@ -1281,6 +1281,28 @@ function App() {
     return () => vv.removeEventListener('resize', check);
   }, []);
   const sheetDragRef = useRef(null);
+  const sheetElRef = useRef(null);
+  const sheetAnimRef = useRef(null); // 전환 직전 높이 — 시트↔페이지를 높이 애니메이션으로 잇는다 (8/29 삐걱거림)
+  const setSheetFullAnimated = (next) => {
+    const el = sheetElRef.current;
+    if (el) sheetAnimRef.current = el.getBoundingClientRect().height;
+    setSheetFull(next);
+  };
+  useLayoutEffect(() => {
+    const el = sheetElRef.current, from = sheetAnimRef.current;
+    sheetAnimRef.current = null;
+    if (!el || from == null) return;
+    el.style.transition = 'none'; el.style.height = ''; el.style.maxHeight = 'none';
+    const to = el.getBoundingClientRect().height;
+    if (Math.abs(to - from) < 2) { el.style.maxHeight = ''; return; }
+    el.style.height = `${from}px`;
+    el.getBoundingClientRect(); // reflow
+    el.style.transition = 'height 0.28s cubic-bezier(.2,.8,.2,1), border-radius 0.28s';
+    el.style.height = `${to}px`;
+    const done = () => { el.style.transition = ''; el.style.height = ''; el.style.maxHeight = ''; el.removeEventListener('transitionend', done); };
+    el.addEventListener('transitionend', done);
+    setTimeout(done, 350);
+  }, [sheetFull]);
   const sheetTextareaRef = useRef(null);
   // 시트 본문 칸은 글 길이만큼 자란다 — 시트일 땐 상한을 두고, 페이지로 펼치면 상한 없이
   const fitSheetTextarea = () => {
@@ -1298,8 +1320,8 @@ function App() {
       const from = sheetDragRef.current; sheetDragRef.current = null;
       if (from == null) return;
       const dy = e.changedTouches[0].clientY - from;
-      if (dy < -40) setSheetFull(true);
-      else if (dy > 40) { if (sheetFull) setSheetFull(false); else closeBlockEditor(); }
+      if (dy < -40) setSheetFullAnimated(true);
+      else if (dy > 40) { if (sheetFull) setSheetFullAnimated(false); else closeBlockEditor(); }
     },
   };
   const [editMemoColor, setEditMemoColor] = useState('default');
@@ -6136,7 +6158,7 @@ function App() {
           어느 화면 어느 자리를 눌러도 여기서 내용·시간·색상·삭제를 다 할 수 있다 */}
 {editingMemo && (
         <div className={`block-sheet-overlay${sheetFull ? ' block-sheet-overlay--full' : ''}`} onClick={closeBlockEditor}>
-          <div className={`block-sheet edit-sheet${sheetFull ? ' block-sheet--full' : ''}${keyboardOpen ? ' block-sheet--kb' : ''}`} onClick={e => e.stopPropagation()}>
+          <div ref={sheetElRef} className={`block-sheet edit-sheet${sheetFull ? ' block-sheet--full' : ''}${keyboardOpen ? ' block-sheet--kb' : ''}`} onClick={e => e.stopPropagation()}>
             {/* 글이 주인공인 시트 (8/29): 위엔 시각 한 줄, 가운데는 글, 아래 도구 줄(시간·색·삭제·저장).
                 손잡이를 위로 밀면 전체 페이지, 아래로 밀면 다시 시트(또는 닫기). 화살표 버튼으로도 된다 */}
             <div className="block-sheet-grip" {...sheetGripHandlers}>
@@ -6144,7 +6166,7 @@ function App() {
               {/* 페이지 모드 상단 바: 둥근 ← / 🗑 / 저장. 그 아래 시각 한 줄 (8/29 참고 화면대로) */}
               {sheetFull && (
                 <div className="edit-page-bar">
-                  <button type="button" className="edit-page-circle" onClick={() => setSheetFull(false)} title="뒤로" aria-label="뒤로">
+                  <button type="button" className="edit-page-circle" onClick={() => setSheetFullAnimated(false)} title="뒤로" aria-label="뒤로">
                     <ChevronLeft size={22} />
                   </button>
                 </div>
@@ -6161,7 +6183,7 @@ function App() {
                 </button>
                 {!sheetFull && (
                   <div className="block-sheet-head-right">
-                    <button className="block-sheet-close" onClick={() => setSheetFull(true)} title="크게 보기" aria-label="크게 보기">
+                    <button className="block-sheet-close" onClick={() => setSheetFullAnimated(true)} title="크게 보기" aria-label="크게 보기">
                       <ChevronUp size={20} />
                     </button>
                     <button className="block-sheet-close" onClick={closeBlockEditor} title="닫기" aria-label="닫기">
