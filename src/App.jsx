@@ -21,7 +21,7 @@ import { supabase, setRememberMe, getRememberMe } from './supabase';
 import { track, identifyUser, resetUser, markFirstMemo } from './analytics';
 import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
 import {
-  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, dateKeyOf, reviewKeyOf,
+  SUMMARY_MIN_RECORDS, SUMMARY_DAILY_LIMIT, GUEST_SUMMARY_DAILY_LIMIT, dateKeyOf, reviewKeyOf,
   buildDayFacts, buildWeekFacts, toSummaryRecords, countRecordDays, minuteInReviewDay, DAY_START_MIN,
 } from './daySummary';
 import { requestDaySummary, summaryCacheKey, peekSummaryCache, collectCachedRabbits, collectCachedSummaries, normalizeSummary } from './summaryAI';
@@ -436,7 +436,7 @@ function MemoItem({ memo, onEdit, onEditTime, onDeleteWithUndo, habitKeywords, d
               순간 기록은 적은 시각. */}
           {/* '이전 기록부터' 이은 기록은 끝나고 적은 것이라 적은 시각(=끝)을 보여준다 — 시작 시각을 찍으면
               채팅 순서(적은 시각순)와 어긋나 헷갈렸다(8/29). '~'가 '여기까지'라는 뜻. */}
-          <span className="memo-time">{isAutoStart(memo)
+          <span className="memo-time">{(isAutoStart(memo) || (memo.backMinutes || 0) > 0)
             ? `~${format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}`
             : format(new Date(startAt ?? new Date(memo.recordedAt).getTime() - (memo.backMinutes || 0) * 60000), 'aa h:mm', { locale: ko })}</span>
         </div>
@@ -1128,7 +1128,10 @@ function buildDayBlocks(sortedMemos, { dayStartMs, nowMs, gridMinutes, clampDawn
     } else {
       // 다음 기록이 30분 안에 있으면 겹치지 않게 거기까지만
       endPos = ownPos + MIN_BLOCK_MINUTES;
-      if (nextPos !== null && nextPos > ownPos) endPos = Math.min(endPos, nextPos);
+      if (nextPos !== null) {
+        const nextStart = nextPos - Math.max(0, nextMemo.backMinutes || 0);
+        if (nextStart > ownPos) endPos = Math.min(endPos, nextStart);
+      }
     }
     if (clampDawn && endPos > ownPos) {
       // 새벽 기록이 새벽 2시를 넘겨 이어지지 않게 자른다
@@ -1829,7 +1832,11 @@ function App() {
   const todayRecords = todayFacts ? toSummaryRecords(todayMemos) : null;
   const summaryKey = todayRecords ? summaryCacheKey(reviewKey, todayRecords) : null;
   // 관리자 계정은 하루 제한을 두지 않는다 — 판정을 바꾼 뒤 여러 날을 다시 돌려 봐야 한다 (8/29)
-  const summaryUsesLeft = currentUser?.email === ADMIN_EMAIL ? 99 : Math.max(0, SUMMARY_DAILY_LIMIT - (summaryUses[todayKey] || 0));
+  // 게스트도 회고를 하루 1회 만들 수 있다 (8/29 회고 게이트 이동). '보려면 로그인'을 만난 27명 중 24명이
+  // 버튼도 안 누르고 나갔다 — 가치를 본 뒤에 저장을 권하는 쪽으로 순서를 바꾼다.
+  // 서버 전체 상한(SUMMARIZE_DAILY_CAP)이 비용을 막으므로 게스트 개방으로 비용 상한은 안 바뀐다.
+  const summaryDailyLimit = currentUser ? SUMMARY_DAILY_LIMIT : GUEST_SUMMARY_DAILY_LIMIT;
+  const summaryUsesLeft = currentUser?.email === ADMIN_EMAIL ? 99 : Math.max(0, summaryDailyLimit - (summaryUses[todayKey] || 0));
   const canGenerate = Boolean(summaryKey) && todayMemos.length >= SUMMARY_MIN_RECORDS && summaryUsesLeft > 0;
   const pickReviewDay = (day) => {
     if (dateKeyOf(day) > todayKey) return;
@@ -3699,14 +3706,32 @@ function App() {
         );
       }
     }
+    // '이전 기록부터'는 누르는 그 순간 시작 시각을 굳힌다(back_minutes). 예전엔 '이전 기록에 붙어 있음' 표시만
+    // 남겨 두고 그릴 때마다 이웃을 따라가게 했는데, 그러면 나중에 이 기록이나 이웃을 고칠 때마다
+    // 시작이 딸려 움직여 꼬였다(8/29). 입력 편의일 뿐이지 영구 연결이 아니다.
+    let backMinutes = 0;
+    if (mode === 'prev' && timed?.kind !== 'range') {
+      const ownMs = recordAt.getTime();
+      const prev = memos
+        .filter(m => new Date(m.recordedAt).getTime() < ownMs && ownMs - new Date(m.recordedAt).getTime() < 24 * 3600000)
+        .sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt))[0];
+      if (prev) {
+        // 이전 기록이 끝을 직접 늘려뒀으면 그 끝부터, 아니면 그 기록 시각부터
+        const prevEnd = new Date(prev.recordedAt).getTime() + Math.max(0, prev.endMinutes || 0) * 60000;
+        backMinutes = Math.max(1, Math.round((ownMs - prevEnd) / 60000));
+      } else {
+        backMinutes = MIN_BLOCK_MINUTES;
+      }
+    }
     const newMemoData = {
       user_id: currentUser?.id,
       content: timed ? timed.content : inputText,
       color: selectedColor,
       recorded_at: recordAt.toISOString(),
-      // 칩을 눌렀으면 잇는다. "9시 30분 밥"처럼 시각만 적은 경우도 그 시각을 끝(또는 시작)으로 잇는다.
-      // 예전엔 시각이 있으면 잇기를 무시해 단일 기록이 됐다 (8/27 실서버 버그). 구간(~)으로 적었을 때만 그대로 둔다.
-      spans_from_prev: mode === 'prev' && timed?.kind !== 'range',
+      spans_from_prev: false,
+      back_minutes: backMinutes,
+      // '다음 기록까지'는 아직 다음 기록이 없으니 굳힐 수 없다 — 이건 그릴 때 따라간다.
+      // "9시 30분 밥"처럼 시각만 적은 경우도 그 시각을 시작으로 잇는다. 구간(~)으로 적었을 때만 그대로 둔다.
       spans_to_next: mode === 'next' && timed?.kind !== 'range',
       // 구간으로 적었으면 끝 시각을 직접 정한 것과 같다
       end_minutes: timed?.kind === 'range' ? timed.durationMin : 0,
@@ -5254,9 +5279,11 @@ function App() {
             week={weekFacts}
             now={nowTime}
             ai={tour.active ? tourAI : summaryForScreen}
-            locked={isGuest && !tour.active}
+            locked={false}
+            isGuest={isGuest && !tour.active}
             busy={tour.active ? tour.aiStatus === 'loading' : summaryBusy}
             usesLeft={tour.active ? SUMMARY_DAILY_LIMIT : summaryUsesLeft}
+            dailyLimit={tour.active ? SUMMARY_DAILY_LIMIT : summaryDailyLimit}
             habitKeywords={habitKeywords}
             onEditHabits={openKeywordModal}
             onModeChange={setReviewMode}
@@ -5268,8 +5295,9 @@ function App() {
             onWeekViewed={handleWeekViewed}
             onGenerate={tour.active ? tourGenerate : generateSummary}
             onGoTimeline={() => setActiveView('timeline')}
-            onLoginClick={() => {
-              track('Summary Login Click', { memo_count: todayFacts?.count ?? 0 });
+            onLoginClick={(placement = 'gate') => {
+              // placement: 'after_result' = 회고를 본 뒤 '간직하기' 카드에서 누름 (8/29부터)
+              track('Summary Login Click', { memo_count: todayFacts?.count ?? 0, placement: typeof placement === 'string' ? placement : 'gate' });
               requestGoogleSignIn();
             }}
           />

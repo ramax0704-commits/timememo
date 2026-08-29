@@ -2370,6 +2370,9 @@ body.keyboard-open .input-toolbar { display: flex; }
   0%, 100% { opacity: 0.45; }
   50% { opacity: 1; }
 }
+/* 회고를 본 뒤 저장을 권하는 카드 (게스트) */
+.day-summary--keep { border: 1px dashed #c9cfe6; background: #f7f8fd; }
+
 .day-summary-btn {
   display: inline-flex;
   align-items: center;

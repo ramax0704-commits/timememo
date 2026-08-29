@@ -16,6 +16,8 @@ export const FIXED_CATEGORY_COUNT = 5;
 export const UNCATEGORIZED = '미분류';
 // 하루에 AI 회고를 만들 수 있는 횟수 (첫 생성 + 다시 만들기 포함). 호출마다 비용이 나간다.
 export const SUMMARY_DAILY_LIMIT = 2;
+// 게스트(로그인 전)는 하루 1회 — 회고를 '보고 나서' 저장을 권하기 위한 맛보기. 서버 전체 상한은 그대로.
+export const GUEST_SUMMARY_DAILY_LIMIT = 1;
 // 한 기록의 활동 시간 상한. 기록과 다음 기록 사이를 그 활동 시간으로 치되, 잠들거나 앱을 닫은
 // 긴 공백이 통째로 한 활동에 붙지 않게 자른다.
 export const ACTIVITY_CAP_MIN = 180;

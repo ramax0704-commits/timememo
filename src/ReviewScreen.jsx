@@ -406,7 +406,7 @@ function LoadingHint({ startedAt }) {
   );
 }
 
-function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginClick }) {
+function AIGate({ ai, locked, recordCount, busy, usesLeft, dailyLimit = SUMMARY_DAILY_LIMIT, onGenerate, onLoginClick }) {
   if (locked) {
     return (
       <section className="day-summary day-summary--ai-gate">
@@ -437,7 +437,7 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
       ) : ai?.status === 'failed' ? (
         <p className="day-summary-muted">지금은 만들 수 없어요. 잠시 후 다시 시도해 주세요.</p>
       ) : exhausted ? (
-        <p className="day-summary-muted">오늘 만들 수 있는 횟수({SUMMARY_DAILY_LIMIT}회)를 다 썼어요. 내일 다시 만들 수 있어요.</p>
+        <p className="day-summary-muted">오늘 만들 수 있는 횟수({dailyLimit}회)를 다 썼어요. 내일 다시 만들 수 있어요.</p>
       ) : short ? (
         <p className="day-summary-muted">
           기록 {SUMMARY_MIN_RECORDS}개부터 만들 수 있어요. 지금 {recordCount}개 — {SUMMARY_MIN_RECORDS - recordCount}개만 더 남기면 돼요.
@@ -449,7 +449,7 @@ function AIGate({ ai, locked, recordCount, busy, usesLeft, onGenerate, onLoginCl
         {ai?.status === 'failed' ? '다시 시도' : '오늘 회고 만들기'}
       </button>
       {!short && !exhausted && ai?.status !== 'failed' && (
-        <span className="day-summary-uses">하루 {SUMMARY_DAILY_LIMIT}회 · 오늘 {usesLeft}회 남음</span>
+        <span className="day-summary-uses">하루 {dailyLimit}회 · 오늘 {usesLeft}회 남음</span>
       )}
     </section>
   );
@@ -781,7 +781,7 @@ function WeekView({ week, habitKeywords, dayHeadlines, dayRabbits, onPickDay, on
 
 // ── 화면 ──────────────────────────────────────────────────────
 export default function ReviewScreen({
-  facts, todayMemos, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, busy, usesLeft,
+  facts, todayMemos, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, isGuest = false, busy, usesLeft, dailyLimit = SUMMARY_DAILY_LIMIT,
   habitKeywords, onEditHabits, dayHeadlines, dayRabbits, onPickDay, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline,
   onModeChange,
 }) {
@@ -865,12 +865,20 @@ export default function ReviewScreen({
                 cardOpen={rabbitCardOpen} onOpenCard={() => setRabbitCardOpen(true)} onCloseCard={() => setRabbitCardOpen(false)}
                 dayLabel={dayLabel}
               />
+              {/* 게스트는 회고를 본 직후에 저장을 권한다 — '보려면 로그인'이 아니라 '간직하려면 로그인' */}
+              {isGuest && !ai.mock && (
+                <section className="day-summary day-summary--keep">
+                  <div className="day-summary-ai-title">이 회고, 내일도 보려면</div>
+                  <p className="day-summary-muted">지금은 이 기기에만 남아요. 구글로 저장해두면 어느 기기에서든 다시 볼 수 있고, 쌓인 날들이 달력에 남아요.</p>
+                  <button type="button" className="day-summary-btn" onClick={() => onLoginClick('after_result')}>구글로 저장해두기</button>
+                </section>
+              )}
               <TalkCurveBlock memos={todayMemos} now={isToday ? now : null} emotions={ai.data.emotions} dayLabel={dayLabel} />
             </>
           ) : (
             <>
               <TalkCurveBlock memos={todayMemos} now={isToday ? now : null} emotions={null} dayLabel={dayLabel} />
-              <AIGate ai={ai} locked={locked} recordCount={facts.count} busy={busy} usesLeft={usesLeft} onGenerate={onGenerate} onLoginClick={onLoginClick} />
+              <AIGate ai={ai} locked={locked} recordCount={facts.count} busy={busy} usesLeft={usesLeft} dailyLimit={dailyLimit} onGenerate={onGenerate} onLoginClick={onLoginClick} />
             </>
           )}
 
