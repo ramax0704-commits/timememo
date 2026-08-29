@@ -3714,3 +3714,9 @@ body.keyboard-open .input-toolbar { display: flex; }
 .auth-feedback .input-field { background-color: #fff; border: 1px solid var(--border-color); }
 .auth-feedback .input-field:focus { background-color: #fff; }
 .auth-wrapper .build-stamp { background-color: var(--bg-body); margin: 0 -28px; padding: 0 28px 16px; }
+
+/* 키보드가 떠 있으면 홈바 여백이 필요 없다 — 도구 줄을 키보드 바로 위에 붙인다 (8/29) */
+.block-sheet--kb { padding-bottom: 10px !important; }
+/* 페이지로 펼치면 글 칸이 남는 높이를 다 차지하고, 도구 줄은 맨 아래에 붙는다 */
+.block-sheet--full .edit-sheet-body { flex: 1; display: flex; flex-direction: column; }
+.block-sheet--full .edit-sheet-text { flex: 1; }

@@ -1267,6 +1267,15 @@ function App() {
   const [sheetFull, setSheetFull] = useState(false);
   // 시트 아래 도구 줄에서 펼친 것: null | 'time' | 'color'
   const [sheetPanel, setSheetPanel] = useState(null);
+  // 키보드가 떠 있는지 (보이는 높이가 창 높이보다 한참 작으면). 떠 있으면 홈바 여백을 빼서 도구 줄을 키보드에 붙인다
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const check = () => setKeyboardOpen(window.innerHeight - vv.height > 120);
+    vv.addEventListener('resize', check);
+    return () => vv.removeEventListener('resize', check);
+  }, []);
   const sheetDragRef = useRef(null);
   const sheetTextareaRef = useRef(null);
   // 시트 본문 칸은 글 길이만큼 자란다 — 시트일 땐 상한을 두고, 페이지로 펼치면 상한 없이
@@ -6117,7 +6126,7 @@ function App() {
           어느 화면 어느 자리를 눌러도 여기서 내용·시간·색상·삭제를 다 할 수 있다 */}
 {editingMemo && (
         <div className={`block-sheet-overlay${sheetFull ? ' block-sheet-overlay--full' : ''}`} onClick={closeBlockEditor}>
-          <div className={`block-sheet edit-sheet${sheetFull ? ' block-sheet--full' : ''}`} onClick={e => e.stopPropagation()}>
+          <div className={`block-sheet edit-sheet${sheetFull ? ' block-sheet--full' : ''}${keyboardOpen ? ' block-sheet--kb' : ''}`} onClick={e => e.stopPropagation()}>
             {/* 글이 주인공인 시트 (8/29): 위엔 시각 한 줄, 가운데는 글, 아래 도구 줄(시간·색·삭제·저장).
                 손잡이를 위로 밀면 전체 페이지, 아래로 밀면 다시 시트(또는 닫기). 화살표 버튼으로도 된다 */}
             <div className="block-sheet-grip" {...sheetGripHandlers}>
@@ -6149,7 +6158,7 @@ function App() {
                 className="edit-sheet-text"
                 value={editContentStr}
                 onChange={e => setEditContentStr(e.target.value)}
-                onFocus={() => setSheetPanel(null)}
+                onFocus={() => { setSheetPanel(null); setSheetFull(true); }}
                 placeholder="무엇을 했나요?"
                 rows={3}
               />
