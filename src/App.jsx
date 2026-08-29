@@ -1417,6 +1417,8 @@ function App() {
   const timelineRef = useRef(null);
   const inputRef = useRef(null);
   const scrollPositionRef = useRef(null);
+  // 지우기로 했지만 서버 삭제가 아직 안 나간 기록 id — 서버에서 받아온 목록에서 걸러낸다
+  const pendingDeleteRef = useRef(new Set());
   const justAddedRef = useRef(null); // 방금 등록한 기록의 recorded_at — 그 자리로 화면을 옮긴다
 
 
@@ -3071,34 +3073,38 @@ function App() {
     // 스크롤 위치 저장
     scrollPositionRef.current = timelineRef.current?.scrollTop ?? null;
 
-    // 기존 Undo 취소
-    if (undoToast?.timer) clearTimeout(undoToast.timer);
+    // 앞서 지운 것의 되돌리기가 아직 떠 있으면, 그건 이제 확정이다 — 타이머만 끄면 서버 삭제가 영영 안 나가서
+    // 지운 기록이 다시 살아났다 (8/29: 연달아 지운 뒤 '이전 기록부터'가 지운 기록에 붙음)
+    if (undoToast?.timer) { clearTimeout(undoToast.timer); undoToast.commit?.(); }
 
     // 낙관적 삭제 (로컬에서 먼저 제거)
     setMemos(prev => prev.filter(m => m.id !== memo.id));
+    pendingDeleteRef.current.add(memo.id);
 
-    const timer = setTimeout(async () => {
+    const commit = async () => {
       // 체험 모드는 브라우저에서만 지우면 끝
       if (isGuest) {
         saveGuestRows(loadGuestRows().filter(r => r.id !== memo.id));
-        setUndoToast(null);
+        pendingDeleteRef.current.delete(memo.id);
         return;
       }
-      // 5초 후 실제 삭제
       const { error } = await supabase.from('memos').delete().eq('id', memo.id);
+      pendingDeleteRef.current.delete(memo.id);
       if (error) {
         console.error('Error deleting memo:', error);
         setMemos(prev => [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
       }
-      setUndoToast(null);
-    }, 5000);
+    };
+    // 5초 후 실제 삭제
+    const timer = setTimeout(async () => { await commit(); setUndoToast(t => (t?.memo?.id === memo.id ? null : t)); }, 5000);
 
-    setUndoToast({ memo, timer });
+    setUndoToast({ memo, timer, commit });
   }, [isGuest, undoToast]);
 
   const handleUndo = useCallback(async () => {
     if (!undoToast) return;
     clearTimeout(undoToast.timer);
+    pendingDeleteRef.current.delete(undoToast.memo.id);
     // 메모 복원 (낙관적으로 이미 제거됐으므로 다시 추가)
     setMemos(prev => [...prev, undoToast.memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
     setUndoToast(null);
@@ -3782,7 +3788,7 @@ function App() {
           .gte('recorded_at', sinceIso).lt('recorded_at', recordAt.toISOString())
           .order('recorded_at', { ascending: false }).limit(50);
         if (Array.isArray(data)) {
-          const fresh = data.map(rowToMemo);
+          const fresh = data.map(rowToMemo).filter(m => !pendingDeleteRef.current.has(m.id));
           const ids = new Set(fresh.map(m => m.id));
           pool = [...fresh, ...memos.filter(m => !ids.has(m.id))];
         }
