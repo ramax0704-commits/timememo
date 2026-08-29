@@ -836,10 +836,10 @@ function FeedbackCard({ user }) {
         maxLength={2000}
         placeholder={user
           ? '불편한 점, 바라는 점, 문의 무엇이든 편하게 남겨주세요.'
-          : '불편한 점, 바라는 점, 문의 무엇이든 편하게 남겨주세요.\n답장이 필요하면 이메일 등 연락처를 함께 적어주세요.'}
+          : '불편한 점, 바라는 점, 문의 무엇이든 편하게 남겨주세요. 답장이 필요하면 이메일 등 연락처를 함께 적어주세요.'}
         value={text}
         onChange={e => setText(e.target.value)}
-        style={{ resize: 'none', fontSize: '0.875rem', lineHeight: 1.5 }}
+        style={{ resize: 'none', fontSize: '0.875rem', lineHeight: 1.5, borderRadius: 12, minHeight: 96 }}
       />
       <button
         type="button"
@@ -5020,7 +5020,6 @@ function App() {
         </button>
         <div className="auth-card">
           <div className="auth-logo">
-            <span className="auth-logo-icon">🕒</span>
             <h2>타임메모</h2>
             <p>오늘 하루를 시간 단위로 꼼꼼하게 기록하세요</p>
           </div>
@@ -5110,14 +5109,6 @@ function App() {
               </div>
             )}
           </form>
-          {/* 체험하던 사람이 막다른 길에 갇히지 않게 되돌아갈 문을 둔다 */}
-          <button
-            type="button"
-            onClick={() => { setShowLogin(false); setAuthError(''); }}
-            style={{ display: 'block', margin: '18px auto 0', background: 'none', border: 'none', color: '#888', fontSize: '0.875rem', cursor: 'pointer' }}
-          >
-            나중에 하기
-          </button>
           {/* 처음 들어온 사람이 가입 전에 확인할 수 있어야 해서 로그인 화면에 둔다 */}
           <p style={{ textAlign: 'center', marginTop: '14px', fontSize: '0.8rem', color: '#999' }}>
             <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: '#999' }}>

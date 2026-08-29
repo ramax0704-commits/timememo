@@ -1632,14 +1632,14 @@ body.keyboard-open .input-toolbar { display: flex; }
 .auth-wrapper {
   position: relative; /* 좌상단 뒤로가기 기준점 */
   display: flex;
-  background-color: var(--bg-body);
+  background-color: #fff;
   padding: 20px;
   overflow-y: auto; /* 카드가 화면보다 길면 스크롤 (모바일 잘림 방지) */
 }
 
 .auth-back-btn {
   position: absolute;
-  top: 12px;
+  top: max(12px, env(safe-area-inset-top));
   left: 12px;
   width: 40px;
   height: 40px;
@@ -1657,12 +1657,13 @@ body.keyboard-open .input-toolbar { display: flex; }
 .auth-back-btn:active { background-color: rgba(0, 0, 0, 0.06); }
 
 .auth-card {
-  background-color: white;
-  border-radius: 20px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  /* 8/29: 회색 바탕 위 흰 상자가 답답해 보여서 상자를 걷어냈다 — 화면 자체가 흰 바탕 */
+  background: none;
+  border-radius: 0;
+  box-shadow: none;
   width: 100%;
   max-width: 400px;
-  padding: 36px 24px;
+  padding: 56px 8px 24px;
   margin: auto; /* 공간이 남으면 중앙, 부족하면 스크롤 가능 */
   animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
