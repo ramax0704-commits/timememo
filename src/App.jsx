@@ -340,7 +340,7 @@ function todoDayLabel(date) {
 // 제스처가 셋이라 한 곳에서 조율한다:
 //   말풍선 탭 → 인라인 수정, 시각 탭 → 시간 조정 시트, 좌우로 밀기 → 삭제 버튼. (꾹 눌러 옮기기는 8/27에 뺐다 — 헷갈린다)
 // 예전에는 touch 이벤트를 썼는데, 포인터 이벤트로 바꿔서 PC 마우스도 같이 통한다.
-function MemoItem({ memo, onEdit, onEditTime, onDeleteWithUndo, habitKeywords, dimmed, duration, startAt }) {
+function MemoItem({ memo, onEdit, onEditTime, onDeleteWithUndo, habitKeywords, dimmed, duration, startAt, endAt }) {
   const [swiped, setSwiped] = useState(false);
   // { x, y, id, mode: 'pending' | 'swipe' | 'scroll' }
   const gestureRef = useRef(null);
@@ -439,7 +439,9 @@ function MemoItem({ memo, onEdit, onEditTime, onDeleteWithUndo, habitKeywords, d
               순간 기록은 적은 시각. */}
           {/* '이전 기록부터' 이은 기록은 끝나고 적은 것이라 적은 시각(=끝)을 보여준다 — 시작 시각을 찍으면
               채팅 순서(적은 시각순)와 어긋나 헷갈렸다(8/29). '~'가 '여기까지'라는 뜻. */}
-          <span className="memo-time">{(isAutoStart(memo) || (memo.backMinutes || 0) > 0)
+          <span className="memo-time">{endAt != null
+            ? `~${format(new Date(endAt), 'aa h:mm', { locale: ko })}`
+            : (isAutoStart(memo) || (memo.backMinutes || 0) > 0)
             ? `~${format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}`
             : format(new Date(startAt ?? new Date(memo.recordedAt).getTime() - (memo.backMinutes || 0) * 60000), 'aa h:mm', { locale: ko })}</span>
         </div>
@@ -2626,6 +2628,9 @@ function App() {
   const chatDurations = {};
   // 구간 기록의 시작 시각. 타임블럭과 같은 계산(앞 기록에 잇기·backMinutes 포함)이라 두 화면의 시각이 같다.
   const chatStarts = {};
+  // 구간 기록의 끝 시각 — 채팅창은 '적은 시각'(끝나고 적은 것이면 끝) 순으로 보여주고 그 시각을 찍는다 (8/29).
+  // 끝이 다음 기록을 따라가는 진행 중 기록(isAutoEnd)은 아직 끝이 없으니 뺀다.
+  const chatEnds = {};
   if (timelineMemos.length > 0) {
     for (const b of buildDayBlocks(timelineMemos, {
       dayStartMs: windowStartMs, nowMs: nowTime.getTime(), gridMinutes: windowMinutes,
@@ -2633,6 +2638,7 @@ function App() {
       if (isRangeMemo(b.memo)) {
         chatDurations[b.memo.id] = b.endPos - b.startPos;
         chatStarts[b.memo.id] = windowStartMs + b.startPos * 60000;
+        if (!isAutoEnd(b.memo)) chatEnds[b.memo.id] = windowStartMs + b.endPos * 60000;
       }
     }
   }
@@ -2992,13 +2998,13 @@ function App() {
   };
 
   // ── 시간대별 그룹핑 ──────────────────────────────────────────
-  function groupMemosByHour(memoList) {
+  function groupMemosByHour(memoList, atOf = (m) => new Date(m.recordedAt).getTime()) {
     const groups = [];
     let currentHour = null;
     let currentGroup = [];
 
     memoList.forEach(memo => {
-      const hour = new Date(memo.recordedAt).getHours();
+      const hour = new Date(atOf(memo)).getHours();
       if (hour !== currentHour) {
         if (currentGroup.length > 0) groups.push(currentGroup);
         currentHour = hour;
@@ -4443,7 +4449,10 @@ function App() {
   // '오늘로' 버튼이 떠 있으면 토스트는 그 위로 올라간다 (겹치면 못 누른다)
   const todayFabVisible = activeView === 'timeline' && !isToday(selectedDate);
   const toastClass = `undo-toast${todayFabVisible ? ' undo-toast--above-fab' : ''}`;
-  const memoGroups = groupMemosByHour(chatMemos);
+  // 채팅창 순서·묶음은 '적은 시각' 기준 — 구간 기록은 끝 시각. 시작 시각으로 세우면 1:17~2:33 기록이
+  // 1:17 순간 기록 위에 놓여 "위로 올라갔다"고 느껴진다 (8/29)
+  const chatAtOf = (m) => chatEnds[m.id] ?? new Date(m.recordedAt).getTime();
+  const memoGroups = groupMemosByHour([...chatMemos].sort((a, b) => chatAtOf(a) - chatAtOf(b)), chatAtOf);
   // ── 타임블럭 뷰 렌더 ──
   // 날짜별로 판을 새로 그리지 않고, 창에 잡힌 며칠을 하나의 시간 축에 이어서 그린다.
   // 그래서 23:50에 시작해 01:20에 끝난 기록이 자정에서 끊기지 않는다.
@@ -5260,6 +5269,7 @@ function App() {
                         dimmed={!isSameDay(new Date(memo.recordedAt), selectedDate)}
                         duration={chatDurations[memo.id]}
                         startAt={chatStarts[memo.id]}
+                        endAt={chatEnds[memo.id]}
                         onEditTime={openBlockTimeEditor}
                       />
                     </React.Fragment>
