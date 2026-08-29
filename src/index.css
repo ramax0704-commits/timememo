@@ -3648,7 +3648,8 @@ body.keyboard-open .input-toolbar { display: flex; }
 .block-textarea { overflow-y: auto; }
 
 /* ── 글이 주인공인 수정 시트 (8/29) ─────────────────────────────── */
-.block-sheet.edit-sheet { min-height: 58%; padding-left: 16px; padding-right: 16px; }
+/* 높이는 글 길이만큼만 (8/29: 고정 최소 높이 때문에 도구 줄 아래가 휑하게 비었다). 아래 여백도 홈바만큼만 */
+.block-sheet.edit-sheet { padding-left: 16px; padding-right: 16px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
 .block-sheet--full.edit-sheet { min-height: 100%; }
 .edit-sheet-head { margin-bottom: 6px; }
 .edit-sheet-when {
