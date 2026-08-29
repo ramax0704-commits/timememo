@@ -16,7 +16,7 @@ import {
   parse
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Send, ChevronLeft, ChevronRight, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Plus, ListChecks, CornerDownLeft, Palette, HelpCircle, MessageSquare, Sparkles } from 'lucide-react';
+import { Send, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Inbox, User, CreditCard, ShieldAlert, X, Trash2, Clock, LayoutGrid, Plus, ListChecks, CornerDownLeft, Palette, HelpCircle, MessageSquare, Sparkles } from 'lucide-react';
 import { supabase, setRememberMe, getRememberMe } from './supabase';
 import { track, identifyUser, resetUser, markFirstMemo } from './analytics';
 import { loadGuestRows, saveGuestRows, clearGuestRows, newGuestId } from './guestStore';
@@ -194,6 +194,25 @@ function parseTimeSpan(text, now) {
   x = text.match(SPAN_SINGLE_RE);
   if (x) { const a = rd(x[1], x[2], x[3], x[4]); if (a) return { start: resolveClock(a.am, a.h, a.m, nowMin), end: null }; }
   return null;
+}
+
+// 모바일에서 입력창이 열린 채 칩·보내기를 누르면, 키보드가 내려가며 화면이 밀려 click이
+// 엉뚱한 자리에 떨어지거나 아예 안 오는 일이 있다(8/29 '이전 기록부터' 눌러도 저장 안 됨).
+// touchend에서 바로 실행하고 기본 동작을 막아(뒤따르는 click 억제) 한 번에 확실히 먹게 한다.
+function tapProps(fn) {
+  let sx = 0, sy = 0;
+  return {
+    onMouseDown: e => e.preventDefault(),
+    onTouchStart: e => { const t = e.touches[0]; sx = t.clientX; sy = t.clientY; },
+    onTouchEnd: e => {
+      const t = e.changedTouches[0];
+      if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) return; // 스크롤하다 뗀 것
+      if (e.currentTarget.disabled) return;
+      e.preventDefault();
+      fn();
+    },
+    onClick: fn,
+  };
 }
 
 function parseTimePrefix(text, now) {
@@ -415,7 +434,11 @@ function MemoItem({ memo, onEdit, onEditTime, onDeleteWithUndo, habitKeywords, d
         >
           {/* 구간 기록은 타임블럭이 그리는 시작 시각(startAt)을 그대로 보여준다 — 두 화면의 시각이 어긋나지 않게.
               순간 기록은 적은 시각. */}
-          <span className="memo-time">{format(new Date(startAt ?? new Date(memo.recordedAt).getTime() - (memo.backMinutes || 0) * 60000), 'aa h:mm', { locale: ko })}</span>
+          {/* '이전 기록부터' 이은 기록은 끝나고 적은 것이라 적은 시각(=끝)을 보여준다 — 시작 시각을 찍으면
+              채팅 순서(적은 시각순)와 어긋나 헷갈렸다(8/29). '~'가 '여기까지'라는 뜻. */}
+          <span className="memo-time">{isAutoStart(memo)
+            ? `~${format(new Date(memo.recordedAt), 'aa h:mm', { locale: ko })}`
+            : format(new Date(startAt ?? new Date(memo.recordedAt).getTime() - (memo.backMinutes || 0) * 60000), 'aa h:mm', { locale: ko })}</span>
         </div>
         <div
           className="memo-content"
@@ -1026,6 +1049,8 @@ const DAY_MINUTES = 24 * 60;
 // 스크롤이 멎고 이만큼 지나야 날짜를 확정한다. 관성으로 스쳐 지나간 날짜마다
 // 앱 전체를 다시 그리면 스크롤이 걸리고 날짜가 훅훅 지나가는 느낌을 준다.
 const DATE_COMMIT_DELAY = 160;
+// 채팅 입력칸이 자랄 수 있는 최대 높이 — 지금 '보이는' 화면(키보드 위)의 35%
+const inputMaxPx = () => Math.max(110, Math.round((window.visualViewport?.height ?? window.innerHeight) * 0.35));
 
 // 끝 시각을 직접 정하지 않고 '다음 기록까지' 자동으로 잇고 있는 상태인지.
 // 종료 시각을 직접 저장하면(endMinutes) 그쪽이 이기므로 자동이 아니게 된다.
@@ -1084,7 +1109,11 @@ function buildDayBlocks(sortedMemos, { dayStartMs, nowMs, gridMinutes, clampDawn
     if (endMin > 0) {
       endPos = ownPos + endMin;
     } else if (spansNext) {
-      if (nextPos !== null) {
+      if (nextPos !== null && nextMemo.spansFromPrev && !(nextMemo.backMinutes > 0)) {
+        // 다음 기록이 '이전 기록부터'로 이 기록 뒤에 붙는다 — 그 구간은 다음 기록 것이다.
+        // 다음 기록 시각까지 늘리면 두 블록이 통째로 겹쳐 옆칸으로 갈라진다(8/29).
+        endPos = ownPos + MIN_BLOCK_MINUTES;
+      } else if (nextPos !== null) {
         // 같은 이유의 거울: 다음 기록이 시작을 직접 당겨뒀으면(backMinutes)
         // 그 당긴 시작 전까지만 잇는다 — 다음 기록 시각까지 가면 겹친다
         endPos = Math.max(ownPos, nextPos - Math.max(0, nextMemo.backMinutes || 0));
@@ -1226,6 +1255,30 @@ function App() {
   // 내용·색상·날짜·시작/종료·삭제를 한 곳에 모아둔다.
   const [editingMemo, setEditingMemo] = useState(null);
   const [editContentStr, setEditContentStr] = useState('');
+  // 수정 시트를 위로 밀어 전체 페이지로 펼친 상태. 긴 글은 시트 반 칸으론 부족하다(8/29)
+  const [sheetFull, setSheetFull] = useState(false);
+  const sheetDragRef = useRef(null);
+  const sheetTextareaRef = useRef(null);
+  // 시트 본문 칸은 글 길이만큼 자란다 — 시트일 땐 상한을 두고, 페이지로 펼치면 상한 없이
+  const fitSheetTextarea = () => {
+    const el = sheetTextareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const cap = sheetFull ? Infinity : Math.max(120, Math.round((window.visualViewport?.height ?? window.innerHeight) * 0.3));
+    el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
+  };
+  useEffect(() => { if (editingMemo) fitSheetTextarea(); }, [editingMemo, editContentStr, sheetFull]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 손잡이·머리를 위로 끌면 페이지로, 아래로 끌면 시트로(이미 시트면 닫기)
+  const sheetGripHandlers = {
+    onTouchStart: e => { sheetDragRef.current = e.touches[0].clientY; },
+    onTouchEnd: e => {
+      const from = sheetDragRef.current; sheetDragRef.current = null;
+      if (from == null) return;
+      const dy = e.changedTouches[0].clientY - from;
+      if (dy < -40) setSheetFull(true);
+      else if (dy > 40) { if (sheetFull) setSheetFull(false); else closeBlockEditor(); }
+    },
+  };
   const [editMemoColor, setEditMemoColor] = useState('default');
   const [editDateStr, setEditDateStr] = useState('');   // yyyy-MM-dd
   const [editStartStr, setEditStartStr] = useState(''); // HH:mm
@@ -1953,10 +2006,13 @@ function App() {
     setSummaryAI({ key, status: 'loading', data: null, mock: false, startedAt: Date.now() });
     const startedAt = Date.now();
     try {
+      // 최근 7일(이 날 제외)의 토끼 — 매일 같은 토끼가 나오지 않게 참고로 넘긴다
+      const recentRabbits = Array.from({ length: 7 }, (_, i) => dayRabbits[dateKeyOf(addDays(reviewDay, -(i + 1)))]).filter(Boolean);
       const { data, mock, fromCache } = await requestDaySummary({
         dateKey: reviewKey,
         records,
         facts,
+        recentRabbits,
         // 이미 결과가 떠 있는 상태에서 누른 건 '다시 만들기' — 캐시를 건너뛴다
         force: summaryForScreen.status === 'ok',
       });
@@ -3186,8 +3242,18 @@ function App() {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, Math.max(110, Math.round(window.innerHeight * 0.35)))}px`;
+    el.style.height = `${Math.min(el.scrollHeight, inputMaxPx())}px`;
   };
+  // 키보드가 뜨면 화면이 줄어드는데 window.innerHeight는(iOS) 그대로다 — 보이는 높이(visualViewport)로 상한을 잡아야
+  // 입력칸이 화면 밖으로 밀리지 않고 안에서 스크롤된다(8/29 긴 글 잘림). 키보드가 뜨고 나서 다시 맞춘다.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => { if (inputRef.current && document.activeElement === inputRef.current) fitInputHeight(); };
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openBlockEditor = (memo) => {
     const range = isRangeMemo(memo);
@@ -3208,6 +3274,7 @@ function App() {
       autoEnd: isAutoEnd(memo),
     };
     setEditingMemo(memo);
+    setSheetFull(false);
     setEditContentStr(memo.content);
     setEditMemoColor(memo.color || 'default');
     setEditDateStr(snapshot.date);
@@ -3550,28 +3617,45 @@ function App() {
     if (editingMemoId) {
       const nowE = new Date();
       const timedE = parseTimePrefix(inputText.trim(), nowE);
-      const base = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
-      let iso, endMin = 0, content = inputText;
-      if (timedE) {
-        base.setMinutes(timedE.startMin);
-        iso = base.toISOString();
-        endMin = timedE.kind === 'range' ? timedE.durationMin : 0;
-        content = timedE.content;
+      const cur = memos.find(m => m.id === editingMemoId);
+      // 기준 날짜는 화면 날짜(selectedDate)가 아니라 그 기록이 실제로 놓인 날.
+      // 스크롤로 헤더 날짜가 바뀌었거나 새벽 기록을 전날 페이지에서 고칠 때 엉뚱한 날짜로 튀었다(8/29).
+      const curRange = cur ? blockRangeOf(cur) : null;
+      const anchor = curRange ? curRange.start : selectedDate;
+      const base = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+      const minOf = (d) => d.getHours() * 60 + d.getMinutes();
+      // 불러온 시각 표기를 그대로 둔 채 글만 고쳤는지 — 그러면 시간 필드는 하나도 건드리지 않는다.
+      // (예전엔 표기를 다시 파싱해 '이전 기록부터' 기록이 시작 시각의 단일 구간으로 굳어 순서가 꼬였다)
+      const timeUntouched = !timedE || (cur && curRange && (
+        timedE.kind === 'range'
+          ? isRangeMemo(cur) && timedE.startMin === minOf(curRange.start) && timedE.durationMin === Math.round((curRange.end - curRange.start) / 60000)
+          : !isRangeMemo(cur) && timedE.startMin === minOf(new Date(cur.recordedAt))
+      ));
+      let content = timedE ? timedE.content : inputText;
+      let db, local;
+      if (timeUntouched && mode === 'single') {
+        db = { content, color: selectedColor };
+        local = { content, color: selectedColor };
       } else {
-        // 시각 표기를 지웠으면 시각은 그대로 두고 내용만 바꾼다
-        const cur = memos.find(m => m.id === editingMemoId);
-        iso = cur ? cur.recordedAt : base.toISOString();
-        endMin = cur?.endMinutes || 0;
+        let iso, endMin = 0;
+        if (timedE) {
+          base.setMinutes(timedE.startMin);
+          iso = base.toISOString();
+          endMin = timedE.kind === 'range' ? timedE.durationMin : 0;
+        } else {
+          iso = cur ? cur.recordedAt : base.toISOString();
+          endMin = cur?.endMinutes || 0;
+        }
+        // 잇기 칩으로 저장하면: '이전 기록부터'는 이 기록 시각이 구간의 끝(적은 시각까지), '다음 기록까지'는 시작.
+        // 직접 적은 구간(~)이 있으면 그 끝/시작을 기준 시각으로 쓰고, 명시 길이는 지운다 (자동 잇기가 이긴다).
+        if (mode === 'prev' && timedE?.kind === 'range') { base.setMinutes(base.getMinutes() + timedE.durationMin); iso = base.toISOString(); }
+        const linkPrev = mode === 'prev', linkNext = mode === 'next';
+        if (linkPrev || linkNext) endMin = 0;
+        db = { recorded_at: iso, end_minutes: endMin, content, color: selectedColor, spans_from_prev: linkPrev, spans_to_next: linkNext, back_minutes: 0 };
+        local = { recordedAt: iso, endMinutes: endMin, content, color: selectedColor, spansFromPrev: linkPrev, spansToNext: linkNext, backMinutes: 0 };
       }
-      // 잇기 칩으로 저장하면: '이전 기록부터'는 이 기록 시각이 구간의 끝(적은 시각까지), '다음 기록까지'는 시작.
-      // 직접 적은 구간(~)이 있으면 그 끝/시작을 기준 시각으로 쓰고, 명시 길이는 지운다 (자동 잇기가 이긴다).
-      if (mode === 'prev' && timedE?.kind === 'range') { base.setMinutes(base.getMinutes() + timedE.durationMin); iso = base.toISOString(); }
-      const linkPrev = mode === 'prev', linkNext = mode === 'next';
-      if (linkPrev || linkNext) endMin = 0;
-      const db = { recorded_at: iso, end_minutes: endMin, content, color: selectedColor, spans_from_prev: linkPrev, spans_to_next: linkNext, back_minutes: 0 };
-      const local = { recordedAt: iso, endMinutes: endMin, content, color: selectedColor, spansFromPrev: linkPrev, spansToNext: linkNext, backMinutes: 0 };
       await writeMemoFields(editingMemoId, db, local);
-      justAddedRef.current = iso;
+      justAddedRef.current = local.recordedAt || cur?.recordedAt;
       setEditingMemoId(null);
       setInputText('');
       if (inputRef.current) inputRef.current.style.height = 'auto';
@@ -3840,8 +3924,7 @@ function App() {
       <button
         type="button"
         className="send-btn"
-        onMouseDown={e => e.preventDefault()}
-        onClick={() => handleAddMemo(null)}
+        {...tapProps(() => handleAddMemo(null))}
         disabled={!inputText.trim()}
         aria-label="보내기"
       >
@@ -4403,10 +4486,9 @@ function App() {
     for (const c of clusters) {
       // 예외: '이전 기록부터 이어서' 쓴 구간은 앞 기록 바로 아래 이어붙인다 (옆으로 나누지 않는다).
       // 11:10 '회의 끝' 다음에 11:10→11:50 '점심'이 오면 두 블록이 위아래로 붙어야 이어 쓴 느낌이 난다.
-      const onlyContinuations = c.items
-        .filter(s => !s.isCompact)
-        .every(s => s.memo.spansFromPrev && !(s.memo.backMinutes > 0));
-      c.useColumns = c.items.length >= 2 && c.items.some(s => !s.isCompact) && !onlyContinuations;
+      // 이어 쓴 기록이 하나라도 끼면 옆으로 나누지 않고 아래로 붙인다 (8/29: 앞 기록이 구간이어도 마찬가지).
+      const hasContinuation = c.items.some(s => s.memo.spansFromPrev && !(s.memo.backMinutes > 0));
+      c.useColumns = c.items.length >= 2 && c.items.some(s => !s.isCompact) && !hasContinuation;
     }
 
     // 3) 쌓는 데 필요한 높이가 실제 시간 길이보다 크면 그만큼 구간을 늘린다.
@@ -4634,7 +4716,7 @@ function App() {
                   key={idx}
                   className={`schedule-block${isCompact ? ' schedule-block--compact' : ''}${schedule.isInner ? ' schedule-block--inner' : ''}${schedule.colCount > 1 ? ' schedule-block--narrow' : ''}`}
                   data-at={schedule.memo.recordedAt}
-                  onClick={() => editMemoInline(schedule.memo)}
+                  onClick={() => openBlockEditor(schedule.memo)}
                   // 꾹 누르면(0.45초) 이동 모드 — 파란 테두리가 생기고 끌어서 시각을 옮긴다
                   onPointerDown={(e) => onScheduleBlockPointerDown(e, schedule)}
                   onPointerMove={onScheduleBlockPointerMove}
@@ -5130,7 +5212,7 @@ function App() {
                     <React.Fragment key={memo.id}>
                       <MemoItem
                         memo={memo}
-                        onEdit={editMemoInline}
+                        onEdit={openBlockEditor}
                         onDeleteWithUndo={handleDeleteWithUndo}
                         habitKeywords={habitKeywords}
                         dimmed={!isSameDay(new Date(memo.recordedAt), selectedDate)}
@@ -5432,7 +5514,7 @@ function App() {
                 setInputText(e.target.value);
                 // 줄 수만큼 자라고, 너무 길면 안에서 스크롤
                 e.target.style.height = 'auto';
-                e.target.style.height = `${Math.min(e.target.scrollHeight, Math.max(110, Math.round(window.innerHeight * 0.35)))}px`;
+                e.target.style.height = `${Math.min(e.target.scrollHeight, inputMaxPx())}px`;
               }}
               onScroll={e => { const m = e.target.previousSibling; if (m) m.scrollTop = e.target.scrollTop; }}
               onFocus={() => setInputFocused(true)}
@@ -5486,8 +5568,7 @@ function App() {
                 <button
                   type="button"
                   className="link-chip link-chip--prev"
-                  onMouseDown={e => e.preventDefault()}
-                  onClick={() => { handleAddMemo(null, 'prev'); inputRef.current?.blur(); }}
+                  {...tapProps(() => { handleAddMemo(null, 'prev'); inputRef.current?.blur(); })}
                   disabled={!inputText.trim()}
                 >
                   ↑ 이전 기록부터
@@ -5495,8 +5576,7 @@ function App() {
                 <button
                   type="button"
                   className="link-chip link-chip--next"
-                  onMouseDown={e => e.preventDefault()}
-                  onClick={() => { handleAddMemo(null, 'next'); inputRef.current?.blur(); }}
+                  {...tapProps(() => { handleAddMemo(null, 'next'); inputRef.current?.blur(); })}
                   disabled={!inputText.trim()}
                 >
                   ↓ 다음 기록까지
@@ -5524,8 +5604,7 @@ function App() {
                 <button
                   type="button"
                   className="link-chip link-chip--prev"
-                  onMouseDown={e => e.preventDefault()}
-                  onClick={() => { handleAddMemo(null, 'prev'); inputRef.current?.blur(); }}
+                  {...tapProps(() => { handleAddMemo(null, 'prev'); inputRef.current?.blur(); })}
                   disabled={!inputText.trim()}
                 >
                   ↑ 이전 기록부터
@@ -5533,8 +5612,7 @@ function App() {
                 <button
                   type="button"
                   className="link-chip link-chip--next"
-                  onMouseDown={e => e.preventDefault()}
-                  onClick={() => { handleAddMemo(null, 'next'); inputRef.current?.blur(); }}
+                  {...tapProps(() => { handleAddMemo(null, 'next'); inputRef.current?.blur(); })}
                   disabled={!inputText.trim()}
                 >
                   ↓ 다음 기록까지
@@ -5978,20 +6056,38 @@ function App() {
       {/* 기록 편집 시트 — 채팅창과 타임블럭이 같은 것을 쓴다.
           어느 화면 어느 자리를 눌러도 여기서 내용·시간·색상·삭제를 다 할 수 있다 */}
       {editingMemo && (
-        <div className="block-sheet-overlay" onClick={closeBlockEditor}>
-          <div className="block-sheet" onClick={e => e.stopPropagation()}>
-            <div className="block-sheet-handle" />
-            <div className="block-sheet-head">
-              <h3>기록 수정</h3>
-              <button className="block-sheet-close" onClick={closeBlockEditor} title="닫기">
-                <X size={18} />
-              </button>
+        <div className={`block-sheet-overlay${sheetFull ? ' block-sheet-overlay--full' : ''}`} onClick={closeBlockEditor}>
+          <div className={`block-sheet edit-sheet${sheetFull ? ' block-sheet--full' : ''}`} onClick={e => e.stopPropagation()}>
+            {/* 손잡이를 위로 밀면 전체 페이지, 아래로 밀면 다시 시트(또는 닫기). 화살표 버튼으로도 된다 */}
+            <div className="block-sheet-grip" {...sheetGripHandlers}>
+              <div className="block-sheet-handle" />
+              <div className="block-sheet-head">
+                <div className="block-sheet-head-left">
+                  {sheetFull && (
+                    <button className="block-sheet-close" onClick={() => setSheetFull(false)} title="시트로 줄이기" aria-label="시트로 줄이기">
+                      <ChevronDown size={20} />
+                    </button>
+                  )}
+                  <h3>기록 수정</h3>
+                </div>
+                <div className="block-sheet-head-right">
+                  {!sheetFull && (
+                    <button className="block-sheet-close" onClick={() => setSheetFull(true)} title="크게 보기" aria-label="크게 보기">
+                      <ChevronUp size={20} />
+                    </button>
+                  )}
+                  <button className="block-sheet-close" onClick={closeBlockEditor} title="닫기" aria-label="닫기">
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="block-sheet-body">
               <div className="block-field">
                 <span className="block-field-label">내용</span>
                 <textarea
+                  ref={sheetTextareaRef}
                   className="block-textarea"
                   value={editContentStr}
                   onChange={e => setEditContentStr(e.target.value)}

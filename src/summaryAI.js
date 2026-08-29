@@ -23,7 +23,7 @@ function hash(str) {
 // 방금 만든 결과가 사라져 보이는 사고가 있었다 (8/25). 세트가 바뀌어도 만든 회고는 그대로 보여야 한다.
 // 스키마 버전 — 프롬프트·출력 구조가 바뀌면 올린다. 옛 버전으로 만든 회고는 캐시에서 안 보이고
 // '만들기'를 누르면 새로 만든다 (2026-08-27: 토끼 21종·done·emotions 도입 → v2).
-export const SUMMARY_SCHEMA_VERSION = 2;
+export const SUMMARY_SCHEMA_VERSION = 3; // 8/29 토끼 판정 개편 — 옛 캐시는 버린다
 // 키는 '날짜|개수|v버전-해시'. 날짜가 맨 앞이어야 다른 곳(먼슬리 백필·서버 보관)이 split('|')[0]로 날짜를 읽는다.
 export function summaryCacheKey(dateKey, records) {
   const body = records.map(r => `${r.time}|${r.text}`).join('\n');
@@ -152,7 +152,8 @@ export function normalizeSummary(obj) {
 
 // records: [{ time, text }] 시간순 / facts: 계산값
 // force: 같은 입력이라도 캐시를 건너뛰고 새로 만든다 ('다시 만들기').
-export async function requestDaySummary({ dateKey, records, facts, signal, force = false }) {
+// recentRabbits: 최근 7일 토끼 id — 우열이 비슷할 때 반복을 피하라고 서버에 넘긴다
+export async function requestDaySummary({ dateKey, records, facts, recentRabbits = [], signal, force = false }) {
   const key = summaryCacheKey(dateKey, records);
   const cached = force ? null : findCached(key);
   if (cached?.data) return { data: cached.data, mock: Boolean(cached.mock), fromCache: true };
@@ -167,7 +168,7 @@ export async function requestDaySummary({ dateKey, records, facts, signal, force
     const res = await fetch('/api/summarize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: dateKey, records, facts }),
+      body: JSON.stringify({ date: dateKey, records, facts, recentRabbits }),
       signal: ctrl.signal,
     });
     if (res.status === 429) {

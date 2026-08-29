@@ -115,7 +115,7 @@ const OUTPUT_SCHEMA = {
     },
     rabbit: {
       type: 'object',
-      description: '순서대로 조건을 검사해 먼저 걸리는 토끼. 순서를 건너뛰지 않는다.',
+      description: '오늘의 토끼. 하루의 주된 결(기록 수·시간을 가장 많이 차지하는 것)로 고른다. 한 건짜리 장면으로 확정하지 않는다.',
       properties: {
         type: { type: 'string', enum: RABBIT_IDS },
         reason: { type: 'string', description: '사용자 1인칭 일기 한 토막. 2~3문장, 110자 이내, ~했다 체. 판정 근거가 된 기록의 표현을 살리고, 감정 표현이 기록에 있으면 한 마디 덧붙인다.' },
@@ -164,13 +164,23 @@ H. emotions — 기록마다 감정 표현이 실제로 적혀 있을 때만 라
   · 다잡음 — 맘 잡고, 다시 일어났다, 정신 차리자처럼 가라앉은 뒤 다시 움직이기로 한 표현. 앞쪽에 부정 감정이 있어야 함.
 - 부정 감정은 불안, 짜증, 무기력, 외로움 넷을 말한다.
 
-I. rabbit — 아래 순서대로 조건을 검사해 먼저 걸리는 것으로 확정하고 멈춘다. 순서를 건너뛰지 않는다.
+I. rabbit — 오늘의 토끼. 하루의 '주된 결'을 고른다. 조건 하나가 한 번 걸렸다고 바로 확정하지 않는다 — 사람을 하루에 한 번 만났다는 이유로 매번 같은 토끼가 나오면 회고가 아니다.
+판정 절차:
+  1단계 (마음이 무거웠던 날): 부정 감정 라벨이 2건 이상이면 여기서 고르고 끝낸다 — 갈등·부딪힘 표현 → fighter, 다잡음 라벨 → arctic_rise, 짜증 라벨 → arctic_alert, 완료 기록 있음 → arctic_firm, 어느 것도 아니면 burrow_deep.
+  2단계 (그 외의 날): 아래 후보 목록의 결(結) 하나하나에 대해 "오늘 기록 중 몇 건이, 하루 시간의 얼마가 이 결에 해당하는가"를 센다. 기록 수와 시간을 가장 많이 차지하는 결의 토끼를 고른다.
+   - 한 건짜리 장면은 그날의 결이 아니다. 어떤 결에 해당하는 기록이 하루에 하나뿐이고 시간도 짧으면 그 토끼로 확정하지 않는다.
+   - 사람(burrow_together, burrow_team)은 특히 엄격하다: 사람과 함께한 시간이 그날 기록 시간의 절반 이상이거나, 그 만남이 그날 가장 긴 한 덩어리일 때만 고른다. 저녁에 친구와 밥 한 끼, 잠깐의 통화·연락·마주침은 해당 없다.
+   - 누군가와 '함께' 어떤 활동(책·영화·운동·공부·요리·산책 등)을 했다면 활동 쪽 결로 센다. 함께한 사실은 reason에 담는다. 예: 친구들과 책 읽고 영화 본 날 → lop_rest, reason에 "친구들이랑".
+   - 하루의 흐름 자체가 결인 경우(늦게 일어나 뒹굴다 늦게 시작 → race, 일정이 촘촘히 이어짐 → clock, 기록이 밤에 몰림 → hare_night)는 개별 활동보다 먼저 살핀다. 그 흐름이 기록 여럿에 걸쳐 분명하면 그것이 그날의 결이다.
+  3단계: 어느 결도 뚜렷하지 않으면 lop.
+  최근 토끼: 요청에 '최근 7일 토끼'가 있으면, 후보 둘의 우열이 비슷할 때 거기 없는 쪽을 고른다. 우열이 분명하면 같은 토끼가 이어져도 된다.
 reason은 사용자가 자기 하루를 돌아보며 쓴 짧은 일기 한 토막이다. 2~3문장, 총 110자 이내.
 - 1인칭. 사용자 자신이 쓴 것처럼 '~했다', '~였다' 체로 적는다. "적혀 있다", "기록이 있었어요", "~로 보여요"처럼 밖에서 관찰한 말투는 금지.
 - 토끼로 판정한 근거가 된 기록의 표현을 그대로 살려 쓴다. 예: "저녁엔 팀원들과 회식했다. 곱창전골 먹고 노래방까지 갔다."
 - emotions에 라벨이 붙은 기록이 있으면 그 감정을 한 마디 덧붙인다 (예: "오랜만에 사람들 사이에서 편했다", "종일 마음이 무거웠다"). 감정 표현이 기록에 없으면 감정을 지어내지 않고 사실만 적는다.
 - 회고 글(narrative)과 같은 문장을 되풀이하지 않는다.
-${RABBITS.map((r, i) => `  ${i + 1}. ${r.criteria} → ${r.id}`).join('\n')}
+후보 목록 (결 → id):
+${RABBITS.map(r => `  - ${r.criteria} → ${r.id}`).join('\n')}
 
 지켜야 할 것:
 1. 기록 내용을 시간순으로 나열하지 않는다. narrative에서 직접 언급하거나 인용하는 기록은 최대 2개까지다. 나머지 기록은 언급하지 않는다.
@@ -242,6 +252,10 @@ export default async function handler(req, res) {
   if (!records) return res.status(400).json({ error: 'bad-records' });
   const date = typeof body?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? body.date : null;
   const facts = body?.facts && typeof body.facts === 'object' ? body.facts : {};
+  // 최근 7일의 토끼 id — 우열이 비슷할 때 같은 토끼가 매일 반복되지 않게 (8/29)
+  const recentRabbits = Array.isArray(body?.recentRabbits)
+    ? body.recentRabbits.filter(t => RABBIT_IDS.includes(t)).slice(0, 7)
+    : [];
 
   const model = (!IS_PROD && typeof body?.model === 'string' && /^claude-[a-z0-9.-]+$/.test(body.model)) ? body.model : MODEL;
   // Haiku 4.5는 effort 옵션을 받지 않는다
@@ -276,7 +290,8 @@ export default async function handler(req, res) {
     facts.recordDays != null && `- 누적 기록일: ${facts.recordDays}일`,
   ].filter(Boolean).join('\n');
 
-  const userMessage = `${date ? `날짜: ${date}\n` : ''}기록 ${records.length}개 (index 시각 본문):\n${lines}\n\n계산값 (쓴다면 그대로):\n${factLines}`;
+  const recentLine = recentRabbits.length ? `\n\n최근 7일 토끼: ${recentRabbits.join(', ')}` : '';
+  const userMessage = `${date ? `날짜: ${date}\n` : ''}기록 ${records.length}개 (index 시각 본문):\n${lines}\n\n계산값 (쓴다면 그대로):\n${factLines}${recentLine}`;
 
   try {
     const r = await fetch(ANTHROPIC_URL, {
