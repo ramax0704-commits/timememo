@@ -5020,8 +5020,7 @@ function App() {
         </button>
         <div className="auth-card">
           <div className="auth-logo">
-            <h2>타임메모</h2>
-            <p>오늘 하루를 시간 단위로 꼼꼼하게 기록하세요</p>
+            <h2>로그인</h2>
           </div>
           {emailAuthOpen && (
           <div className="auth-tabs">

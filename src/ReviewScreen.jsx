@@ -869,10 +869,12 @@ export default function ReviewScreen({
               {isGuest && !ai.mock && (
                 <section className="day-summary day-summary--keep">
                   <div className="day-summary-keep-row">
-                    <div className="day-summary-keep-title">이 회고, 내일도 보려면</div>
+                    <div>
+                      <div className="day-summary-keep-title">이 회고, 내일도 보려면</div>
+                      <p className="day-summary-muted" style={{ margin: '2px 0 0' }}>7일 후에 지워질 수 있어요</p>
+                    </div>
                     <button type="button" className="day-summary-btn day-summary-btn--small" onClick={() => onLoginClick('after_result')}>로그인하기</button>
                   </div>
-                  <p className="day-summary-muted">지금은 이 폰에만 있어요. 7일 동안 안 열면 지워질 수 있어요.</p>
                 </section>
               )}
               <TalkCurveBlock memos={todayMemos} now={isToday ? now : null} emotions={ai.data.emotions} dayLabel={dayLabel} />
