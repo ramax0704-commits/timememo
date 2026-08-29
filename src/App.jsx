@@ -6205,20 +6205,11 @@ function App() {
                   <small className="block-dawn-hint">새벽 0~2시 시각은 이 날짜의 밤(다음날 새벽)으로 저장돼요.</small>
                 )}
                 {editMode === 'range' && (
-                  <label className="block-auto-toggle">
-                    <input type="checkbox" checked={editSpansFromPrev} onChange={toggleDraftSpansFromPrev} />
-                    <span className="block-auto-toggle-text">
-                      <strong>이전 기록부터</strong>
-                    </span>
-                  </label>
-                )}
-                {editMode === 'range' && (
-                  <label className="block-auto-toggle">
-                    <input type="checkbox" checked={editSpansToNext} onChange={toggleDraftSpansToNext} />
-                    <span className="block-auto-toggle-text">
-                      <strong>다음 기록까지</strong>
-                    </span>
-                  </label>
+                  // 입력창 칩과 같은 모양으로 한 줄에 (8/29: 세로 체크박스는 모양이 애매했다)
+                  <div className="edit-link-chips">
+                    <button type="button" className={`link-chip link-chip--prev${editSpansFromPrev ? ' active' : ''}`} onClick={toggleDraftSpansFromPrev}>↑ 이전 기록부터</button>
+                    <button type="button" className={`link-chip link-chip--next${editSpansToNext ? ' active' : ''}`} onClick={toggleDraftSpansToNext}>↓ 다음 기록까지</button>
+                  </div>
                 )}
               </div>
             )}

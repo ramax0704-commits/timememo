@@ -869,7 +869,7 @@ export default function ReviewScreen({
               {isGuest && !ai.mock && (
                 <section className="day-summary day-summary--keep">
                   <div className="day-summary-ai-title">이 회고, 내일도 보려면</div>
-                  <p className="day-summary-muted">지금은 이 폰의 브라우저에만 남아 있어요. 폰을 바꾸거나, 아이폰은 7일 동안 안 열면 브라우저가 지워버릴 수 있어요. 구글로 저장해두면 어디서 열어도 그대로고, 쌓인 날들이 달력에 남아요.</p>
+                  <p className="day-summary-muted">지금은 이 폰에만 있어요.<br />아이폰은 7일 동안 안 열면 지워질 수 있어요.</p>
                   <button type="button" className="day-summary-btn" onClick={() => onLoginClick('after_result')}>구글로 저장해두기</button>
                 </section>
               )}

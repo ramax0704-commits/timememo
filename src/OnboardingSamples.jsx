@@ -25,26 +25,20 @@ export function SampleInput() {
   );
 }
 
-// 투어 '시간은 이렇게 적어요' 카드 — 글 앞에 시각을 적는 세 가지 꼴 (8/29)
+// '시간은 이렇게 적어요' 카드 — 말풍선 세 개뿐, 설명 없음 (8/29: 글이 많으면 안 읽는다)
 const TIME_GUIDE = [
-  { typed: ['7시 20분', ' 기상'], note: '그냥 7시 = 아침 7시', result: '오전 7:20' },
-  { typed: ['저녁 7시', ' 친구랑 밥'], note: '저녁·밤·오후 = 저녁', result: '오후 7:00' },
-  { typed: ['9시~10시 반', ' 회의'], note: '~ 로 이으면 구간', result: '오전 9:00 → 10:30' },
+  ['7시 20분', ' 기상'],
+  ['저녁 7시', ' 친구랑 밥'],
+  ['9시~10시 반', ' 회의'],
 ];
 export function SampleTimeGuide() {
   return (
     <div className="ob-time-guide" aria-hidden="true">
       {TIME_GUIDE.map((g, i) => (
-        <div key={i} className="ob-time-guide-row">
-          <div className="ob-time-guide-typed"><span className="ob-input-time">{g.typed[0]}</span>{g.typed[1]}</div>
-          <div className="ob-time-guide-arrow">→</div>
-          <div className="ob-time-guide-result">
-            <strong>{g.result}</strong>
-            <small>{g.note}</small>
-          </div>
+        <div key={i} className={`ob-time-guide-bubble${i % 2 ? ' ob-time-guide-bubble--alt' : ''}`}>
+          <span className="ob-input-time">{g[0]}</span>{g[1]}
         </div>
       ))}
-      <div className="ob-time-guide-foot">글 맨 앞에 시각을 적으면 그 시각의 기록이 돼요. 안 적으면 지금 시각.</div>
     </div>
   );
 }
