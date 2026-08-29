@@ -1914,7 +1914,7 @@ function App() {
   // 매칭된 키를 그대로 쓴다 — 만들고 나서 기록을 더 썼다면 키가 달라져 있고,
   // 그러면 화면이 '이후에 기록이 더 추가됐어요 + 다시 만들기'를 알아서 띄운다.
   useEffect(() => {
-    if (activeView !== 'review' || !summaryKey || isGuest) return;
+    if (activeView !== 'review' || !summaryKey) return;
     const day = summaryKey.split('|')[0];
     const applyResult = (key, data, mock) => {
       setSummaryAI(prev => {
@@ -1928,6 +1928,7 @@ function App() {
       const id = setTimeout(() => applyResult(cached.key ?? summaryKey, cached.data, cached.mock), 0);
       return () => clearTimeout(id);
     }
+    if (isGuest) return; // 게스트는 기기 캐시까지만 — 서버 보관분은 로그인 사용자 것
     let alive = true;
     fetchWithRetry(() => supabase.from('day_reviews').select('data, cache_key').eq('day', day).maybeSingle()).then(({ data: row, error }) => {
       if (!alive || error || !row?.data) return;
@@ -1994,7 +1995,7 @@ function App() {
   }, [userId]);
 
   const generateSummary = async () => {
-    if (!canGenerate || isGuest || summaryBusy) return;
+    if (!canGenerate || summaryBusy) return; // 게스트도 만든다 (8/29 회고 게이트 이동) — 횟수는 summaryUsesLeft가 막는다
     const key = summaryKey;
     // 기록별 지속시간(분)을 붙여 보낸다 — 화면엔 이미 있지만 프롬프트엔 안 가고 있었다 (회고-수정안 §7)
     const records = todayRecords.map((r, i) => ({ ...r, durationMin: todayFacts.durations.get(todayMemos[i]?.id) ?? null }));
@@ -2108,8 +2109,9 @@ function App() {
   // 단, 자동 잇기 구간('이전 기록부터'·'다음 기록까지')은 예외 — 경계가 recordedAt이
   // 아니라 이웃 기록에 붙어 있어서, recordedAt만 옮기면 시작(또는 끝)이 제자리에
   // 남는다. 드롭한 자리의 구간을 명시적으로 굳혀야 옮겨진다.
-  const confirmMove = async () => {
-    const m = moveConfirm;
+  // mArg: 시트를 거치지 않고 놓자마자 바로 확정할 때 넘긴다 (8/29: 다이얼 단계가 번거로워 뺐다)
+  const confirmMove = async (mArg) => {
+    const m = mArg ?? moveConfirm;
     if (!m) return;
     setMoveConfirm(null);
     const startChanged = m.draftStart !== m.initStart;
@@ -2251,8 +2253,8 @@ function App() {
     writeMemoFields(g.schedule.memo.id, { recorded_at: iso }, { recordedAt: iso }).then((ok) => {
       if (!ok) return;
       track('Memo Reordered', { guest: isGuest, view: 'schedule' });
-      // 옮기기는 아직 안 끝났다 — 시각을 확인/수정해야 완료다.
-      // 구간 기록은 시작·종료를 각각 고칠 수 있다 (블록의 시작·끝은 이미 계산돼 있다).
+      // 놓으면 바로 확정한다 (8/29). 시각 다이얼 시트는 번거로워서 뺐고, 세부 조정은 되돌리기 토스트나
+      // 블록을 눌러 여는 수정 시트로 한다. 옮긴 자리의 구간은 confirmMove가 굳힌다.
       const isRange = isRangeMemo(g.schedule.memo);
       const durationMin = Math.round(g.schedule.endPos - g.schedule.startPos);
       const startBefore = new Date(windowStartMs + g.schedule.startPos * 60000);
@@ -2261,7 +2263,7 @@ function App() {
       const endAfter = new Date(startAfter.getTime() + durationMin * 60000);
       const startStr = hhmm(isRange ? startAfter : new Date(iso));
       const endStr = hhmm(endAfter);
-      setMoveConfirm({
+      confirmMove({
         memoId: g.schedule.memo.id,
         prev: snapshotMoveFields(g.schedule.memo),
         appliedIso: iso,
