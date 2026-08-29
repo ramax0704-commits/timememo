@@ -3724,10 +3724,9 @@ body.keyboard-open .input-toolbar { display: flex; }
 /* 수정 시트는 '실제로 보이는 영역'에 맞춘다 — 키보드가 뜬 뒤 앱이 위로 밀려도 도구 줄이 키보드에 붙게 */
 .block-sheet-overlay:has(.edit-sheet) {
   position: fixed;
-  inset: auto;
-  top: var(--vv-top, 0px);
-  left: 0; right: 0;
-  height: var(--vh, 100dvh);
+  inset: 0;
+  bottom: var(--kb, 0px); /* 키보드가 가린 만큼만 위로 — --vh 계산이 어긋나도 시트 바닥은 키보드에 붙는다 */
+  height: auto;
   max-width: 480px; margin: 0 auto;
 }
 

@@ -1778,6 +1778,9 @@ function App() {
       // iOS는 키보드가 뜨면 보이는 영역을 아래로 밀어 놓기도 한다(offsetTop). 그만큼 앱 아래에 빈 띠가 생겨
       // 시트 도구 줄과 키보드 사이가 뜬다 — 시트는 이 값으로 자리를 잡는다 (8/29)
       document.documentElement.style.setProperty('--vv-top', `${Math.round(window.visualViewport.offsetTop)}px`);
+      // 키보드(등)가 화면 아래를 얼마나 가리는지 — 창 높이에서 보이는 영역의 바닥을 뺀 값. 시트는 이 위에 붙는다
+      const vv = window.visualViewport;
+      document.documentElement.style.setProperty('--kb', `${Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)))}px`);
     };
     let settle = null;
     const handleResize = () => {
@@ -6252,7 +6255,7 @@ function App() {
               </div>
             )}
 
-            {currentUser?.email === ADMIN_EMAIL && vvDebug && <div style={{ fontSize: '0.62rem', color: '#aaa', padding: '2px 0' }}>{vvDebug}</div>}
+            {(currentUser?.email === ADMIN_EMAIL || /[?&]vv/.test(window.location.search)) && vvDebug && <div style={{ fontSize: '0.62rem', color: '#aaa', padding: '2px 0' }}>{vvDebug}</div>}
             <div className="edit-sheet-tools">
               <button
                 type="button"
