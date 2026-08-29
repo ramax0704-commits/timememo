@@ -9,7 +9,8 @@
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "backup": "node scripts/backup.js",
-    "words": "node scripts/word-freq.js"
+    "words": "node scripts/word-freq.js",
+    "mp": "node scripts/mixpanel.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.7",
