@@ -5075,7 +5075,7 @@ function App() {
             {showEmailFields && <div className="auth-divider"><span>또는</span></div>}
             {(authView === 'signup' || !emailAuthOpen) && (
               <p className="auth-google-hint">
-                구글 계정으로 바로 시작할 수 있어요. 따로 가입할 필요 없습니다.
+                구글 계정으로 바로 시작해요.
               </p>
             )}
             <button type="button" className="google-signin-btn" onClick={requestGoogleSignIn} disabled={submittingAuth}>
@@ -5109,7 +5109,7 @@ function App() {
             )}
           </form>
           {/* 처음 들어온 사람이 가입 전에 확인할 수 있어야 해서 로그인 화면에 둔다 */}
-          <p style={{ textAlign: 'left', marginTop: '18px', fontSize: '0.8rem', color: '#999' }}>
+          <p style={{ textAlign: 'center', marginTop: '18px', fontSize: '0.8rem', color: '#999' }}>
             <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: '#999' }}>
               이용약관
             </a>

@@ -1632,8 +1632,8 @@ body.keyboard-open .input-toolbar { display: flex; }
 .auth-wrapper {
   position: relative; /* 좌상단 뒤로가기 기준점 */
   display: flex;
-  background-color: #fff;
-  padding: 20px;
+  background-color: var(--bg-body); /* 남는 자리는 아래 띠와 같은 회색 (8/29) */
+  padding: 0;
   overflow-y: auto; /* 카드가 화면보다 길면 스크롤 (모바일 잘림 방지) */
 }
 
@@ -1658,17 +1658,20 @@ body.keyboard-open .input-toolbar { display: flex; }
 
 .auth-card {
   /* 8/29: 회색 바탕 위 흰 상자가 답답해 보여서 상자를 걷어냈다 — 화면 자체가 흰 바탕 */
-  background: none;
+  background: #fff;
   border-radius: 0;
   box-shadow: none;
   width: 100%;
-  max-width: 400px;
-  padding: 64px 8px 24px;
-  margin: 0 auto auto; /* 위에 붙인다 — 가운데 두면 머리 위가 휑하다 (8/29) */
+  max-width: 480px;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 64px 28px 0;
+  margin: 0 auto; /* 위에 붙인다 — 가운데 두면 머리 위가 휑하다 (8/29) */
   animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.auth-logo { text-align: left; margin-bottom: 24px; }
+.auth-logo { text-align: left; margin-bottom: 10px; }
 .auth-logo-icon { font-size: 2.8rem; display: block; margin-bottom: 10px; }
 .auth-logo h2 { font-size: 1.45rem; font-weight: 700; color: var(--text-main); margin-bottom: 6px; letter-spacing: -0.5px; }
 .auth-logo p  { font-size: 0.85rem; color: var(--text-muted); line-height: 1.4; }
@@ -1719,7 +1722,7 @@ body.keyboard-open .input-toolbar { display: flex; }
   line-height: 1.4;
 }
 
-.auth-remember-container { display: flex; align-items: center; margin-top: 12px; margin-bottom: 4px; }
+.auth-remember-container { display: flex; align-items: center; margin-top: 2px; margin-bottom: 4px; }
 .auth-remember-label { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-muted); cursor: pointer; user-select: none; }
 .auth-remember-checkbox { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--border-color); outline: none; cursor: pointer; }
 
@@ -3702,9 +3705,10 @@ body.keyboard-open .input-toolbar { display: flex; }
 
 /* 로그인 화면 아래 '의견 보내기' 띠 — 위(로그인)와 회색 바탕으로 구분, 칸은 흰색 (8/29) */
 .auth-feedback {
-  margin: 36px -28px 0; /* 카드 좌우 여백(8px)+래퍼(20px)를 뚫고 화면 끝까지 */
+  margin: 36px -28px 0; /* 카드 좌우 여백을 뚫고 화면 끝까지 */
   padding: 22px 28px 24px;
   background-color: var(--bg-body);
+  flex: 1; /* 남는 높이까지 회색 띠가 채운다 */
 }
 .auth-feedback .input-field { background-color: #fff; border: 1px solid var(--border-color); }
 .auth-feedback .input-field:focus { background-color: #fff; }
