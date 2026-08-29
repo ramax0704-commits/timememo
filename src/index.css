@@ -3682,3 +3682,14 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 .edit-sheet-save:disabled { opacity: 0.4; }
 .block-time-auto { margin-left: 6px; font-size: 0.68rem; font-weight: 600; color: #a0a0ac; }
+
+/* ── 투어: 시간은 이렇게 적어요 (8/29) ─────────────────────────── */
+.ob-time-guide { display: flex; flex-direction: column; gap: 10px; background: #fff; border-radius: 14px; padding: 14px; box-shadow: 0 10px 30px rgba(20, 22, 34, 0.2); }
+.ob-time-guide-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+.ob-time-guide-typed { background: #f5f6f8; border-radius: 10px; padding: 8px 10px; font-size: 0.86rem; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ob-time-guide-arrow { color: #b0b0bc; font-size: 0.9rem; }
+.ob-time-guide-result { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ob-time-guide-result strong { font-size: 0.86rem; color: var(--primary-color); white-space: nowrap; }
+.ob-time-guide-result small { font-size: 0.72rem; color: var(--text-muted); }
+.ob-time-guide-foot { font-size: 0.78rem; color: var(--text-muted); border-top: 1px solid var(--border-color); padding-top: 10px; line-height: 1.5; }
+.tour-bubble--plain .tour-preview:has(.ob-time-guide) { background: none; box-shadow: none; padding: 0; max-height: none; overflow: visible; }

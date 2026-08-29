@@ -12,15 +12,39 @@ const SAMPLE_MEMOS = [
   { time: '오후 7:10', text: '미팅 자료 준비 완료. 요구사항 정리 완료', dur: '1h 15m' },
 ];
 
-// 입력창에 "9시 30분 카페가서 독서함"이라고 적은 모습 (실제 입력 영역과 같은 구성)
+// 입력창에 "아침 9시 카페가서 독서함"이라고 적은 모습 (실제 입력 영역과 같은 구성)
 export function SampleInput() {
   return (
     <div className="ob-input" aria-hidden="true">
       <div className="ob-input-row">
-        <div className="ob-input-box"><span className="ob-input-time">9시 30분</span> 카페가서 독서함</div>
+        <div className="ob-input-box"><span className="ob-input-time">아침 9시</span> 카페가서 독서함</div>
         <span className="ob-input-send"><Send size={18} /></span>
       </div>
       <div className="ob-input-chips"><span className="ob-input-chip-icon"><Palette size={15} strokeWidth={2.2} /></span><span>↑ 이전 기록부터</span><span>↓ 다음 기록까지</span></div>
+    </div>
+  );
+}
+
+// 투어 '시간은 이렇게 적어요' 카드 — 글 앞에 시각을 적는 세 가지 꼴 (8/29)
+const TIME_GUIDE = [
+  { typed: ['7시', ' 기상'], note: '그냥 7시 = 아침 7시', result: '오전 7:00' },
+  { typed: ['저녁 7시', ' 친구랑 저녁'], note: '저녁·밤·오후 7시 = 저녁', result: '오후 7:00' },
+  { typed: ['9시~10시 반', ' 회의'], note: '~ 로 이으면 구간', result: '오전 9:00 → 10:30' },
+];
+export function SampleTimeGuide() {
+  return (
+    <div className="ob-time-guide" aria-hidden="true">
+      {TIME_GUIDE.map((g, i) => (
+        <div key={i} className="ob-time-guide-row">
+          <div className="ob-time-guide-typed"><span className="ob-input-time">{g.typed[0]}</span>{g.typed[1]}</div>
+          <div className="ob-time-guide-arrow">→</div>
+          <div className="ob-time-guide-result">
+            <strong>{g.result}</strong>
+            <small>{g.note}</small>
+          </div>
+        </div>
+      ))}
+      <div className="ob-time-guide-foot">글 맨 앞에 시각을 적으면 그 시각의 기록이 돼요. 안 적으면 지금 시각.</div>
     </div>
   );
 }
@@ -30,10 +54,10 @@ export function SampleChatOne() {
   return (
     <div className="ob-sample ob-sample--chat ob-sample--one" aria-hidden="true">
       <div className="memo-item">
-        <div className="memo-time-container"><span className="memo-time">오전 9:30</span></div>
+        <div className="memo-time-container"><span className="memo-time">오전 9:00</span></div>
         <div className="memo-content">밥 먹고 출근</div>
       </div>
-      <div className="ob-sample-typed">← "9시 30분 밥 먹고 출근"이라고 적으면 이렇게 남아요</div>
+      <div className="ob-sample-typed">← "아침 9시 밥 먹고 출근"이라고 적으면 이렇게 남아요</div>
     </div>
   );
 }

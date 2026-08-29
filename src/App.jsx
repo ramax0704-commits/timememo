@@ -28,7 +28,7 @@ import { requestDaySummary, summaryCacheKey, peekSummaryCache, collectCachedRabb
 import ReviewScreen from './ReviewScreen';
 import TourOverlay from './TourOverlay';
 import OnboardingCards from './OnboardingCards';
-import { SampleInput, SampleDragDemo, SampleTapEditDemo, SampleTimeChipDemo, REVIEW_CARDS, WEEK_CARDS, MONTHLY_CARDS } from './OnboardingSamples';
+import { SampleInput, SampleTimeGuide, SampleDragDemo, SampleTapEditDemo, SampleTimeChipDemo, REVIEW_CARDS, WEEK_CARDS, MONTHLY_CARDS } from './OnboardingSamples';
 import Splash from './Splash';
 
 // Supabase 행(snake_case)을 앱에서 쓰는 형태(camelCase)로 변환
@@ -156,7 +156,8 @@ function parseFinance(text) {
 // "11시 40분 밥 먹음" → 11:40 단일 기록 '밥 먹음'
 // "11:30~2:30 수영함" → 11:30부터 구간 기록 '수영함'
 // 시각은 글 맨 앞에 있을 때만 읽는다. 본문 속 숫자를 시각으로 오해하면 안 된다.
-const TIME_TOKEN = '(오전|오후)?\\s*(\\d{1,2})(?::(\\d{2})|시\\s*(?:(\\d{1,2})\\s*분?)?)';
+// 오전/오후뿐 아니라 아침·새벽·낮·저녁·밤도 읽는다 ("아침 7시", "저녁 7시") — 8/29
+const TIME_TOKEN = '(오전|오후|아침|새벽|낮|저녁|밤)?\\s*(\\d{1,2})(?::(\\d{2})|시\\s*(?:(\\d{1,2})\\s*분?)?)';
 const RANGE_RE = new RegExp(`^${TIME_TOKEN}\\s*[~\\-]\\s*${TIME_TOKEN}\\s+([\\s\\S]+)$`);
 const SINGLE_RE = new RegExp(`^${TIME_TOKEN}\\s+([\\s\\S]+)$`);
 
@@ -167,8 +168,10 @@ const SINGLE_RE = new RegExp(`^${TIME_TOKEN}\\s+([\\s\\S]+)$`);
 // 저장돼 헷갈렸다. 규칙이 하나면 외울 게 없다. (12시는 정오)
 // eslint-disable-next-line no-unused-vars
 function resolveClock(ampm, h, m, nowMin) {
-  if (ampm === '오전') return (h % 12) * 60 + m;
-  if (ampm === '오후') return ((h % 12) + 12) * 60 + m;
+  if (ampm === '오전' || ampm === '아침' || ampm === '새벽') return (h % 12) * 60 + m;
+  if (ampm === '밤' && h === 12) return 24 * 60 + m; // "밤 12시" = 자정(다음날 0시)
+  if (ampm === '오후' || ampm === '저녁' || ampm === '밤') return ((h % 12) + 12) * 60 + m;
+  if (ampm === '낮') return (h >= 12 || h <= 5 ? (h % 12) + 12 : h) * 60 + m; // "낮 2시"=14시, "낮 11시"=11시
   if (h >= 12) return h * 60 + m; // 12시(정오)와 24시간 표기
   return h * 60 + m;
 }
@@ -4132,6 +4135,12 @@ function App() {
       caption: '그다음부터 지금까지는 뭘 했나요? 적은 다음, 「이전 기록부터」를 켜고 보내보세요. 앞 기록부터 지금까지 이어진 시간으로 저장돼요.',
     },
     {
+      // 시간을 어떻게 적는지 한 장으로 (8/29). 그림은 이미지 대신 실제 UI 조각.
+      key: 'time-tip', target: null, place: 'bottom', pointer: null, advance: 'button', free: true, plain: true,
+      caption: '시간은 이렇게 적어요',
+      preview: <SampleTimeGuide />,
+    },
+    {
       key: 'tab-schedule', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', pointer: 'tap', advance: 'tap-target',
       caption: '타임라인 탭을 눌러보세요.',
     },
@@ -6197,8 +6206,7 @@ function App() {
                   <label className="block-auto-toggle">
                     <input type="checkbox" checked={editSpansFromPrev} onChange={toggleDraftSpansFromPrev} />
                     <span className="block-auto-toggle-text">
-                      <strong>시작을 이전 기록 끝에 자동으로 맞추기</strong>
-                      <small>시작 시각을 직접 고르면 꺼져요.</small>
+                      <strong>이전 기록부터</strong>
                     </span>
                   </label>
                 )}
@@ -6206,8 +6214,7 @@ function App() {
                   <label className="block-auto-toggle">
                     <input type="checkbox" checked={editSpansToNext} onChange={toggleDraftSpansToNext} />
                     <span className="block-auto-toggle-text">
-                      <strong>끝을 다음 기록에 자동으로 맞추기</strong>
-                      <small>마지막 기록이면 지금까지 진행 중으로 그려져요. 끝 시각을 직접 고르면 꺼져요.</small>
+                      <strong>다음 기록까지</strong>
                     </span>
                   </label>
                 )}
