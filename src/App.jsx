@@ -5073,6 +5073,11 @@ function App() {
             )}
             {/* 구글은 가입 절차가 따로 없어 로그인/회원가입 양쪽에 둔다 */}
             {showEmailFields && <div className="auth-divider"><span>또는</span></div>}
+            {(authView === 'signup' || !emailAuthOpen) && (
+              <p className="auth-google-hint">
+                구글 계정으로 바로 시작할 수 있어요. 따로 가입할 필요 없습니다.
+              </p>
+            )}
             <button type="button" className="google-signin-btn" onClick={requestGoogleSignIn} disabled={submittingAuth}>
               <svg viewBox="0 0 24 24" width="18" height="18" style={{ marginRight: '10px' }}>
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -5083,11 +5088,6 @@ function App() {
               {authView === 'signup' || !emailAuthOpen ? '구글로 시작하기' : '구글로 로그인'}
             </button>
             {!emailAuthOpen && rememberMeCheckbox}
-            {(authView === 'signup' || !emailAuthOpen) && (
-              <p className="auth-google-hint">
-                구글 계정으로 바로 시작할 수 있어요. 따로 가입할 필요 없습니다.
-              </p>
-            )}
             {authView === 'login' && EMAIL_LOGIN_ENABLED && (
               <div style={{ textAlign: 'center', marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e5e5e5' }}>
                 <button
@@ -5109,7 +5109,7 @@ function App() {
             )}
           </form>
           {/* 처음 들어온 사람이 가입 전에 확인할 수 있어야 해서 로그인 화면에 둔다 */}
-          <p style={{ textAlign: 'center', marginTop: '14px', fontSize: '0.8rem', color: '#999' }}>
+          <p style={{ textAlign: 'left', marginTop: '18px', fontSize: '0.8rem', color: '#999' }}>
             <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: '#999' }}>
               이용약관
             </a>
@@ -5119,8 +5119,8 @@ function App() {
             </a>
           </p>
           {/* 비로그인 사용자용 의견·문의 창구 — 마이페이지가 없으니 여기 둔다 */}
-          <div style={{ marginTop: '18px', paddingTop: '18px', borderTop: '1px solid #eee' }}>
-            <p style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: '#555', margin: '0 0 8px' }}>
+          <div className="auth-feedback">
+            <p style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 600, color: '#555', margin: '0 0 10px' }}>
               <MessageSquare size={15} style={{ color: 'var(--primary-color)' }} />
               의견 보내기
             </p>

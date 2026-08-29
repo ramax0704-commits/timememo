@@ -1719,7 +1719,7 @@ body.keyboard-open .input-toolbar { display: flex; }
   line-height: 1.4;
 }
 
-.auth-remember-container { display: flex; align-items: center; margin-top: -6px; margin-bottom: 4px; }
+.auth-remember-container { display: flex; align-items: center; margin-top: 12px; margin-bottom: 4px; }
 .auth-remember-label { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-muted); cursor: pointer; user-select: none; }
 .auth-remember-checkbox { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--border-color); outline: none; cursor: pointer; }
 
@@ -1747,7 +1747,7 @@ body.keyboard-open .input-toolbar { display: flex; }
 .google-signin-btn:hover { background-color: #f7f9fa; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
 .google-signin-btn:disabled { background-color: #f1f3f5; color: #cccccc; cursor: not-allowed; border-color: #e2e8f0; }
 
-.auth-google-hint { margin: 10px 0 0; text-align: center; font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; }
+.auth-google-hint { margin: 0 0 14px; text-align: left; font-size: 0.86rem; color: var(--text-muted); line-height: 1.5; }
 
 /* ── 할 일 시트 ──────────────────────────────────────────────
    화면을 옮기지 않고 아래에서 올라오는 형태.
@@ -3699,3 +3699,13 @@ body.keyboard-open .input-toolbar { display: flex; }
 .edit-link-chips { display: flex; gap: 8px; }
 /* 토끼 카드 딤: inset:0은 사파리 하단 바 뒤까지 덮어서 버튼이 가려졌다 — 보이는 높이만큼만 */
 .rabbit-card-dim { inset: auto; top: 0; left: 0; right: 0; height: var(--vh, 100dvh); padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+
+/* 로그인 화면 아래 '의견 보내기' 띠 — 위(로그인)와 회색 바탕으로 구분, 칸은 흰색 (8/29) */
+.auth-feedback {
+  margin: 36px -28px 0; /* 카드 좌우 여백(8px)+래퍼(20px)를 뚫고 화면 끝까지 */
+  padding: 22px 28px 24px;
+  background-color: var(--bg-body);
+}
+.auth-feedback .input-field { background-color: #fff; border: 1px solid var(--border-color); }
+.auth-feedback .input-field:focus { background-color: #fff; }
+.auth-wrapper .build-stamp { background-color: var(--bg-body); margin: 0 -28px; padding: 0 28px 16px; }
