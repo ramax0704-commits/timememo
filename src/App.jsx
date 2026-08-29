@@ -4549,7 +4549,10 @@ function App() {
       // 11:10 '회의 끝' 다음에 11:10→11:50 '점심'이 오면 두 블록이 위아래로 붙어야 이어 쓴 느낌이 난다.
       // 이어 쓴 기록이 하나라도 끼면 옆으로 나누지 않고 아래로 붙인다 (8/29: 앞 기록이 구간이어도 마찬가지).
       const hasContinuation = c.items.some(s => s.memo.spansFromPrev && !(s.memo.backMinutes > 0));
-      c.useColumns = c.items.length >= 2 && c.items.some(s => !s.isCompact) && !hasContinuation;
+      // 옆으로 나누는 건 구간 블록끼리 진짜로 겹칠 때뿐. 순간 기록 하나가 구간의 머리에 걸친 건
+      // 위아래로 쌓고 시간 축을 그만큼 늘린다 (8/29: 13:17 순간 + 13:17→14:33 구간이 겹쳐 그려졌다)
+      const rangeCount = c.items.filter(s => !s.isCompact).length;
+      c.useColumns = rangeCount >= 2 && !hasContinuation;
     }
 
     // 3) 쌓는 데 필요한 높이가 실제 시간 길이보다 크면 그만큼 구간을 늘린다.
