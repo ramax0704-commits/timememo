@@ -6142,6 +6142,12 @@ function App() {
             <div className="block-sheet-grip" {...sheetGripHandlers}>
               {!sheetFull && <div className="block-sheet-handle" />}
               <div className="block-sheet-head edit-sheet-head">
+                {/* 페이지 모드는 페이지답게 좌상단 뒤로가기 — 누르면 시트로 돌아간다 */}
+                {sheetFull && (
+                  <button className="block-sheet-close edit-sheet-back" onClick={() => setSheetFull(false)} title="뒤로" aria-label="뒤로">
+                    <ChevronLeft size={22} />
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`edit-sheet-when${sheetPanel === 'time' ? ' active' : ''}`}
@@ -6152,9 +6158,11 @@ function App() {
                   <span>{editWhenLabel}</span>
                 </button>
                 <div className="block-sheet-head-right">
-                  <button className="block-sheet-close" onClick={() => setSheetFull(f => !f)} title={sheetFull ? '시트로 줄이기' : '크게 보기'} aria-label={sheetFull ? '시트로 줄이기' : '크게 보기'}>
-                    {sheetFull ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
-                  </button>
+                  {!sheetFull && (
+                    <button className="block-sheet-close" onClick={() => setSheetFull(true)} title="크게 보기" aria-label="크게 보기">
+                      <ChevronUp size={20} />
+                    </button>
+                  )}
                   <button className="block-sheet-close" onClick={closeBlockEditor} title="닫기" aria-label="닫기">
                     <X size={18} />
                   </button>
@@ -6255,7 +6263,7 @@ function App() {
               </div>
             )}
 
-            {(currentUser?.email === ADMIN_EMAIL || /[?&]vv/.test(window.location.search)) && vvDebug && <div style={{ fontSize: '0.62rem', color: '#aaa', padding: '2px 0' }}>{vvDebug}</div>}
+            {/[?&]vv/.test(window.location.search) && vvDebug && <div style={{ fontSize: '0.62rem', color: '#aaa', padding: '2px 0' }}>{vvDebug}</div>}
             <div className="edit-sheet-tools">
               <button
                 type="button"

@@ -3649,7 +3649,8 @@ body.keyboard-open .input-toolbar { display: flex; }
 
 /* ── 글이 주인공인 수정 시트 (8/29) ─────────────────────────────── */
 /* 높이는 글 길이만큼만 (8/29: 고정 최소 높이 때문에 도구 줄 아래가 휑하게 비었다). 아래 여백도 홈바만큼만 */
-.block-sheet.edit-sheet { padding-left: 16px; padding-right: 16px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+/* 아래 여백: 홈바만큼. 키보드가 떠 있으면(--kb>0) 홈바는 키보드 밑이니 여백 없이 10px만 */
+.block-sheet.edit-sheet { padding-left: 16px; padding-right: 16px; padding-bottom: max(10px, calc(env(safe-area-inset-bottom) - var(--kb, 0px))); }
 .block-sheet--full.edit-sheet { min-height: 100%; }
 .edit-sheet-head { margin-bottom: 6px; }
 .edit-sheet-when {
@@ -3733,3 +3734,7 @@ body.keyboard-open .input-toolbar { display: flex; }
 /* 페이지 모드는 페이지답게: 모서리·손잡이 없이 상태바 아래부터 (8/29) */
 .block-sheet--full.edit-sheet { border-radius: 0; padding-top: calc(14px + env(safe-area-inset-top)); }
 .block-sheet--full .edit-sheet-head { margin-top: 0; }
+
+.edit-sheet-back { margin-left: -6px; margin-right: 2px; color: var(--text-main); }
+.block-sheet--full .edit-sheet-head { gap: 6px; }
+.block-sheet--full .edit-sheet-when { margin-left: 0; }
