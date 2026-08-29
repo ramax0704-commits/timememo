@@ -4519,7 +4519,9 @@ function App() {
       let host = null;
       for (const a of ordered) {
         if (a === s) continue;
-        const inside = a.startPos < s.startPos && s.endPos <= a.endPos;
+        // 구간의 머리(같은 분, 초만 다른 것 포함)에 걸친 기록은 '안에 든' 게 아니라 이어진 기록이다 —
+        // 얹지 말고 위아래로 쌓는다 (8/29: 13:17 순간이 13:17→14:33 구간 위에 겹쳐 그려졌다)
+        const inside = a.startPos + 5 <= s.startPos && s.endPos <= a.endPos;
         const longer = (a.endPos - a.startPos) > (s.endPos - s.startPos);
         if (!inside || !longer) continue;
         // 가장 가까이 감싸는 블록을 고른다
