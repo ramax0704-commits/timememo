@@ -1287,6 +1287,14 @@ function App() {
     const el = sheetElRef.current;
     if (el) sheetAnimRef.current = el.getBoundingClientRect().height;
     setSheetFull(next);
+    // 페이지로 펼치면 바로 쓸 수 있게 키보드를 띄운다 — 사용자 제스처 안에서 불러야 iOS가 허용한다
+    if (next) focusSheetTextarea();
+  };
+  const focusSheetTextarea = () => {
+    const el = sheetTextareaRef.current;
+    if (!el) return;
+    el.focus();
+    try { const n = el.value.length; el.setSelectionRange(n, n); } catch { /* 무시 */ }
   };
   useLayoutEffect(() => {
     const el = sheetElRef.current, from = sheetAnimRef.current;
@@ -6201,6 +6209,7 @@ function App() {
                 value={editContentStr}
                 onChange={e => setEditContentStr(e.target.value)}
                 onFocus={() => setSheetPanel(null)}
+                autoFocus
                 placeholder="무엇을 했나요?"
                 rows={3}
               />
