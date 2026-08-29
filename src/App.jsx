@@ -4040,6 +4040,8 @@ function App() {
   const TIP_STEPS = {
     timeline: [
       { key: 'time', target: '.input-area', place: 'above', advance: 'send', plain: true, caption: '했던 일을 시간과 함께 입력해 보세요.', preview: <SampleInput /> },
+      // 보내고 나면 시간 적는 법 한 장 (8/29) — 그냥 7시는 아침, 저녁 7시, ~로 구간
+      { key: 'time-guide', target: null, place: 'bottom', plain: true, caption: '시간은 이렇게 적어요', preview: <SampleTimeGuide /> },
       { key: 'tab', target: '.bottom-tab-bar .tab-btn:nth-child(1)', place: 'above', advance: 'tap-target', plain: true, caption: '타임라인 탭을 한 번 더 누르면 시간표로 바뀌어요.' },
     ],
     // 시간표: 전부 애니메이션 시연 (직접 해보게 하면 딤 밖으로 움직이거나 시트가 떠서 오류처럼 보였다)
