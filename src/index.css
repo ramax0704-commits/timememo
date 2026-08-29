@@ -3738,3 +3738,20 @@ body.keyboard-open .input-toolbar { display: flex; }
 .edit-sheet-back { margin-left: -6px; margin-right: 2px; color: var(--text-main); }
 .block-sheet--full .edit-sheet-head { gap: 6px; }
 .block-sheet--full .edit-sheet-when { margin-left: 0; }
+
+/* 페이지 모드 상단 바 (8/29) */
+.edit-page-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.edit-page-bar-right { display: flex; align-items: center; gap: 8px; }
+.edit-page-circle {
+  width: 42px; height: 42px; border-radius: 50%; border: none; background: #f2f2f6; color: var(--text-main);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0;
+}
+.edit-page-circle--danger { color: #e53e3e; }
+.edit-page-save {
+  height: 42px; padding: 0 18px; border-radius: 999px; border: none; background: var(--primary-color); color: #fff;
+  font: inherit; font-size: 0.92rem; font-weight: 700; cursor: pointer;
+}
+.edit-page-save:disabled { opacity: 0.4; }
+.block-sheet--full .edit-sheet-head { margin-bottom: 2px; }
+.block-sheet--full .edit-sheet-text { font-size: 1.15rem; line-height: 1.65; }
+.block-sheet--full .edit-sheet-tools { border: none; }

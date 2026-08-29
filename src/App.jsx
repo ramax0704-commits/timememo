@@ -6141,13 +6141,21 @@ function App() {
                 손잡이를 위로 밀면 전체 페이지, 아래로 밀면 다시 시트(또는 닫기). 화살표 버튼으로도 된다 */}
             <div className="block-sheet-grip" {...sheetGripHandlers}>
               {!sheetFull && <div className="block-sheet-handle" />}
-              <div className="block-sheet-head edit-sheet-head">
-                {/* 페이지 모드는 페이지답게 좌상단 뒤로가기 — 누르면 시트로 돌아간다 */}
-                {sheetFull && (
-                  <button className="block-sheet-close edit-sheet-back" onClick={() => setSheetFull(false)} title="뒤로" aria-label="뒤로">
+              {/* 페이지 모드 상단 바: 둥근 ← / 🗑 / 저장. 그 아래 시각 한 줄 (8/29 참고 화면대로) */}
+              {sheetFull && (
+                <div className="edit-page-bar">
+                  <button type="button" className="edit-page-circle" onClick={() => setSheetFull(false)} title="뒤로" aria-label="뒤로">
                     <ChevronLeft size={22} />
                   </button>
-                )}
+                  <div className="edit-page-bar-right">
+                    <button type="button" className="edit-page-circle edit-page-circle--danger" onClick={deleteFromBlockEditor} title="삭제" aria-label="삭제">
+                      <Trash2 size={18} />
+                    </button>
+                    <button type="button" className="edit-page-save" onClick={saveBlockEdit} disabled={!editContentStr.trim()}>저장</button>
+                  </div>
+                </div>
+              )}
+              <div className="block-sheet-head edit-sheet-head">
                 <button
                   type="button"
                   className={`edit-sheet-when${sheetPanel === 'time' ? ' active' : ''}`}
@@ -6157,16 +6165,16 @@ function App() {
                   <Clock size={15} strokeWidth={2.2} />
                   <span>{editWhenLabel}</span>
                 </button>
-                <div className="block-sheet-head-right">
-                  {!sheetFull && (
+                {!sheetFull && (
+                  <div className="block-sheet-head-right">
                     <button className="block-sheet-close" onClick={() => setSheetFull(true)} title="크게 보기" aria-label="크게 보기">
                       <ChevronUp size={20} />
                     </button>
-                  )}
-                  <button className="block-sheet-close" onClick={closeBlockEditor} title="닫기" aria-label="닫기">
-                    <X size={18} />
-                  </button>
-                </div>
+                    <button className="block-sheet-close" onClick={closeBlockEditor} title="닫기" aria-label="닫기">
+                      <X size={18} />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -6284,24 +6292,28 @@ function App() {
               >
                 <Palette size={18} strokeWidth={2} />
               </button>
-              <button
-                type="button"
-                className="edit-tool-btn edit-tool-btn--danger"
-                onMouseDown={e => e.preventDefault()}
-                onClick={deleteFromBlockEditor}
-                title="삭제" aria-label="삭제"
-              >
-                <Trash2 size={18} strokeWidth={2} />
-              </button>
-              <button
-                type="button"
-                className="edit-sheet-save"
-                onMouseDown={e => e.preventDefault()}
-                onClick={saveBlockEdit}
-                disabled={!editContentStr.trim()}
-              >
-                저장
-              </button>
+              {!sheetFull && (
+                <>
+                  <button
+                    type="button"
+                    className="edit-tool-btn edit-tool-btn--danger"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={deleteFromBlockEditor}
+                    title="삭제" aria-label="삭제"
+                  >
+                    <Trash2 size={18} strokeWidth={2} />
+                  </button>
+                  <button
+                    type="button"
+                    className="edit-sheet-save"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={saveBlockEdit}
+                    disabled={!editContentStr.trim()}
+                  >
+                    저장
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
