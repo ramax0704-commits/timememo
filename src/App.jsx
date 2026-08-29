@@ -3772,16 +3772,27 @@ function App() {
     let backMinutes = 0;
     if (mode === 'prev' && timed?.kind !== 'range') {
       const ownMs = recordAt.getTime();
-      const prev = memos
-        .filter(m => new Date(m.recordedAt).getTime() < ownMs && ownMs - new Date(m.recordedAt).getTime() < 24 * 3600000)
-        .sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt))[0];
-      if (prev) {
-        // 이전 기록이 끝을 직접 늘려뒀으면 그 끝부터, 아니면 그 기록 시각부터
-        const prevEnd = new Date(prev.recordedAt).getTime() + Math.max(0, prev.endMinutes || 0) * 60000;
-        backMinutes = Math.max(1, Math.round((ownMs - prevEnd) / 60000));
-      } else {
-        backMinutes = MIN_BLOCK_MINUTES;
+      // '이전 기록'은 지금보다 앞서 '끝난' 기록 중 가장 늦게 끝난 것 — 기록 시각이 아니라 끝(시각+길이)으로 고른다.
+      // (9:00→11:04로 고쳐 둔 구간은 시각이 9:00이라 그냥 시각순으로 고르면 뒤로 밀린다)
+      // 다른 기기에서 쓴 기록이 이 화면에 아직 안 왔을 수 있어, 로그인 상태면 서버에서 최근 것을 한 번 더 받아 합친다 (8/29 실서버: 첫 기록부터 이어붙던 문제)
+      let pool = memos;
+      if (!isGuest) {
+        const sinceIso = new Date(ownMs - 24 * 3600000).toISOString();
+        const { data } = await supabase.from('memos').select('*')
+          .gte('recorded_at', sinceIso).lt('recorded_at', recordAt.toISOString())
+          .order('recorded_at', { ascending: false }).limit(50);
+        if (Array.isArray(data)) {
+          const fresh = data.map(rowToMemo);
+          const ids = new Set(fresh.map(m => m.id));
+          pool = [...fresh, ...memos.filter(m => !ids.has(m.id))];
+        }
       }
+      const endOf = (m) => new Date(m.recordedAt).getTime() + Math.max(0, m.endMinutes || 0) * 60000;
+      const prev = pool
+        .filter(m => !String(m.id).startsWith('guide-') && !String(m.id).startsWith('tour-'))
+        .filter(m => endOf(m) < ownMs && ownMs - endOf(m) < 24 * 3600000)
+        .sort((a, b) => endOf(b) - endOf(a))[0];
+      backMinutes = prev ? Math.max(1, Math.round((ownMs - endOf(prev)) / 60000)) : MIN_BLOCK_MINUTES;
     }
     const newMemoData = {
       user_id: currentUser?.id,
