@@ -3636,3 +3636,46 @@ body.keyboard-open .input-toolbar { display: flex; }
 /* 페이지로 펼치면 본문 칸이 글 길이만큼 자란다 (시트일 땐 fitSheetTextarea가 상한을 둔다) */
 .block-sheet--full .block-textarea { min-height: 160px; }
 .block-textarea { overflow-y: auto; }
+
+/* ── 글이 주인공인 수정 시트 (8/29) ─────────────────────────────── */
+.block-sheet.edit-sheet { min-height: 58%; padding-left: 16px; padding-right: 16px; }
+.block-sheet--full.edit-sheet { min-height: 100%; }
+.edit-sheet-head { margin-bottom: 6px; }
+.edit-sheet-when {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: none; background: none; padding: 6px 8px; margin-left: -8px;
+  font: inherit; font-size: 0.86rem; font-weight: 600; color: var(--primary-color);
+  border-radius: 8px; cursor: pointer; min-width: 0;
+}
+.edit-sheet-when span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.edit-sheet-when.active { background: #eef2ff; }
+.edit-sheet-body { padding: 0; gap: 0; }
+.edit-sheet-text {
+  width: 100%; border: none; outline: none; resize: none; background: transparent;
+  padding: 8px 4px; font-family: inherit; font-size: 1.08rem; line-height: 1.6; color: var(--text-main);
+  min-height: 140px; overflow-y: auto;
+}
+.edit-sheet-text::placeholder { color: #b5b5c0; }
+.block-sheet--full .edit-sheet-text { min-height: 40vh; }
+.edit-sheet-panel {
+  flex: none; display: flex; flex-direction: column; gap: 10px;
+  padding: 12px; margin-top: 6px; background: #f7f7fa; border-radius: 12px;
+  max-height: 46%; overflow-y: auto;
+}
+.edit-sheet-tools {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding-top: 10px; margin-top: 8px; border-top: 1px solid var(--border-color);
+}
+.edit-tool-btn {
+  width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--border-color);
+  background: #fff; color: var(--text-muted); display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; padding: 0;
+}
+.edit-tool-btn.active { border-color: var(--primary-color); color: var(--primary-color); background: #eef2ff; }
+.edit-tool-btn--danger { color: #e53e3e; }
+.edit-sheet-save {
+  margin-left: auto; padding: 9px 22px; border-radius: 999px; border: none;
+  background: var(--primary-color); color: #fff; font: inherit; font-size: 0.92rem; font-weight: 700; cursor: pointer;
+}
+.edit-sheet-save:disabled { opacity: 0.4; }
+.block-time-auto { margin-left: 6px; font-size: 0.68rem; font-weight: 600; color: #a0a0ac; }

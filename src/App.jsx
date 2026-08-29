@@ -1257,6 +1257,8 @@ function App() {
   const [editContentStr, setEditContentStr] = useState('');
   // 수정 시트를 위로 밀어 전체 페이지로 펼친 상태. 긴 글은 시트 반 칸으론 부족하다(8/29)
   const [sheetFull, setSheetFull] = useState(false);
+  // 시트 아래 도구 줄에서 펼친 것: null | 'time' | 'color'
+  const [sheetPanel, setSheetPanel] = useState(null);
   const sheetDragRef = useRef(null);
   const sheetTextareaRef = useRef(null);
   // 시트 본문 칸은 글 길이만큼 자란다 — 시트일 땐 상한을 두고, 페이지로 펼치면 상한 없이
@@ -1264,7 +1266,7 @@ function App() {
     const el = sheetTextareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    const cap = sheetFull ? Infinity : Math.max(120, Math.round((window.visualViewport?.height ?? window.innerHeight) * 0.3));
+    const cap = sheetFull ? Infinity : Math.max(140, Math.round((window.visualViewport?.height ?? window.innerHeight) * 0.42));
     el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
   };
   useEffect(() => { if (editingMemo) fitSheetTextarea(); }, [editingMemo, editContentStr, sheetFull]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1826,7 +1828,8 @@ function App() {
   const weekFacts = buildWeekFacts(memos, nowTime);
   const todayRecords = todayFacts ? toSummaryRecords(todayMemos) : null;
   const summaryKey = todayRecords ? summaryCacheKey(reviewKey, todayRecords) : null;
-  const summaryUsesLeft = Math.max(0, SUMMARY_DAILY_LIMIT - (summaryUses[todayKey] || 0));
+  // 관리자 계정은 하루 제한을 두지 않는다 — 판정을 바꾼 뒤 여러 날을 다시 돌려 봐야 한다 (8/29)
+  const summaryUsesLeft = currentUser?.email === ADMIN_EMAIL ? 99 : Math.max(0, SUMMARY_DAILY_LIMIT - (summaryUses[todayKey] || 0));
   const canGenerate = Boolean(summaryKey) && todayMemos.length >= SUMMARY_MIN_RECORDS && summaryUsesLeft > 0;
   const pickReviewDay = (day) => {
     if (dateKeyOf(day) > todayKey) return;
@@ -3275,6 +3278,7 @@ function App() {
     };
     setEditingMemo(memo);
     setSheetFull(false);
+    setSheetPanel(null);
     setEditContentStr(memo.content);
     setEditMemoColor(memo.color || 'default');
     setEditDateStr(snapshot.date);
@@ -3348,6 +3352,16 @@ function App() {
       setOpenTimeWheel(w => (w === 'end' ? null : w));
     }
   };
+
+  // 시트 머리의 시각 한 줄: "8월 29일 (토), 오후 1:17 → 오후 2:33"
+  const editWhenLabel = (() => {
+    if (!editDateStr) return '';
+    const [y, mo, d] = editDateStr.split('-').map(Number);
+    const day = new Date(y, mo - 1, d);
+    const dayStr = isSameDay(day, new Date()) ? '오늘' : format(day, 'M월 d일 (EEE)', { locale: ko });
+    const t = editMode === 'range' ? `${timeLabel12(editStartStr)} → ${timeLabel12(editEndStr)}` : timeLabel12(editStartStr);
+    return `${dayStr}, ${t}`;
+  })();
 
   const saveBlockEdit = async () => {
     const memo = editingMemo;
@@ -6055,27 +6069,27 @@ function App() {
 
       {/* 기록 편집 시트 — 채팅창과 타임블럭이 같은 것을 쓴다.
           어느 화면 어느 자리를 눌러도 여기서 내용·시간·색상·삭제를 다 할 수 있다 */}
-      {editingMemo && (
+{editingMemo && (
         <div className={`block-sheet-overlay${sheetFull ? ' block-sheet-overlay--full' : ''}`} onClick={closeBlockEditor}>
           <div className={`block-sheet edit-sheet${sheetFull ? ' block-sheet--full' : ''}`} onClick={e => e.stopPropagation()}>
-            {/* 손잡이를 위로 밀면 전체 페이지, 아래로 밀면 다시 시트(또는 닫기). 화살표 버튼으로도 된다 */}
+            {/* 글이 주인공인 시트 (8/29): 위엔 시각 한 줄, 가운데는 글, 아래 도구 줄(시간·색·삭제·저장).
+                손잡이를 위로 밀면 전체 페이지, 아래로 밀면 다시 시트(또는 닫기). 화살표 버튼으로도 된다 */}
             <div className="block-sheet-grip" {...sheetGripHandlers}>
               <div className="block-sheet-handle" />
-              <div className="block-sheet-head">
-                <div className="block-sheet-head-left">
-                  {sheetFull && (
-                    <button className="block-sheet-close" onClick={() => setSheetFull(false)} title="시트로 줄이기" aria-label="시트로 줄이기">
-                      <ChevronDown size={20} />
-                    </button>
-                  )}
-                  <h3>기록 수정</h3>
-                </div>
+              <div className="block-sheet-head edit-sheet-head">
+                <button
+                  type="button"
+                  className={`edit-sheet-when${sheetPanel === 'time' ? ' active' : ''}`}
+                  onClick={() => setSheetPanel(p => (p === 'time' ? null : 'time'))}
+                  title="시간 고치기"
+                >
+                  <Clock size={15} strokeWidth={2.2} />
+                  <span>{editWhenLabel}</span>
+                </button>
                 <div className="block-sheet-head-right">
-                  {!sheetFull && (
-                    <button className="block-sheet-close" onClick={() => setSheetFull(true)} title="크게 보기" aria-label="크게 보기">
-                      <ChevronUp size={20} />
-                    </button>
-                  )}
+                  <button className="block-sheet-close" onClick={() => setSheetFull(f => !f)} title={sheetFull ? '시트로 줄이기' : '크게 보기'} aria-label={sheetFull ? '시트로 줄이기' : '크게 보기'}>
+                    {sheetFull ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
+                  </button>
                   <button className="block-sheet-close" onClick={closeBlockEditor} title="닫기" aria-label="닫기">
                     <X size={18} />
                   </button>
@@ -6083,38 +6097,26 @@ function App() {
               </div>
             </div>
 
-            <div className="block-sheet-body">
-              <div className="block-field">
-                <span className="block-field-label">내용</span>
-                <textarea
-                  ref={sheetTextareaRef}
-                  className="block-textarea"
-                  value={editContentStr}
-                  onChange={e => setEditContentStr(e.target.value)}
-                  rows={3}
-                />
-              </div>
+            <div className="block-sheet-body edit-sheet-body">
+              <textarea
+                ref={sheetTextareaRef}
+                className="edit-sheet-text"
+                value={editContentStr}
+                onChange={e => setEditContentStr(e.target.value)}
+                onFocus={() => setSheetPanel(null)}
+                placeholder="무엇을 했나요?"
+                rows={3}
+              />
+            </div>
 
-              <div className="block-field">
+            {sheetPanel === 'time' && (
+              <div className="edit-sheet-panel">
                 <div className="block-field-head">
                   <span className="block-field-label">시간</span>
-                  {/* 그냥 적어둔 한 줄과, 얼마나 걸렸는지가 있는 일은 다르다.
-                      전부 구간으로 물으면 메모할 때마다 쓸데없는 결정을 하게 된다 */}
+                  {/* 그냥 적어둔 한 줄과, 얼마나 걸렸는지가 있는 일은 다르다 */}
                   <div className="block-mode-toggle">
-                    <button
-                      type="button"
-                      className={editMode === 'moment' ? 'active' : ''}
-                      onClick={() => switchEditMode('moment')}
-                    >
-                      한 순간
-                    </button>
-                    <button
-                      type="button"
-                      className={editMode === 'range' ? 'active' : ''}
-                      onClick={() => switchEditMode('range')}
-                    >
-                      구간
-                    </button>
+                    <button type="button" className={editMode === 'moment' ? 'active' : ''} onClick={() => switchEditMode('moment')}>한 순간</button>
+                    <button type="button" className={editMode === 'range' ? 'active' : ''} onClick={() => switchEditMode('range')}>구간</button>
                   </div>
                 </div>
                 <input
@@ -6123,17 +6125,18 @@ function App() {
                   value={editDateStr}
                   onChange={e => setEditDateStr(e.target.value)}
                 />
-                {/* 기기 기본 time 입력은 갤럭시에서 시계 다이얼이 떠서 불편했다.
-                    어느 기기에서나 똑같도록 앱이 직접 그리는 휠로 고른다 */}
+                {/* 기기 기본 time 입력은 갤럭시에서 시계 다이얼이 떠서 불편했다 — 앱이 직접 그리는 휠로 고른다.
+                    자동으로 잇는 중이어도 눌러서 바로 고칠 수 있다(누르면 자동이 꺼진다). 잠가두면 당황한다(8/29). */}
                 <div className="block-time-row">
                   <button
                     type="button"
                     className={`block-input block-time-btn${openTimeWheel === 'start' ? ' open' : ''}`}
-                    onClick={() => setOpenTimeWheel(w => (w === 'start' ? null : 'start'))}
-                    /* 자동으로 잇는 중에는 시작이 이전 기록을 따라가므로 직접 못 고친다 */
-                    disabled={editMode === 'range' && editSpansFromPrev}
+                    onClick={() => {
+                      if (editMode === 'range' && editSpansFromPrev) { setEditSpansFromPrev(false); setOpenTimeWheel('start'); return; }
+                      setOpenTimeWheel(w => (w === 'start' ? null : 'start'));
+                    }}
                   >
-                    {timeLabel12(editStartStr)}
+                    {timeLabel12(editStartStr)}{editMode === 'range' && editSpansFromPrev && <small className="block-time-auto">자동</small>}
                   </button>
                   {editMode === 'range' && (
                     <>
@@ -6141,11 +6144,12 @@ function App() {
                       <button
                         type="button"
                         className={`block-input block-time-btn${openTimeWheel === 'end' ? ' open' : ''}`}
-                        onClick={() => setOpenTimeWheel(w => (w === 'end' ? null : 'end'))}
-                        /* 자동으로 잇는 중에는 끝 시각이 다음 기록을 따라가므로 직접 못 고친다 */
-                        disabled={editSpansToNext}
+                        onClick={() => {
+                          if (editSpansToNext) { setEditSpansToNext(false); setOpenTimeWheel('end'); return; }
+                          setOpenTimeWheel(w => (w === 'end' ? null : 'end'));
+                        }}
                       >
-                        {timeLabel12(editEndStr)}
+                        {timeLabel12(editEndStr)}{editSpansToNext && <small className="block-time-auto">자동</small>}
                       </button>
                     </>
                   )}
@@ -6156,42 +6160,32 @@ function App() {
                 {openTimeWheel === 'end' && editMode === 'range' && !editSpansToNext && (
                   <TimeWheelPicker value={editEndStr} onChange={setEditEndStr} />
                 )}
-                {/* 하루의 밤은 새벽 2시까지 — 새벽 시각은 이 날짜의 밤으로 저장된다 */}
                 {(editStartStr < '02:00' || (editMode === 'range' && editEndStr < '02:00')) && (
-                  <small className="block-dawn-hint">
-                    새벽 0~2시 시각은 이 날짜의 밤(다음날 새벽)으로 저장돼요.
-                  </small>
+                  <small className="block-dawn-hint">새벽 0~2시 시각은 이 날짜의 밤(다음날 새벽)으로 저장돼요.</small>
                 )}
                 {editMode === 'range' && (
                   <label className="block-auto-toggle">
-                    <input
-                      type="checkbox"
-                      checked={editSpansFromPrev}
-                      onChange={toggleDraftSpansFromPrev}
-                    />
+                    <input type="checkbox" checked={editSpansFromPrev} onChange={toggleDraftSpansFromPrev} />
                     <span className="block-auto-toggle-text">
-                      <strong>이전 기록부터 이어서 표시</strong>
-                      <small>끝나고 적은 기록일 때. 이전 기록 시각부터 이 기록까지 한 덩어리가 됩니다.</small>
+                      <strong>시작을 이전 기록 끝에 자동으로 맞추기</strong>
+                      <small>시작 시각을 직접 고르면 꺼져요.</small>
                     </span>
                   </label>
                 )}
                 {editMode === 'range' && (
                   <label className="block-auto-toggle">
-                    <input
-                      type="checkbox"
-                      checked={editSpansToNext}
-                      onChange={toggleDraftSpansToNext}
-                    />
+                    <input type="checkbox" checked={editSpansToNext} onChange={toggleDraftSpansToNext} />
                     <span className="block-auto-toggle-text">
-                      <strong>다음 기록까지 자동으로 잇기</strong>
-                      <small>마지막 기록이면 지금 이 순간까지 진행 중으로 그려집니다.</small>
+                      <strong>끝을 다음 기록에 자동으로 맞추기</strong>
+                      <small>마지막 기록이면 지금까지 진행 중으로 그려져요. 끝 시각을 직접 고르면 꺼져요.</small>
                     </span>
                   </label>
                 )}
               </div>
+            )}
 
-              <div className="block-field">
-                <span className="block-field-label">색상</span>
+            {sheetPanel === 'color' && (
+              <div className="edit-sheet-panel">
                 <div className="block-color-row">
                   {COLOR_PALETTE.map(c => (
                     <button
@@ -6199,23 +6193,56 @@ function App() {
                       type="button"
                       className={`block-color-swatch ${editMemoColor === c.id ? 'selected' : ''}`}
                       style={{ backgroundColor: c.bg, borderColor: COLOR_BORDER[c.id] }}
-                      onClick={() => setEditMemoColor(c.id)}
+                      onClick={() => { setEditMemoColor(c.id); setSheetPanel(null); }}
                       title={c.label}
                     />
                   ))}
                 </div>
               </div>
-            </div>
+            )}
 
-            <div className="block-sheet-actions">
-              <button className="block-delete-btn" onClick={deleteFromBlockEditor}>삭제</button>
-              <button className="btn-cancel" onClick={closeBlockEditor}>취소</button>
-              <button className="btn-save" onClick={saveBlockEdit}>저장</button>
+            <div className="edit-sheet-tools">
+              <button
+                type="button"
+                className={`edit-tool-btn${sheetPanel === 'time' ? ' active' : ''}`}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => setSheetPanel(p => (p === 'time' ? null : 'time'))}
+                title="시간" aria-label="시간"
+              >
+                <Clock size={19} strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                className={`edit-tool-btn${sheetPanel === 'color' ? ' active' : ''}`}
+                style={{ backgroundColor: COLOR_PALETTE.find(c => c.id === editMemoColor)?.bg || '#f9f9fb', borderColor: COLOR_BORDER[editMemoColor] || '#ddd' }}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => setSheetPanel(p => (p === 'color' ? null : 'color'))}
+                title="색상" aria-label="색상"
+              >
+                <Palette size={18} strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                className="edit-tool-btn edit-tool-btn--danger"
+                onMouseDown={e => e.preventDefault()}
+                onClick={deleteFromBlockEditor}
+                title="삭제" aria-label="삭제"
+              >
+                <Trash2 size={18} strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                className="edit-sheet-save"
+                onMouseDown={e => e.preventDefault()}
+                onClick={saveBlockEdit}
+                disabled={!editContentStr.trim()}
+              >
+                저장
+              </button>
             </div>
           </div>
         </div>
       )}
-
       {showConsent && (
         <ConsentSheet onAgree={agreeAndSignIn} onClose={() => { track('Consent', { action: 'closed' }); setShowConsent(false); }} />
       )}
