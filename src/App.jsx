@@ -1178,6 +1178,8 @@ function App() {
   const [refetchTick, setRefetchTick] = useState(0);
   // 서버에서 기록을 못 받아온 상태. 빈 화면을 '다 날아갔다'로 보이게 두면 안 되니 안내를 띄우고 다시 시도한다.
   const [memosLoadFailed, setMemosLoadFailed] = useState(false);
+  // 어느 사용자의 기록을 서버에서 한 번이라도 받아왔는지(user id) — 받기 전엔 첫 화면 대신 스플래시를 보인다
+  const [memosFetchedFor, setMemosFetchedFor] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
   // 타임블럭이 이어서 그려둔 날짜 창의 기준일. selectedDate가 창을 벗어날 때만 따라온다.
   // (헤더 날짜는 스크롤을 따라 계속 바뀌는데, 그때마다 창을 다시 잡으면 화면이 튄다)
@@ -1547,10 +1549,12 @@ function App() {
       if (error) {
         console.error('Error fetching memos:', error);
         setMemosLoadFailed(true);
+        setMemosFetchedFor(userId); // 실패해도 스플래시는 내린다 — '다시 시도' 토스트가 뜨는 화면으로
         return;
       }
       setMemosLoadFailed(false);
       setMemos(data.map(rowToMemo));
+      setMemosFetchedFor(userId);
     };
     fetchMemos();
 
@@ -5062,10 +5066,19 @@ function App() {
   }
 
   // ── 로딩 ─────────────────────────────────────────────────────
-  if (authLoading) {
+  // 링크를 열고 첫 화면이 뜨기까지(로그인 확인 → 기록 불러오기) 스피너만 돌던 자리에
+  // 온보딩과 같은 스플래시를 띄운다. 기다리는 동안 빈 화면이 아니라 브랜드가 보이게 (8/30)
+  if (authLoading || (userId && memosFetchedFor !== userId)) {
     return (
-      <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
-        <div className="spinner" />
+      <div className="app-container">
+        <div className="splash splash--boot" role="status" aria-label="타임메모 여는 중">
+          <div className="splash-body">
+            <h1 className="splash-title">
+              순간의 기록을 모아<br />오늘의 일기로
+            </h1>
+            <div className="splash-brand">타임메모</div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -5396,7 +5409,8 @@ function App() {
         )}
         {/* 어제 회고에서 적은 '내일의 나에게 한 줄' — 오늘 첫 화면, 날짜 선택 바로 아래에서 만난다 (8/30).
             채팅 목록 안에 넣으면 아래로 붙어 기록과 한 덩어리로 보여서 밖에 둔다 */}
-        {activeView === 'timeline' && !showScheduleView && prevDayNote && (
+        {/* 글을 쓰는 동안은 숨긴다 — 키보드가 올라와 좁아진 화면에서 답답하기만 하다 (8/30) */}
+        {activeView === 'timeline' && !showScheduleView && prevDayNote && !inputActive && (
           <div className="day-note-card" role="note">
             <div className="day-note-card-label">{prevDayNoteLabel}</div>
             <div className="day-note-card-text">{prevDayNote}</div>

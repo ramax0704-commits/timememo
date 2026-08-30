@@ -3784,3 +3784,6 @@ body.keyboard-open .input-toolbar { display: flex; }
   padding: 10px 16px;
   opacity: 0.9;
 }
+
+/* 앱을 여는 동안(로그인 확인·기록 불러오기)의 스플래시 — 온보딩 스플래시와 같은 모습, 시간 제한 없이 준비되면 내려간다 */
+.splash--boot { position: relative; flex: 1; }
