@@ -5380,6 +5380,8 @@ function App() {
               )}
             </div>
           </div>
+          {/* 채팅창에 글을 쓰는 동안은 요일·날짜 줄도 숨긴다 — 키보드로 좁아진 화면을 넓게 (8/30) */}
+          {!(activeView === 'timeline' && inputActive) && (
           <WeekStrip
             selected={headerDate}
             onPick={activeView === 'review' ? pickReviewDay : goToDay}
@@ -5387,6 +5389,7 @@ function App() {
             marked={memoDayKeys}
             reviewed={reviewedDayKeys}
           />
+          )}
         </header>
       )}
 
