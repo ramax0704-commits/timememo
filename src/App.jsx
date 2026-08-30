@@ -4779,6 +4779,8 @@ function App() {
         s.colCount = host.colCount;
         y = s.top + slot;
       }
+      // 감싸는 블록의 글은 첫 안쪽 기록 위까지만 — 안 그러면 얹힌 기록이 글 줄 중간을 덮는다 (8/30)
+      host.textPx = Math.min(...inner.map(s => s.top)) - host.top;
     }
 
     // 지금 이 순간이 창 안이면 빨간 줄을 그린다 (창 기준 분)
@@ -4892,7 +4894,7 @@ function App() {
               const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
               const contentLines = (!isCompact && (schedule.colCount ?? 1) <= 1)
                 // 마지막 줄이 3px쯤 덜 보이는 건 봐준다 — 안 그러면 두 줄 들어갈 자리에 한 줄만 남아 휑하다
-                ? Math.max(1, Math.floor((schedule.height - 16 - 0.72 * rem * 1.2 - 5 + 3) / (0.85 * rem * 1.35)))
+                ? Math.max(1, Math.floor(((schedule.textPx ?? schedule.height) - 16 - 0.72 * rem * 1.2 - 5 + 3) / (0.85 * rem * 1.35)))
                 : null;
 
               return (
