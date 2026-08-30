@@ -4641,20 +4641,42 @@ function App() {
     // 3) 쌓는 데 필요한 높이가 실제 시간 길이보다 크면 그만큼 구간을 늘린다.
     //    감싸는 블록은 안쪽 기록들이 다 들어갈 만큼도 확보해야 한다.
     const innerOf = (host) => ordered.filter(s => s.host === host);
-    const innerNeedPx = (host) => {
-      let y = 0;
-      for (const s of innerOf(host)) {
-        y = Math.max(y, (s.startPos - host.startPos) * PX_PER_MIN) + minPxFor(s);
+    const expansions = [];
+    // 늘린 구간을 반영한 시간 → 픽셀 변환 (시간 눈금도 이걸 따라간다). expansions는 아래에서 채워진다
+    const timeToPx = (t) => {
+      let px = t * PX_PER_MIN;
+      for (const e of expansions) {
+        if (t >= e.to) px += e.extra;
+        else if (t > e.from) px += e.extra * ((t - e.from) / (e.to - e.from));
       }
-      return y;
+      return px;
     };
+    // 안쪽(감싸인) 순간 기록도 정시 선을 넘지 않는다 (8/30: 20:50→22:32 안의 21:48·21:53이 22시 선을 넘어 그려졌다).
+    // 바깥 묶음과 같은 규칙 — 정시마다 끊어, 그 시간대에 시작한 안쪽 기록들의 높이만큼 시간 축을 늘린다.
+    // 감싸는 블록은 이 늘어난 만큼 함께 커진다 (innerExtraPx)
+    const innerExtraPx = new Map();
+    for (const host of ordered) {
+      const inner = innerOf(host);
+      if (!inner.length) continue;
+      let extraSum = 0;
+      let i = 0;
+      while (i < inner.length) {
+        const from = inner[i].startPos;
+        const hourEnd = (Math.floor(from / 60) + 1) * 60;
+        let need = 0;
+        while (i < inner.length && inner[i].startPos < hourEnd) { need += minPxFor(inner[i]); i++; }
+        const naturalPx = (hourEnd - from) * PX_PER_MIN;
+        if (need > naturalPx) { expansions.push({ from, to: hourEnd, extra: need - naturalPx }); extraSum += need - naturalPx; }
+      }
+      innerExtraPx.set(host, extraSum);
+    }
+    const innerNeedPx = (host) => (host.endPos - host.startPos) * PX_PER_MIN + (innerExtraPx.get(host) || 0);
     const slotPxFor = (s) => Math.max(
       minPxFor(s),
       (s.endPos - s.startPos) * PX_PER_MIN,
       innerNeedPx(s)
     );
 
-    const expansions = [];
     for (const c of clusters) {
       // 옆으로 나누는 묶음: 구간 블록은 제 시각 자리에 그대로 두지만,
       // 순간 기록들은 열 하나에 위아래로 쌓으므로 그만큼은 시간 축을 늘려야 한다.
@@ -4688,19 +4710,10 @@ function App() {
         }
         continue;
       }
-      const naturalPx = (c.end - c.start) * PX_PER_MIN;
+      const naturalPx = timeToPx(c.end) - timeToPx(c.start);
       if (c.needPx > naturalPx) expansions.push({ from: c.start, to: c.end, extra: c.needPx - naturalPx });
     }
 
-    // 3) 늘린 구간을 반영한 시간 → 픽셀 변환 (시간 눈금도 이걸 따라간다)
-    const timeToPx = (t) => {
-      let px = t * PX_PER_MIN;
-      for (const e of expansions) {
-        if (t >= e.to) px += e.extra;
-        else if (t > e.from) px += e.extra * ((t - e.from) / (e.to - e.from));
-      }
-      return px;
-    };
     const totalPx = timeToPx(gridMinutes);
     // 블록을 꾹 눌러 옮길 때 놓인 픽셀을 시각으로 되읽는 데 쓴다
     schedulePxMapRef.current = { timeToPx, gridMinutes };
@@ -4757,7 +4770,8 @@ function App() {
       for (const s of inner) {
         const slot = minPxFor(s);
         // 자기 시각 자리에 두되, 앞의 안쪽 기록과 겹치면 그만큼만 내린다
-        s.top = Math.max(host.top + (s.startPos - host.startPos) * PX_PER_MIN, y);
+        // 제 시각의 축 위치에 둔다 (예전엔 감싸는 블록 머리에서 분 단위로 더해, 늘어난 구간에선 눈금과 어긋났다)
+        s.top = Math.max(timeToPx(s.startPos), host.top, y);
         s.height = slot - BLOCK_GAP_PX;
         s.isInner = true;
         // 감싸는 블록이 열로 나뉘어 있으면 같은 열 안에 얹는다
