@@ -860,7 +860,7 @@ function FeedbackCard({ user }) {
 // ── 요일 띠 (헤더) ───────────────────────────────────────────
 // 고른 날이 든 한 주(일~토)를 보여주고, 누르면 그 날로. 좌우로 밀면 한 주씩 넘어간다.
 // maxDate가 있으면 그 뒤 날짜는 누를 수 없다 (회고는 오늘까지). marked = 기록 있는 날 점.
-function WeekStrip({ selected, onPick, maxDate, marked }) {
+function WeekStrip({ selected, onPick, maxDate, marked, reviewed }) {
   const start = startOfWeek(selected, { weekStartsOn: 0 });
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const maxKey = maxDate ? dateKeyOf(maxDate) : null;
@@ -893,7 +893,8 @@ function WeekStrip({ selected, onPick, maxDate, marked }) {
           >
             <span className="week-day-name">{format(day, 'E', { locale: ko })}</span>
             <span className="week-day-num">{format(day, 'd')}</span>
-            <span className={`week-day-dot${marked?.has(key) ? ' week-day-dot--on' : ''}`} />
+            {/* 점: 기록 있는 날은 옅게, 회고까지 만든 날은 진하게 (8/30) */}
+            <span className={`week-day-dot${marked?.has(key) ? ' week-day-dot--on' : ''}${reviewed?.has(key) ? ' week-day-dot--reviewed' : ''}`} />
           </button>
         );
       })}
@@ -1654,6 +1655,38 @@ function App() {
     return () => { cancelled = true; };
   }, [userId, refetchTick]);
 
+  // ── '내일의 나에게 한 줄' (8/30) ───────────────────────────────
+  // 회고 화면에서 사용자가 직접 적는 한 줄. { 'yyyy-MM-dd': '내용' }. 체험 모드는 브라우저에 둔다.
+  const DAY_NOTES_GUEST_KEY = 'timememo-guest-daynotes';
+  const readGuestNotes = () => { try { return JSON.parse(localStorage.getItem(DAY_NOTES_GUEST_KEY) || '{}') || {}; } catch { return {}; } };
+  const [dayNotes, setDayNotes] = useState(readGuestNotes);
+  useEffect(() => {
+    if (isGuest || !userId) return;
+    let alive = true;
+    (async () => {
+      const { data, error } = await fetchWithRetry(() => supabase.from('day_notes').select('date, content'));
+      if (error) { console.error('Error fetching day notes:', error); return; }
+      if (alive) setDayNotes(Object.fromEntries((data || []).map(r => [r.date, r.content])));
+    })();
+    return () => { alive = false; };
+  }, [userId, isGuest]);
+  const saveDayNote = useCallback(async (dateKey, text) => {
+    const content = (text || '').trim();
+    setDayNotes(prev => {
+      const next = { ...prev };
+      if (content) next[dateKey] = content; else delete next[dateKey];
+      if (isGuest) { try { localStorage.setItem(DAY_NOTES_GUEST_KEY, JSON.stringify(next)); } catch { /* 무시 */ } }
+      return next;
+    });
+    if (!isGuest && userId) {
+      const { error } = content
+        ? await supabase.from('day_notes').upsert({ user_id: userId, date: dateKey, content, updated_at: new Date().toISOString() }, { onConflict: 'user_id,date' })
+        : await supabase.from('day_notes').delete().eq('user_id', userId).eq('date', dateKey);
+      if (error) console.error('Error saving day note:', error);
+    }
+    track('Day Note Saved', { date: dateKey, length: content.length, cleared: !content, guest: isGuest });
+  }, [isGuest, userId]);
+
   // ── 할 일 불러오기 ──────────────────────────────────────────
   useEffect(() => {
     if (!userId) return;
@@ -1872,6 +1905,12 @@ function App() {
   const reviewDay = reviewDayPick ?? todayReviewDate;
   const reviewKey = dateKeyOf(reviewDay);
   const reviewIsToday = reviewKey === todayKey;
+  // 보고 있는 날의 전날에 적은 '내일의 나에게 한 줄' — 오늘이면 '어제', 지난 날이면 그 전날 것 (8/30: 25일에 적은 게 26일 화면에 떠야)
+  const prevDayNote = dayNotes[dateKeyOf(addDays(selectedDate, -1))] || '';
+  const prevDayNoteLabel = isToday(selectedDate) ? '어제의 내가 남긴 한 줄' : `${format(addDays(selectedDate, -1), 'M월 d일')}의 내가 남긴 한 줄`;
+  useEffect(() => {
+    if (activeView === 'timeline' && prevDayNote) track('Day Note Seen', { date: dateKeyOf(selectedDate), is_today: isToday(selectedDate) });
+  }, [activeView, prevDayNote, selectedDate]);
   const todayMemos = memos
     .filter(m => reviewKeyOf(new Date(m.recordedAt)) === reviewKey)
     .sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
@@ -1914,6 +1953,8 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todayKey]);
   const memoDayKeys = new Set(memos.map(m => dateKeyOf(new Date(m.recordedAt))));
+  // 회고를 만든 날 = 그날 토끼가 있는 날
+  const reviewedDayKeys = new Set(Object.keys(dayRabbits).filter(k => dayRabbits[k]));
 
   // 약관·방침 전문을 보고 '/?consent=1'로 돌아온 사람은 동의 시트를 다시 띄운다
   useEffect(() => {
@@ -5321,6 +5362,7 @@ function App() {
             onPick={activeView === 'review' ? pickReviewDay : goToDay}
             maxDate={activeView === 'review' ? todayReviewDate : null}
             marked={memoDayKeys}
+            reviewed={reviewedDayKeys}
           />
         </header>
       )}
@@ -5341,6 +5383,14 @@ function App() {
         {/* 회고 탭도 같은 자리 — 지난 날 회고를 보다 오늘로 바로 돌아온다 */}
         {activeView === 'review' && !reviewIsToday && (
           <button type="button" className="today-fab" onClick={() => pickReviewDay(new Date())}>오늘로</button>
+        )}
+        {/* 어제 회고에서 적은 '내일의 나에게 한 줄' — 오늘 첫 화면, 날짜 선택 바로 아래에서 만난다 (8/30).
+            채팅 목록 안에 넣으면 아래로 붙어 기록과 한 덩어리로 보여서 밖에 둔다 */}
+        {activeView === 'timeline' && !showScheduleView && prevDayNote && (
+          <div className="day-note-card" role="note">
+            <div className="day-note-card-label">{prevDayNoteLabel}</div>
+            <div className="day-note-card-text">{prevDayNote}</div>
+          </div>
         )}
         {activeView === 'timeline' ? (
           /* ── 타임라인 뷰 ── */
@@ -5436,6 +5486,8 @@ function App() {
             onWeekViewed={handleWeekViewed}
             onGenerate={tour.active ? tourGenerate : generateSummary}
             onGoTimeline={() => setActiveView('timeline')}
+            note={dayNotes[reviewKey] || ''}
+            onSaveNote={(t) => saveDayNote(reviewKey, t)}
             onLoginClick={(placement = 'gate') => {
               // placement: 'after_result' = 회고를 본 뒤 '간직하기' 카드에서 누름 (8/29부터)
               track('Summary Login Click', { memo_count: todayFacts?.count ?? 0, placement: typeof placement === 'string' ? placement : 'gate' });

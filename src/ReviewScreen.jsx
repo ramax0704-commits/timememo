@@ -780,10 +780,54 @@ function WeekView({ week, habitKeywords, dayHeadlines, dayRabbits, onPickDay, on
 }
 
 // ── 화면 ──────────────────────────────────────────────────────
+// ── 내일의 나에게 한 줄 (8/30) ────────────────────────────────
+// 빈 칸 셋을 채우라고 하면 안 쓴다. 한 줄만, 그것도 선택. 포커스를 떼거나 엔터를 치면 저장된다.
+function DayNoteBlock({ note, onSave, isToday }) {
+  // 부모가 key={viewKey}로 날짜마다 새로 만들어 주므로 초기값만 받으면 된다
+  const [text, setText] = useState(note);
+  const [savedAt, setSavedAt] = useState(0);
+  const ref = useRef(null);
+  const dirty = text.trim() !== (note || '').trim();
+  const commit = () => {
+    if (!dirty) return;
+    onSave?.(text);
+    setSavedAt(Date.now());
+    ref.current?.blur();
+  };
+  // 칸을 누르면 키보드가 올라오면서 칸이 키보드 밑에 숨었다 — 키보드가 다 올라온 뒤 칸을 보이는 자리로 끌어올린다
+  const reveal = () => {
+    const el = ref.current;
+    if (!el) return;
+    const t = [80, 300, 600].map(d => setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), d));
+    return () => t.forEach(clearTimeout);
+  };
+  return (
+    <section className="day-summary day-note" aria-label="내일의 나에게 한 줄">
+      <div className="day-note-head">
+        <div className="day-summary-title">{isToday ? '내일의 나에게 한 줄' : '다음날의 나에게 한 줄'}</div>
+        {savedAt > 0 && !dirty && <span className="day-note-saved">저장됨</span>}
+      </div>
+      <div className="day-note-row">
+        <textarea
+          ref={ref}
+          className="day-note-input"
+          rows={1}
+          value={text}
+          maxLength={120}
+          placeholder="내일 아침 첫 화면에 그대로 떠요"
+          onChange={e => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 96)}px`; }}
+          onFocus={reveal}
+        />
+        <button type="button" className="day-summary-btn day-summary-btn--small day-note-save" onClick={commit} disabled={!dirty}>저장</button>
+      </div>
+    </section>
+  );
+}
+
 export default function ReviewScreen({
   facts, todayMemos, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, isGuest = false, busy, usesLeft, dailyLimit = SUMMARY_DAILY_LIMIT,
   habitKeywords, onEditHabits, dayHeadlines, dayRabbits, onPickDay, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline,
-  onModeChange,
+  onModeChange, note = '', onSaveNote,
 }) {
   const [mode, setMode] = useState('today'); // 'today' | 'week' | 'monthly'
   // 페이지별 첫 진입 팁이 어느 화면인지 알아야 해서 App에 알린다
@@ -878,6 +922,8 @@ export default function ReviewScreen({
                 </section>
               )}
               <TalkCurveBlock memos={todayMemos} now={isToday ? now : null} emotions={ai.data.emotions} dayLabel={dayLabel} />
+              {/* 내일의 나에게 한 줄 — AI가 아니라 사용자가 적는 유일한 칸. 회고를 읽은 뒤에만 나온다 (8/30) */}
+              <DayNoteBlock key={viewKey} note={note} onSave={onSaveNote} isToday={isToday} />
             </>
           ) : (
             <>

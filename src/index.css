@@ -3311,6 +3311,7 @@ body.keyboard-open .input-toolbar { display: flex; }
 .week-day--today:not(.week-day--on) .week-day-num { color: var(--primary-color); }
 .week-day-dot { width: 4px; height: 4px; border-radius: 50%; background: transparent; }
 .week-day-dot--on { background-color: #c5cdf5; }
+.week-day-dot--reviewed { background-color: var(--primary-color); }
 
 /* 투어 건너뛰기 X */
 .tour-skip {
@@ -3754,3 +3755,25 @@ body.keyboard-open .input-toolbar { display: flex; }
 .block-sheet--full .edit-sheet-head { margin-bottom: 2px; }
 /* 글씨 크기는 두 모드 같게 — 전환 때 글이 튀지 않게 */
 .block-sheet--full .edit-sheet-tools { border: none; }
+
+/* ── 내일의 나에게 한 줄 (8/30) ──────────────────────────────── */
+.day-note-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.day-note-saved { font-size: 0.72rem; color: #9a9aa8; }
+.day-note-input {
+  width: 100%; margin-top: 8px; padding: 10px 12px; box-sizing: border-box;
+  border: 1px solid var(--border-color); border-radius: 12px; background: #fff;
+  font: inherit; font-size: 0.95rem; line-height: 1.5; color: var(--text-main); resize: none;
+}
+.day-note-input:focus { outline: none; border-color: var(--primary-color); }
+.day-note-input::placeholder { color: #b5b5c0; }
+.day-note-row { display: flex; align-items: flex-end; gap: 8px; margin-top: 8px; }
+.day-note-row .day-note-input { flex: 1; margin-top: 0; }
+.day-note-save { flex: none; height: 42px; }
+.day-note-save:disabled { opacity: 0.4; cursor: default; }
+/* 타임라인 첫 화면의 어제 한 줄 */
+.day-note-card {
+  flex: none; margin: 10px 16px 0; padding: 12px 14px; border-radius: 14px;
+  background: #f3f5ff; border: 1px solid #e0e6ff;
+}
+.day-note-card-label { font-size: 0.72rem; font-weight: 600; color: var(--primary-color); margin-bottom: 4px; }
+.day-note-card-text { font-size: 0.95rem; line-height: 1.5; color: var(--text-main); white-space: pre-wrap; word-break: break-word; }
