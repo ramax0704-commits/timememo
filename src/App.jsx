@@ -3380,6 +3380,9 @@ function App() {
   };
 
   const closeBlockEditor = () => {
+    // 글 칸에 포커스가 남은 채로 시트를 없애면 브라우저가 focusout을 안 보내서 keyboard-open이
+    // 몸에 남고 하단 탭이 안 돌아왔다 (8/29 저장 후 탭바 사라짐). 먼저 포커스를 뗀다
+    if (document.activeElement === sheetTextareaRef.current) sheetTextareaRef.current.blur();
     setEditingMemo(null);
     setEditInitial(null);
     setOpenTimeWheel(null);
@@ -4404,6 +4407,10 @@ function App() {
       // 내려가고, 그만큼 공간이 넓어지면서 시트가 커져 목록이 통째로 펼쳐진다.
       // 적는 중에 아래를 훑어보는 건 정상 동작이므로 건드리지 않는다.
       if (e.target?.closest?.('.todo-sheet')) return;
+      // 글 칸 안에서 손가락을 끄는 건 글자 범위를 잡는 중이다 — 여기서 포커스를 떼면 키보드가
+      // 내려가며 시트가 접혔다 펴졌다 해서 드래그가 안 됐다 (8/29)
+      const tag = e.target?.tagName;
+      if (tag === 'TEXTAREA' || tag === 'INPUT') return;
       // 포커스된 요소 즉시 blur
       if (document.activeElement && document.activeElement !== document.body) {
         document.activeElement.blur();
@@ -4570,12 +4577,20 @@ function App() {
     // 한 줄짜리(시간+내용 인라인, 넘치면 …으로 잘림)는 낮게, 두 줄짜리는 그대로.
     // 블록끼리의 간격은 자리(slot)에서 아래 여백을 떼는 방식으로 준다.
     // 쌓인 블록 사이에만 간격을 넣으면 시간대가 다른 이웃과 규칙이 달라져 들쭉날쭉해 보인다.
-    const BLOCK_GAP_PX = 2;
+    // 위·아래 3px씩 — 정시에 시작·끝나는 블록이 정시 선에 딱 붙어 답답해 보였다 (8/30).
+    // 위 3px은 그릴 때 top에 더하고(BLOCK_TOP_INSET), 아래 3px은 높이에서 뺀다
+    const BLOCK_GAP_PX = 6;
+    const BLOCK_TOP_INSET = 3;
     const MIN_BLOCK_PX = 48 + BLOCK_GAP_PX;
     const MIN_COMPACT_PX = 34 + BLOCK_GAP_PX;
     const minPxFor = (s) => (s.isCompact ? MIN_COMPACT_PX : MIN_BLOCK_PX);
 
-    const ordered = [...schedules].sort((a, b) => a.startPos - b.startPos || a.endPos - b.endPos);
+    // 같은 분에 시작하면 순간 기록이 구간보다 앞. 구간을 먼저 쌓으면 순간 기록이 구간 끝(14:33) 아래로
+    // 밀려 제 시각(13:17)과 동떨어진 자리에 그려졌다 (8/29 '서울 이동')
+    const ordered = [...schedules].sort((a, b) =>
+      (Math.floor(a.startPos) - Math.floor(b.startPos))
+      || ((a.isCompact ? 0 : 1) - (b.isCompact ? 0 : 1))
+      || a.startPos - b.startPos || a.endPos - b.endPos);
 
     // 1) 긴 블록 '안에' 완전히 들어가는 짧은 기록은 따로 뺀다.
     //    (예: 09:20~12:30 일하는 중에 11:13에 남긴 결제 기록)
@@ -4657,6 +4672,22 @@ function App() {
         continue;
       }
       c.needPx = c.items.reduce((sum, s) => sum + slotPxFor(s), 0);
+      if (c.items.every(s => s.isCompact)) {
+        // 순간 기록만 있는 묶음은 정시 선을 넘지 않는다 — 09:56 기록의 바닥이 10시 선을 넘고(8/30),
+        // 21:48·21:53·22:05가 쌓이면 22시 선이 21:53 블록 한가운데를 지났다(8/29).
+        // 정시마다 끊어서, 그 시간대에 시작한 블록들의 높이만큼만 그 구간의 시간 축을 늘린다.
+        // 블록은 위에서부터 붙여 쌓으므로 정시 선이 정확히 블록 사이 틈에 떨어진다
+        let from = c.start;
+        while (from < c.end) {
+          const hourEnd = (Math.floor(from / 60) + 1) * 60;
+          const to = Math.min(hourEnd, c.end);
+          const need = c.items.filter(s => s.startPos >= from && s.startPos < hourEnd).reduce((sum, s) => sum + slotPxFor(s), 0);
+          const naturalPx = (to - from) * PX_PER_MIN;
+          if (need > naturalPx) expansions.push({ from, to, extra: need - naturalPx });
+          from = to;
+        }
+        continue;
+      }
       const naturalPx = (c.end - c.start) * PX_PER_MIN;
       if (c.needPx > naturalPx) expansions.push({ from: c.start, to: c.end, extra: c.needPx - naturalPx });
     }
@@ -4842,6 +4873,13 @@ function App() {
                 ? `${pad(schedule.startHour)}:${pad(schedule.startMin)} → ${pad(schedule.endHour)}:${pad(schedule.endMin)}`
                 : `${pad(schedule.startHour)}:${pad(schedule.startMin)}`;
               const isCompact = schedule.isCompact;
+              // 글이 블록 높이보다 길면 줄 중간에서 뚝 잘렸다 (8/30) — 들어가는 줄 수만큼만 보이고 '…'로 끝낸다.
+              // 수치는 CSS와 맞춘 것: 위 6 + 아래 8 + 테두리 2 + 시각 줄(0.72rem×1.2) + 틈 5, 본문 한 줄 0.85rem×1.35
+              const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+              const contentLines = (!isCompact && (schedule.colCount ?? 1) <= 1)
+                // 마지막 줄이 3px쯤 덜 보이는 건 봐준다 — 안 그러면 두 줄 들어갈 자리에 한 줄만 남아 휑하다
+                ? Math.max(1, Math.floor((schedule.height - 16 - 0.72 * rem * 1.2 - 5 + 3) / (0.85 * rem * 1.35)))
+                : null;
 
               return (
                 <div
@@ -4862,7 +4900,7 @@ function App() {
                     }
                   }}
                   style={{
-                    top: `${schedule.top}px`,
+                    top: `${schedule.top + BLOCK_TOP_INSET}px`,
                     height: `${schedule.height}px`,
                     backgroundColor: bgColor,
                     borderColor: borderColor,
@@ -4878,7 +4916,10 @@ function App() {
                   }}
                 >
                   <div className="schedule-block-time">{timeLabel}</div>
-                  <div className="schedule-block-content">{schedule.content}</div>
+                  <div
+                    className="schedule-block-content"
+                    style={contentLines ? { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: contentLines, flex: '0 1 auto' } : undefined}
+                  >{schedule.content}</div>
                 </div>
               );
             })}

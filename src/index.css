@@ -363,13 +363,11 @@ body.mouse-device .memo-delete-reveal-btn { display: none; }
   font-size: 0.95rem;
   line-height: 1.5;
   color: var(--text-main);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   /* 카톡처럼 글자 길이만큼만 말풍선이 늘어난다 */
   flex: 0 1 auto;
   width: fit-content;
   max-width: 100%;
   word-break: break-word;
-  transition: box-shadow 0.2s;
 }
 
 /* 웹 호버 시 우측 버튼 공간 확보 */
@@ -400,9 +398,7 @@ body.mouse-device .memo-content { max-width: calc(100% - 28px); }
   word-break: break-all;
 }
 
-.memo-content:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-}
+/* 말풍선 그림자 없음 — 터치 기기에선 hover 그림자가 마지막에 누른 말풍선에 눌어붙었다 (8/29) */
 
 /* ── Empty State ─────────────────────────────────────────────── */
 .empty-state {
