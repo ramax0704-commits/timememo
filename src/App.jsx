@@ -1183,6 +1183,10 @@ function App() {
   // (헤더 날짜는 스크롤을 따라 계속 바뀌는데, 그때마다 창을 다시 잡으면 화면이 튄다)
   const [anchorDate, setAnchorDate] = useState(new Date());
   const [inputText, setInputText] = useState('');
+  // 서버에 저장하러 간 기록 수. 엔터 치면 입력칸은 바로 비워지는데 서버 응답이 올 때까지
+  // 화면에 기록이 안 뜨니, 네트워크가 느리면 '안 올라갔나?' 싶어 오류로 보였다(8/30).
+  // 0보다 크면 하단에 '저장 중…' 을 띄운다.
+  const [savingCount, setSavingCount] = useState(0);
   // 입력창 활성화 여부(칩 표시·헤더 접기용)
   const [inputFocused, setInputFocused] = useState(false);
   // 빈 자리를 누른 직후 뜨는 시각 조정 시트. { isRange, dayMs, draftStart, draftEnd, wheel }
@@ -3820,6 +3824,9 @@ function App() {
     // 남겨 두고 그릴 때마다 이웃을 따라가게 했는데, 그러면 나중에 이 기록이나 이웃을 고칠 때마다
     // 시작이 딸려 움직여 꼬였다(8/29). 입력 편의일 뿐이지 영구 연결이 아니다.
     let backMinutes = 0;
+    // 여기부터 서버를 오간다 — '저장 중…' 표시. 끝나면(성공·실패 모두) finally에서 내린다
+    if (!isGuest) setSavingCount(c => c + 1);
+    try {
     if (mode === 'prev' && timed?.kind !== 'range') {
       const ownMs = recordAt.getTime();
       // '이전 기록'은 지금보다 앞서 '끝난' 기록 중 가장 늦게 끝난 것 — 기록 시각이 아니라 끝(시각+길이)으로 고른다.
@@ -3904,6 +3911,9 @@ function App() {
     setMemos(prev => prev.some(m => m.id === memo.id) ? prev : [...prev, memo].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)));
     if (tour.active) afterTourSend(memo, mode);
     if (advanceTipIf('send', 400)) inputRef.current?.blur(); // 안내 중엔 키보드를 내리고 다음 안내로
+    } finally {
+      if (!isGuest) setSavingCount(c => Math.max(0, c - 1));
+    }
   };
 
   // 기록 하나가 만들어질 때 보내는 공통 이벤트.
@@ -5662,7 +5672,13 @@ function App() {
             <button className="undo-btn" onClick={() => setRefetchTick(t => t + 1)}>다시 시도</button>
           </div>
         )}
-        {reviewToast && !undoToast && !moveUndoToast && !memosLoadFailed && (
+        {/* 저장 중 — 엔터 친 뒤 서버 응답을 기다리는 동안. 다른 토스트가 있으면 그쪽이 우선 */}
+        {savingCount > 0 && !undoToast && !moveUndoToast && !memosLoadFailed && (
+          <div className={`${toastClass} saving-toast`} role="status" aria-live="polite">
+            <span>저장 중…</span>
+          </div>
+        )}
+        {reviewToast && !undoToast && !moveUndoToast && !memosLoadFailed && !savingCount && (
           <div className={toastClass}>
             <span>오늘의 회고를 확인해보세요</span>
             <button className="undo-btn" onClick={openReviewFromToast}>보기</button>

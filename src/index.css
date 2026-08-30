@@ -3777,3 +3777,10 @@ body.keyboard-open .input-toolbar { display: flex; }
 }
 .day-note-card-label { font-size: 0.72rem; font-weight: 600; color: var(--primary-color); margin-bottom: 4px; }
 .day-note-card-text { font-size: 0.95rem; line-height: 1.5; color: var(--text-main); white-space: pre-wrap; word-break: break-word; }
+
+/* 저장 중 토스트 — 되돌리기 토스트와 같은 자리, 버튼 없이 글자만. 짧게 스쳐 지나가니 등장 애니메이션은 뺀다 */
+.saving-toast {
+  animation: none;
+  padding: 10px 16px;
+  opacity: 0.9;
+}
