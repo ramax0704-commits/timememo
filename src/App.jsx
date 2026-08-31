@@ -1946,11 +1946,6 @@ function App() {
     if (dateKeyOf(day) > todayKey) return;
     setReviewDayPick(dateKeyOf(day) === todayKey ? null : day);
   };
-  // 주 단위 이동 — 다음 주로 넘어가다 오늘을 지나치면 오늘에서 멈춘다
-  const pickReviewWeek = (delta) => {
-    const d = addDays(reviewDay, delta * 7);
-    pickReviewDay(dateKeyOf(d) > todayKey ? todayReviewDate : d);
-  };
   // 헤더가 보여주는 날짜: 회고 탭은 보고 있는 회고일, 나머지는 타임라인 날짜
   const headerDate = activeView === 'review' ? reviewDay : selectedDate;
   // 자정을 넘기면 '오늘'을 보고 있던 타임라인은 새 오늘로 따라간다 (앱을 켜둔 채 날이 바뀌는 경우).
@@ -5500,7 +5495,6 @@ function App() {
             dayLabel={todayLabel}
             isToday={reviewIsToday}
             onSwipeDay={(delta) => pickReviewDay(addDays(reviewDay, delta))}
-            onSwipeWeek={pickReviewWeek}
             week={weekFacts}
             now={nowTime}
             ai={tour.active ? tourAI : summaryForScreen}
