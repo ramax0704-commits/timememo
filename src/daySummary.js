@@ -284,11 +284,13 @@ export function buildDayFacts(dayMemos, allMemos, now, { past = false } = {}) {
 // ── 이번 주 리포트 (계산만) ────────────────────────────────────
 // 달력 주(월~일). "이번 주"라고 써 놓고 최근 7일을 보여주면 요일이 화요일부터 시작해
 // 어리둥절해진다 (8/24 피드백). 아직 오지 않은 요일은 future로 표시해 빈 칸으로 그린다.
-export function buildWeekFacts(memos, now) {
+// anchor: 어느 날이 든 주를 볼지 (기본 오늘). 회고 탭에서 지난 날짜로 넘기면 그 날이 든 주가 나와야 한다 (8/31).
+// '오늘'(now)은 미래 요일 판정과 오늘 마지막 기록의 길이에만 쓴다.
+export function buildWeekFacts(memos, now, anchor = now) {
   const days = [];
   const todayKey = dateKeyOf(now);
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const monday = addDays(today, -((today.getDay() + 6) % 7));
+  const base = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+  const monday = addDays(base, -((base.getDay() + 6) % 7));
   for (let i = 0; i < WEEKLY_DAYS; i++) {
     const d = addDays(monday, i);
     const key = dateKeyOf(d);

@@ -721,6 +721,8 @@ function WeekTalkCurve({ week }) {
   );
 }
 
+const addDaysLocal = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+
 // ── 이번 주 요일별 한 줄 ─────────────────────────────────────
 // 날짜별 기록 '개수'는 의미가 없었다. 대신 그날 뭘 했는지 한 줄로.
 // 회고를 만든 날은 그 회고의 제목(headline)을, 아니면 기록 중 핵심 몇 개를 AI 없이 골라 잇는다.
@@ -754,15 +756,28 @@ function WeekDays({ week, dayHeadlines, dayRabbits, habitKeywords, onPickDay }) 
   );
 }
 
-function WeekView({ week, habitKeywords, dayHeadlines, dayRabbits, onPickDay, onEditHabits, onViewed }) {
+function WeekView({ week, now, habitKeywords, dayHeadlines, dayRabbits, onPickDay, onEditHabits, onViewed, onSwipeWeek }) {
   useEffect(() => { onViewed?.(); }, [onViewed]);
+
+  // 어느 주인지 — 먼슬리의 달 이동과 같은 ‹ › (8/31: 지난주를 볼 수 없다는 피드백)
+  const first = week.days[0].date, last = week.days[week.days.length - 1].date;
+  const isCurrentWeek = Boolean(now) && now >= first && now < addDaysLocal(last, 1);
+  const rangeLabel = first.getMonth() === last.getMonth()
+    ? `${format(first, 'M월 d일')}–${format(last, 'd일')}`
+    : `${format(first, 'M월 d일')}–${format(last, 'M월 d일')}`;
 
   return (
     <>
       <section className="day-summary shape" aria-label="이번 주 할 말이 많았던 때">
-        <header className="day-summary-head">
-          <span className="day-summary-title">할 말이 많았던 때</span>
-          <span className="day-summary-count">이번 주</span>
+        <header className="day-summary-head monthly-head">
+          <button type="button" className="monthly-nav" onClick={() => onSwipeWeek?.(-1)} aria-label="지난주">
+            <ChevronLeft size={16} />
+          </button>
+          <span className="day-summary-title">{isCurrentWeek ? '이번 주' : rangeLabel}</span>
+          <button type="button" className="monthly-nav" disabled={isCurrentWeek} onClick={() => onSwipeWeek?.(1)} aria-label="다음주">
+            <ChevronRight size={16} />
+          </button>
+          <span className="day-summary-count">{isCurrentWeek ? rangeLabel : '할 말이 많았던 때'}</span>
         </header>
         <WeekTalkCurve week={week} />
       </section>
@@ -827,7 +842,7 @@ function DayNoteBlock({ note, onSave, isToday }) {
 export default function ReviewScreen({
   facts, todayMemos, dayLabel, isToday = true, onSwipeDay, week, now, ai, locked, isGuest = false, busy, usesLeft, dailyLimit = SUMMARY_DAILY_LIMIT,
   habitKeywords, onEditHabits, dayHeadlines, dayRabbits, onPickDay, onGenerate, onLoginClick, onViewed, onWeekViewed, viewKey, onGoTimeline,
-  onModeChange, note = '', onSaveNote,
+  onModeChange, note = '', onSaveNote, onSwipeWeek,
 }) {
   const [mode, setMode] = useState('today'); // 'today' | 'week' | 'monthly'
   // 페이지별 첫 진입 팁이 어느 화면인지 알아야 해서 App에 알린다
@@ -857,10 +872,11 @@ export default function ReviewScreen({
   const onPointerDown = (e) => { if (e.pointerType === 'mouse' && e.button !== 0) return; swipeRef.current = { x: e.clientX, y: e.clientY }; };
   const onPointerUp = (e) => {
     const d = swipeRef.current; swipeRef.current = null;
-    if (!d || mode !== 'today' || !onSwipeDay) return;
+    if (!d) return;
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
     if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-    onSwipeDay(dx < 0 ? 1 : -1); // 왼쪽으로 밀면 다음 날
+    if (mode === 'today') onSwipeDay?.(dx < 0 ? 1 : -1); // 왼쪽으로 밀면 다음 날
+    else if (mode === 'week') onSwipeWeek?.(dx < 0 ? 1 : -1); // 이번 주 탭은 주 단위로
   };
 
   return (
@@ -878,8 +894,8 @@ export default function ReviewScreen({
         />
       ) : mode === 'week' ? (
         <WeekView
-          week={week} habitKeywords={habitKeywords} dayHeadlines={dayHeadlines} dayRabbits={dayRabbits}
-          onPickDay={(d) => { onPickDay?.(d); setMode('today'); }} onEditHabits={onEditHabits} onViewed={onWeekViewed}
+          week={week} now={now} habitKeywords={habitKeywords} dayHeadlines={dayHeadlines} dayRabbits={dayRabbits}
+          onPickDay={(d) => { onPickDay?.(d); setMode('today'); }} onEditHabits={onEditHabits} onViewed={onWeekViewed} onSwipeWeek={onSwipeWeek}
         />
       ) : (
         <>

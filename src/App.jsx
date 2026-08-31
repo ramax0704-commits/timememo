@@ -1931,7 +1931,8 @@ function App() {
     ? nowTime
     : new Date(reviewDay.getFullYear(), reviewDay.getMonth(), reviewDay.getDate() + 1, 1, 59);
   const todayFacts = todayMemos.length > 0 ? buildDayFacts(todayMemos, memos, reviewDayEnd, { past: !reviewIsToday }) : null;
-  const weekFacts = buildWeekFacts(memos, nowTime);
+  // 보고 있는 날(reviewDay)이 든 주 — 헤더 날짜를 지난주로 넘기면 '이번 주' 탭도 그 주를 보여준다 (8/31)
+  const weekFacts = buildWeekFacts(memos, nowTime, reviewDay);
   const todayRecords = todayFacts ? toSummaryRecords(todayMemos) : null;
   const summaryKey = todayRecords ? summaryCacheKey(reviewKey, todayRecords) : null;
   // 관리자 계정은 하루 제한을 두지 않는다 — 판정을 바꾼 뒤 여러 날을 다시 돌려 봐야 한다 (8/29)
@@ -1944,6 +1945,11 @@ function App() {
   const pickReviewDay = (day) => {
     if (dateKeyOf(day) > todayKey) return;
     setReviewDayPick(dateKeyOf(day) === todayKey ? null : day);
+  };
+  // 주 단위 이동 — 다음 주로 넘어가다 오늘을 지나치면 오늘에서 멈춘다
+  const pickReviewWeek = (delta) => {
+    const d = addDays(reviewDay, delta * 7);
+    pickReviewDay(dateKeyOf(d) > todayKey ? todayReviewDate : d);
   };
   // 헤더가 보여주는 날짜: 회고 탭은 보고 있는 회고일, 나머지는 타임라인 날짜
   const headerDate = activeView === 'review' ? reviewDay : selectedDate;
@@ -5494,6 +5500,7 @@ function App() {
             dayLabel={todayLabel}
             isToday={reviewIsToday}
             onSwipeDay={(delta) => pickReviewDay(addDays(reviewDay, delta))}
+            onSwipeWeek={pickReviewWeek}
             week={weekFacts}
             now={nowTime}
             ai={tour.active ? tourAI : summaryForScreen}
