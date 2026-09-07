@@ -4668,11 +4668,15 @@ function App() {
     }
     const outerBlocks = ordered.filter(s => !s.host);
 
-    // 2) 시간이 겹치는 (감싸이지 않은) 블록끼리 묶는다
+    // 2) 시간이 겹치는 (감싸이지 않은) 블록끼리 묶는다.
+    // '이전 기록부터'는 시작을 분 단위로 반올림해 굳히므로(backMinutes) 앞 기록의 끝(초 포함)과
+    // 최대 30초쯤 어긋나 겹칠 수 있다. 이런 초 단위 겹침은 겹침이 아니다 — 같은 묶음으로 묶어
+    // 옆 칸으로 가르지 말고 각자 제 시각 자리에 아래로 이어 그린다 (9/7)
+    const OVERLAP_EPS = 1;
     const clusters = [];
     for (const s of outerBlocks) {
       const last = clusters[clusters.length - 1];
-      if (last && s.startPos < last.end) {
+      if (last && s.startPos < last.end - OVERLAP_EPS) {
         last.end = Math.max(last.end, s.endPos);
         last.items.push(s);
       } else {
