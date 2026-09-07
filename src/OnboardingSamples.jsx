@@ -385,5 +385,5 @@ export const WEEK_CARDS = [
   { key: 'curve', title: '이번 주 할 말이 많았던 때', line: '하루하루 곡선이 겹쳐 한 주의 리듬이 보여요', art: <div className="ob-card-art"><SampleCurve /></div> },
 ];
 export const MONTHLY_CARDS = [
-  { key: 'rabbits', title: '한 달의 토끼', line: '회고를 만든 날마다 토끼가 달력에 남아요', art: <div className="ob-card-art"><SampleMonthly compact /></div> },
+  { key: 'rabbits', title: '한 달이 쌓이면', line: <>회고를 만든 날마다<br />그 날의 유형에 맞는 토끼가 찍혀요</>, art: <div className="ob-card-art"><SampleMonthly compact /></div> },
 ];

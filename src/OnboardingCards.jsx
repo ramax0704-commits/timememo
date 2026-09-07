@@ -29,7 +29,7 @@ const CARDS = [
   {
     key: 'month',
     title: '한 달이 쌓이면',
-    line: '매일의 토끼가 달력에 모여요',
+    line: <>회고를 만든 날마다<br />그 날의 유형에 맞는 토끼가 찍혀요</>,
     art: <div className="ob-card-art"><SampleMonthly compact /></div>,
   },
 ];
